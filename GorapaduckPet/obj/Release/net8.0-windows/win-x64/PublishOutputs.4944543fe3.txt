@@ -1,0 +1,2 @@
+D:\Test\GorapaduckPet\bin\Release\net8.0-windows\win-x64\publish\GorapaduckPet.pdb
+D:\Test\GorapaduckPet\bin\Release\net8.0-windows\win-x64\publish\GorapaduckPet.exe

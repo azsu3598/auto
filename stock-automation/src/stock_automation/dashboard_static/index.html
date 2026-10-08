@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#07111f">
+  <title>SABU Trading Console</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-block">
+        <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div>
+          <p class="eyebrow">SYSTEMATIC TRADING OPERATIONS</p>
+          <h1>SABU <span>Trading Console</span></h1>
+        </div>
+      </div>
+      <div class="top-actions">
+        <div class="market-clock">
+          <span class="pulse"></span>
+          <div><strong id="clock">--:--:--</strong><small>KST · KRX</small></div>
+        </div>
+        <button id="refresh" class="refresh-button" type="button" aria-label="데이터 새로고침">
+          <span class="refresh-icon">↻</span><span>새로고침</span>
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero-grid">
+        <article class="system-card panel">
+          <div class="system-heading">
+            <div>
+              <p class="label">OPERATION MODE</p>
+              <div class="mode-row"><span class="mode-dot"></span><h2>모의운용</h2></div>
+            </div>
+            <span id="mode-badge" class="badge safe">LIVE LOCKED</span>
+          </div>
+          <p class="system-copy">실주문 경로는 잠겨 있습니다. 검증된 데이터와 예약 작업만 모니터링합니다.</p>
+          <div class="system-meta">
+            <div><span>데이터 기준</span><strong id="generated-at">확인 중</strong></div>
+            <div><span>데이터 소스</span><strong>DynamoDB Paper Ledger</strong></div>
+          </div>
+        </article>
+
+        <article class="lock-card panel">
+          <div class="lock-symbol" aria-hidden="true">⌁</div>
+          <div class="lock-content">
+            <p class="label">REAL TRADING GATE</p>
+            <h2>실거래 준비 잠금</h2>
+            <p id="live-lock-reason">보호장치 상태를 불러오는 중입니다.</p>
+          </div>
+          <button class="locked-button" type="button" disabled>안전조건 미충족</button>
+        </article>
+      </section>
+
+      <section class="metric-grid" aria-label="핵심 지표">
+        <article class="metric-card"><p>가용 현금</p><strong id="available-cash">-</strong><small>전략 지갑 합계</small></article>
+        <article class="metric-card"><p>투자 원금</p><strong id="invested-principal">-</strong><small>현재 배정 금액</small></article>
+        <article class="metric-card"><p>누적 실현손익</p><strong id="realized-pnl">-</strong><small id="fees-taxes">비용 -</small></article>
+        <article class="metric-card"><p>열린 포지션</p><strong id="open-positions">-</strong><small id="pending-alerts">알림 대기 -</small></article>
+      </section>
+
+      <section id="warnings-section" class="warning-strip hidden" aria-live="polite">
+        <span class="warning-icon">!</span><div id="warnings"></div>
+      </section>
+
+      <section class="content-grid">
+        <div class="primary-column">
+          <article class="panel section-panel">
+            <div class="section-title">
+              <div><p class="label">OPEN POSITIONS</p><h2>운용 포지션</h2></div>
+              <span id="position-count" class="count-badge">0</span>
+            </div>
+            <div id="positions" class="position-list"><div class="skeleton tall"></div></div>
+          </article>
+
+          <article class="panel section-panel">
+            <div class="section-title">
+              <div><p class="label">ACTIVITY LOG</p><h2>최근 실행 이력</h2></div>
+              <span class="subtle">최근 30건</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>시각</th><th>구분</th><th>종목</th><th>결정</th><th>가격</th><th>손익</th></tr></thead>
+                <tbody id="events"><tr><td colspan="6"><div class="skeleton"></div></td></tr></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+
+        <aside class="side-column">
+          <article class="panel section-panel">
+            <div class="section-title"><div><p class="label">SAFETY MATRIX</p><h2>안전장치</h2></div></div>
+            <div id="safety" class="safety-list"><div class="skeleton"></div></div>
+          </article>
+
+          <article class="panel section-panel">
+            <div class="section-title"><div><p class="label">STRATEGY WALLETS</p><h2>전략별 자금</h2></div></div>
+            <div id="wallets" class="wallet-list"><div class="skeleton"></div></div>
+          </article>
+
+          <article class="panel section-panel">
+            <div class="section-title"><div><p class="label">DAILY RUNBOOK</p><h2>오늘의 실행표</h2></div></div>
+            <div id="schedules" class="timeline"><div class="skeleton tall"></div></div>
+          </article>
+        </aside>
+      </section>
+    </main>
+
+    <footer>
+      <span>SABU Trading Console · Read-only operations view</span>
+      <span>수익률을 보장하지 않으며 확인되지 않은 데이터에서는 거래하지 않습니다.</span>
+    </footer>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

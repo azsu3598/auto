@@ -1,0 +1,14 @@
+**
+
+!Kiwoom-REST-API/
+!Kiwoom-REST-API/kiwoom/
+!Kiwoom-REST-API/kiwoom/**
+!Kiwoom-REST-API/pyproject.toml
+!Kiwoom-REST-API/README.md
+!Kiwoom-REST-API/LICENSE.md
+
+!stock-automation/
+!stock-automation/Dockerfile
+!stock-automation/pyproject.toml
+!stock-automation/src/
+!stock-automation/src/**

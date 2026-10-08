@@ -1,0 +1,478 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Scheduled Korean closing-bet paper trader (no live order permissions)
+
+Parameters:
+  ImageUri:
+    Type: String
+    Description: ECR image URI built from stock-automation/Dockerfile
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  SecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+  KiwoomDemoSecretArn:
+    Type: String
+    Description: Secrets Manager JSON with app_key_mock and app_secret_mock
+  DartSecretArn:
+    Type: String
+    Description: Secrets Manager JSON with dart_api_key (free OpenDART key)
+  StartingCash:
+    Type: Number
+    Default: 600000
+  MediumStartingCash:
+    Type: Number
+    Default: 600000
+    Description: Separate paper capital for the 20-40 trading-day strategy
+  BuyFeeBps:
+    Type: Number
+    Description: Verified broker buy commission in basis points, used only by replay/tuning
+    MinValue: 0
+    MaxValue: 100
+  SellFeeBps:
+    Type: Number
+    Description: Verified broker sell commission in basis points, used only by replay/tuning
+    MinValue: 0
+    MaxValue: 100
+  SellTaxBps:
+    Type: Number
+    Description: Verified applicable sell tax in basis points, used only by replay/tuning
+    MinValue: 0
+    MaxValue: 100
+  CoreScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [ENABLED, DISABLED]
+    Description: Keep disabled through smoke testing, then explicitly enable paper schedules
+  NxtScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [ENABLED, DISABLED]
+  NotificationChannel:
+    Type: String
+    Default: telegram
+    AllowedValues: [telegram, kakao, email, disabled]
+    Description: Free mobile messenger used for paper trade alerts
+  NotificationSecretArn:
+    Type: String
+    Default: ""
+    Description: Secrets Manager JSON; Telegram requires bot_token and chat_id
+  NotificationEmail:
+    Type: String
+    Default: ""
+    Description: Optional SNS email fallback; confirmation is required
+
+Conditions:
+  HasNotificationSecret: !Not [!Equals [!Ref NotificationSecretArn, ""]]
+  HasNotificationEmail: !Not [!Equals [!Ref NotificationEmail, ""]]
+  IsKakaoNotification: !Equals [!Ref NotificationChannel, kakao]
+
+Resources:
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-raw-snapshots
+            Status: Enabled
+            Prefix: runs/
+            ExpirationInDays: 365
+
+  TradeNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: stock-automation-paper
+
+  TradeNotificationEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasNotificationEmail
+    Properties:
+      Protocol: email
+      Endpoint: !Ref NotificationEmail
+      TopicArn: !Ref TradeNotificationTopic
+
+  PaperTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 30
+
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: read-kiwoom-demo-secret
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: [!Ref KiwoomDemoSecretArn, !Ref DartSecretArn]
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: paper-artifacts-only
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject]
+                Resource: !Sub "${ArtifactBucket.Arn}/*"
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt ArtifactBucket.Arn
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:TransactWriteItems, dynamodb:Scan]
+                Resource: !GetAtt PaperTable.Arn
+              - !If
+                - HasNotificationSecret
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Ref NotificationSecretArn
+                - !Ref AWS::NoValue
+              - !If
+                - IsKakaoNotification
+                - Effect: Allow
+                  Action: secretsmanager:PutSecretValue
+                  Resource: !Ref NotificationSecretArn
+                - !Ref AWS::NoValue
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref TradeNotificationTopic
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: stock-automation-paper
+      Cpu: "512"
+      Memory: "1024"
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt ExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: stock-automation
+          Image: !Ref ImageUri
+          Essential: true
+          Command: [aws-run]
+          Environment:
+            - {Name: KIWOOM_MODE, Value: demo}
+            - {Name: KIWOOM_TOKEN_STORE, Value: memory}
+            - Name: PAPER_BUCKET
+              Value: !Ref ArtifactBucket
+            - Name: PAPER_TABLE
+              Value: !Ref PaperTable
+            - {Name: TRADING_CALENDAR_KEY, Value: "config/calendar/current.json"}
+            - Name: STARTING_CASH
+              Value: !Ref StartingCash
+            - Name: MEDIUM_STARTING_CASH
+              Value: !Ref MediumStartingCash
+            - Name: BUY_FEE_BPS
+              Value: !Ref BuyFeeBps
+            - Name: SELL_FEE_BPS
+              Value: !Ref SellFeeBps
+            - Name: SELL_TAX_BPS
+              Value: !Ref SellTaxBps
+            - Name: NOTIFICATION_CHANNEL
+              Value: !Ref NotificationChannel
+            - Name: NOTIFICATION_SECRET_ARN
+              Value: !Ref NotificationSecretArn
+            - Name: SNS_NOTIFICATION_TOPIC_ARN
+              Value: !Ref TradeNotificationTopic
+          Secrets:
+            - Name: APP_KEY_MOCK
+              ValueFrom: !Sub "${KiwoomDemoSecretArn}:app_key_mock::"
+            - Name: APP_SECRET_MOCK
+              ValueFrom: !Sub "${KiwoomDemoSecretArn}:app_secret_mock::"
+            - Name: DART_API_KEY
+              ValueFrom: !Sub "${DartSecretArn}:dart_api_key::"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: paper
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: scheduler.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: run-paper-task
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Ref TaskDefinition
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: [!GetAtt ExecutionRole.Arn, !GetAtt TaskRole.Arn]
+
+  ScanSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      State: !Ref CoreScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(50 14 ? * MON-FRI *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !GetAtt Cluster.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        EcsParameters:
+          TaskDefinitionArn: !Ref TaskDefinition
+          LaunchType: FARGATE
+          NetworkConfiguration:
+            AwsVpcConfiguration:
+              AssignPublicIp: ENABLED
+              Subnets: !Ref SubnetIds
+              SecurityGroups: !Ref SecurityGroupIds
+        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"SCAN_1450"}]}]}'
+
+  ShortlistSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      State: !Ref CoreScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(10 15 ? * MON-FRI *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !GetAtt Cluster.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        EcsParameters:
+          TaskDefinitionArn: !Ref TaskDefinition
+          LaunchType: FARGATE
+          NetworkConfiguration:
+            AwsVpcConfiguration:
+              AssignPublicIp: ENABLED
+              Subnets: !Ref SubnetIds
+              SecurityGroups: !Ref SecurityGroupIds
+        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"SHORTLIST_1510"}]}]}'
+
+  EntrySchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      State: !Ref CoreScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(20 15 ? * MON-FRI *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !GetAtt Cluster.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        EcsParameters:
+          TaskDefinitionArn: !Ref TaskDefinition
+          LaunchType: FARGATE
+          NetworkConfiguration:
+            AwsVpcConfiguration:
+              AssignPublicIp: ENABLED
+              Subnets: !Ref SubnetIds
+              SecurityGroups: !Ref SecurityGroupIds
+        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"ENTRY_1520"}]}]}'
+
+  NxtEntrySchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      State: !Ref NxtScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(55 19 ? * MON-FRI *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !GetAtt Cluster.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        EcsParameters:
+          TaskDefinitionArn: !Ref TaskDefinition
+          LaunchType: FARGATE
+          NetworkConfiguration:
+            AwsVpcConfiguration:
+              AssignPublicIp: ENABLED
+              Subnets: !Ref SubnetIds
+              SecurityGroups: !Ref SecurityGroupIds
+        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"ENTRY_NXT_1955"}]}]}'
+
+  EarlyExitReviewSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      State: !Ref CoreScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(5 9 ? * MON-FRI *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !GetAtt Cluster.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        EcsParameters:
+          TaskDefinitionArn: !Ref TaskDefinition
+          LaunchType: FARGATE
+          NetworkConfiguration:
+            AwsVpcConfiguration:
+              AssignPublicIp: ENABLED
+              Subnets: !Ref SubnetIds
+              SecurityGroups: !Ref SecurityGroupIds
+        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"EXIT_0905"}]}]}'
+
+  ScheduledExitSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      State: !Ref CoreScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(10 9 ? * MON-FRI *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !GetAtt Cluster.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        EcsParameters:
+          TaskDefinitionArn: !Ref TaskDefinition
+          LaunchType: FARGATE
+          NetworkConfiguration:
+            AwsVpcConfiguration:
+              AssignPublicIp: ENABLED
+              Subnets: !Ref SubnetIds
+              SecurityGroups: !Ref SecurityGroupIds
+        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"EXIT_0910"}]}]}'
+
+  WeeklyTuningSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      State: !Ref CoreScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(0 8 ? * SAT *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !GetAtt Cluster.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        EcsParameters:
+          TaskDefinitionArn: !Ref TaskDefinition
+          LaunchType: FARGATE
+          NetworkConfiguration:
+            AwsVpcConfiguration:
+              AssignPublicIp: ENABLED
+              Subnets: !Ref SubnetIds
+              SecurityGroups: !Ref SecurityGroupIds
+        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"TUNE_WEEKLY"}]}]}'
+
+  MediumEntrySchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      State: !Ref CoreScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(15 9 ? * MON-FRI *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !GetAtt Cluster.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        EcsParameters:
+          TaskDefinitionArn: !Ref TaskDefinition
+          LaunchType: FARGATE
+          NetworkConfiguration:
+            AwsVpcConfiguration:
+              AssignPublicIp: ENABLED
+              Subnets: !Ref SubnetIds
+              SecurityGroups: !Ref SecurityGroupIds
+        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"MEDIUM_ENTRY_0915"}]}]}'
+
+  MediumSignalSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      State: !Ref CoreScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(40 15 ? * MON-FRI *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !GetAtt Cluster.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        EcsParameters:
+          TaskDefinitionArn: !Ref TaskDefinition
+          LaunchType: FARGATE
+          NetworkConfiguration:
+            AwsVpcConfiguration:
+              AssignPublicIp: ENABLED
+              Subnets: !Ref SubnetIds
+              SecurityGroups: !Ref SecurityGroupIds
+        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"MEDIUM_SIGNAL_1540"}]}]}'
+
+  MediumReviewSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      State: !Ref CoreScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(35 15 ? * MON-FRI *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !GetAtt Cluster.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        EcsParameters:
+          TaskDefinitionArn: !Ref TaskDefinition
+          LaunchType: FARGATE
+          NetworkConfiguration:
+            AwsVpcConfiguration:
+              AssignPublicIp: ENABLED
+              Subnets: !Ref SubnetIds
+              SecurityGroups: !Ref SecurityGroupIds
+        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"MEDIUM_REVIEW_1535"}]}]}'
+
+Outputs:
+  ArtifactBucketName: {Value: !Ref ArtifactBucket}
+  PaperTableName: {Value: !Ref PaperTable}
+  ClusterArn: {Value: !GetAtt Cluster.Arn}
+  TaskDefinitionArn: {Value: !Ref TaskDefinition}
+  NotificationChannel: {Value: !Ref NotificationChannel}
+  NotificationTopicArn: {Value: !Ref TradeNotificationTopic}
+  LogGroupName: {Value: !Ref LogGroup}

@@ -1,0 +1,37 @@
+[
+  {
+    "pk": "WALLET#CLOSING_BET#KRX_1520",
+    "initial_cash": 600000,
+    "available_cash": 381420,
+    "invested_principal": 220000,
+    "realized_pnl": 1420,
+    "fees_taxes": 580,
+    "updated_at": "2026-10-08T15:20:30+09:00"
+  },
+  {
+    "pk": "WALLET#MEDIUM_TERM",
+    "initial_cash": 600000,
+    "available_cash": 600000,
+    "invested_principal": 0,
+    "realized_pnl": 0,
+    "fees_taxes": 0,
+    "updated_at": "2026-10-08T15:35:00+09:00"
+  },
+  {
+    "pk": "OPEN#CLOSING_BET#KRX_1520",
+    "remaining_quantity": 11,
+    "payload_json": "{\"position_id\":\"POS-DEMO001\",\"code\":\"123456\",\"name\":\"UI 샘플종목\",\"entry_price\":20000,\"quantity\":11,\"stop_price\":19400,\"emergency_stop\":19100,\"target1\":20900,\"target2\":21500,\"entry_at\":\"2026-10-08T15:20:30+09:00\",\"status\":\"OPEN\"}"
+  },
+  {
+    "pk": "2026-10-08:KRX_1520:CLOSING_BET",
+    "event_id": "SIM-20261008-KRX_1520-DEMO",
+    "decision": "BUY",
+    "decided_at": "2026-10-08T15:20:30+09:00",
+    "payload_json": "{\"decision\":\"BUY\",\"decided_at\":\"2026-10-08T15:20:30+09:00\",\"position\":{\"name\":\"UI 샘플종목\",\"code\":\"123456\"},\"reference_price\":20000}"
+  },
+  {
+    "pk": "EXIT#POS-OLD001#20261008T091005#SCHEDULED_EXIT",
+    "position_id": "POS-OLD001",
+    "payload_json": "{\"name\":\"이전 샘플\",\"code\":\"654321\",\"action\":\"SCHEDULED_EXIT\",\"decided_at\":\"2026-10-08T09:10:05+09:00\",\"execution_price\":10200,\"execution_quantity\":20,\"realized_pnl\":3573}"
+  }
+]

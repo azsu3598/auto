@@ -1,0 +1,41 @@
+{
+  "captured_at": "2026-10-06T15:20:30+09:00",
+  "session": "KRX_1520",
+  "kospi_change_pct": 0.2,
+  "kosdaq_change_pct": 0.5,
+  "source": "TEST_FIXTURE",
+  "delayed": false,
+  "quotes": [
+    {
+      "code": "123456",
+      "name": "샘플종목",
+      "observed_at": "2026-10-06T15:20:10+09:00",
+      "price": 20000,
+      "open_price": 19000,
+      "high_price": 20100,
+      "low_price": 18900,
+      "volume": 1800000,
+      "trading_value": 36000000000,
+      "previous_volume": 1000000,
+      "day_change_pct": 5.0,
+      "ma5": 19400,
+      "ma20": 18900,
+      "ma120": 17000,
+      "five_min_ma20": 19700,
+      "five_min_ma20_slope": 0.4,
+      "support_price": 19400,
+      "nxt_eligible": false,
+      "theme": "robot",
+      "catalyst": "검증용 샘플 촉매",
+      "catalyst_score": 0.8,
+      "catalyst_verified": true,
+      "institution_net": 500000000,
+      "program_net": 300000000,
+      "best_ask": 20000,
+      "best_bid": 19990,
+      "total_ask_size": 100000,
+      "total_bid_size": 90000,
+      "warnings": []
+    }
+  ]
+}
