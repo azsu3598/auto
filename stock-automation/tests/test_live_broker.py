@@ -83,12 +83,17 @@ def authorized_intent():
         open_positions=0,
         owned_quantity=0,
         kill_switch_active=False,
+        observed_account_fingerprint="fingerprint-main",
+        holdings_reconciled=True,
     )
     authorization = authorize_live_order(
         intent,
         approval=approval,
         state=state,
-        policy=LiveOrderPolicy(live_order_enabled=True),
+        policy=LiveOrderPolicy(
+            live_order_enabled=True,
+            expected_account_fingerprint="fingerprint-main",
+        ),
         checked_at=NOW,
     )
     return intent, authorization
@@ -115,8 +120,15 @@ class KiwoomLiveBrokerTests(unittest.TestCase):
         rejected = authorize_live_order(
             intent,
             approval=None,
-            state=AccountRiskState("main", 600_000, 0, 0, 0, 0, False),
-            policy=LiveOrderPolicy(live_order_enabled=True),
+            state=AccountRiskState(
+                "main", 600_000, 0, 0, 0, 0, False,
+                observed_account_fingerprint="fingerprint-main",
+                holdings_reconciled=True,
+            ),
+            policy=LiveOrderPolicy(
+                live_order_enabled=True,
+                expected_account_fingerprint="fingerprint-main",
+            ),
             checked_at=NOW,
         )
         with self.assertRaises(PermissionError):
@@ -142,7 +154,22 @@ class KiwoomLiveBrokerTests(unittest.TestCase):
         self.assertEqual(-4_500, state.realized_daily_pnl)
         self.assertEqual(2, state.open_positions)
         self.assertEqual(8, state.owned_quantity)
+        self.assertEqual(10, state.total_owned_quantity)
         self.assertTrue(state.kill_switch_active)
+
+        reconciled = broker.account_risk_state(
+            code="123456",
+            trading_date="20261007",
+            kill_switch_active=False,
+            protected_baseline_quantity=10,
+            program_owned_quantity=0,
+            holdings_reconciled=True,
+        )
+        self.assertTrue(reconciled.holdings_reconciled)
+
+    def test_reads_existing_holdings_for_protected_baseline(self):
+        broker = KiwoomLiveBroker(FakeClient(), account_alias="main")
+        self.assertEqual({"123456": 10, "654321": 5}, broker.holdings())
 
 
 if __name__ == "__main__":

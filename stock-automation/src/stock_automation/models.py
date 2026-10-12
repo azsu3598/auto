@@ -68,7 +68,9 @@ class Quote:
     vwap: float | None = None
     five_min_volume_ratio: float | None = None
     last_hour_return_pct: float | None = None
+    last_fifteen_min_return_pct: float | None = None
     higher_lows: bool | None = None
+    reclaimed_five_min_ma20: bool | None = None
     breakout_level: float | None = None
     breakout_holds: bool | None = None
 
@@ -185,7 +187,9 @@ class Decision:
                         "atr14": c.quote.atr14,
                         "five_min_volume_ratio": c.quote.five_min_volume_ratio,
                         "last_hour_return_pct": c.quote.last_hour_return_pct,
+                        "last_fifteen_min_return_pct": c.quote.last_fifteen_min_return_pct,
                         "higher_lows": c.quote.higher_lows,
+                        "reclaimed_five_min_ma20": c.quote.reclaimed_five_min_ma20,
                         "breakout_level": c.quote.breakout_level,
                         "breakout_holds": c.quote.breakout_holds,
                         "recent_resistance": c.quote.recent_resistance,

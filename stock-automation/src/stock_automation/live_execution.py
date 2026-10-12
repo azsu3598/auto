@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, Protocol
 
-from .live_broker import BrokerOrder, KiwoomLiveBroker
+from .live_broker import BrokerOrder, BrokerOrderStatus, KiwoomLiveBroker
 from .order_safety import (
     AuthorizationStatus,
     OrderAuthorization,
@@ -22,6 +22,10 @@ class LiveOrderState(StrEnum):
     READY = "READY"
     SUBMITTING = "SUBMITTING"
     ACKNOWLEDGED = "ACKNOWLEDGED"
+    PARTIALLY_FILLED = "PARTIALLY_FILLED"
+    FILLED = "FILLED"
+    CANCELLED = "CANCELLED"
+    REJECTED = "REJECTED"
     UNCERTAIN = "UNCERTAIN"
 
 
@@ -40,6 +44,28 @@ class LiveExecutionResult:
     state: LiveOrderState
     broker_order_no: str | None
     detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class FillReconciliation:
+    intent_id: str
+    broker_order_no: str
+    state: LiveOrderState
+    cumulative_filled_quantity: int
+    fill_delta: int
+    program_quantity: int
+    checked_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class AccountGuard:
+    account_alias: str
+    account_fingerprint: str
+    protected_holdings: dict[str, int]
+    captured_at: datetime
+
+    def protected_quantity(self, code: str) -> int:
+        return max(0, int(self.protected_holdings.get(code, 0)))
 
 
 class LiveOrderStore(Protocol):
@@ -137,6 +163,56 @@ class DynamoLiveOrderStore:
                 return False
             raise
 
+    def initialize_account_guard(self, guard: AccountGuard) -> bool:
+        if guard.captured_at.tzinfo is None:
+            raise ValueError("account guard timestamp must be timezone-aware")
+        if not guard.account_alias.strip() or not guard.account_fingerprint.strip():
+            raise ValueError("account guard identity is required")
+        protected = {
+            str(code): max(0, int(quantity))
+            for code, quantity in guard.protected_holdings.items()
+            if int(quantity) > 0
+        }
+        item = {
+            "pk": {"S": "CONTROL#ACCOUNT_GUARD"},
+            "status": {"S": "BASELINE_LOCKED"},
+            "account_alias": {"S": guard.account_alias},
+            "account_fingerprint": {"S": guard.account_fingerprint},
+            "protected_holdings_json": {
+                "S": json.dumps(protected, ensure_ascii=False, sort_keys=True)
+            },
+            "captured_at": {"S": guard.captured_at.isoformat()},
+            "updated_at": {"S": guard.captured_at.isoformat()},
+        }
+        try:
+            self.ddb.put_item(
+                TableName=self.table_name,
+                Item=item,
+                ConditionExpression="attribute_not_exists(pk)",
+            )
+            return True
+        except Exception as exc:
+            if _conditional_failure(exc):
+                return False
+            raise
+
+    def load_account_guard(self) -> AccountGuard | None:
+        response = self.ddb.get_item(
+            TableName=self.table_name,
+            Key={"pk": {"S": "CONTROL#ACCOUNT_GUARD"}},
+            ConsistentRead=True,
+        )
+        item = response.get("Item")
+        if not item:
+            return None
+        holdings = json.loads(item["protected_holdings_json"]["S"])
+        return AccountGuard(
+            account_alias=item["account_alias"]["S"],
+            account_fingerprint=item["account_fingerprint"]["S"],
+            protected_holdings={str(code): int(quantity) for code, quantity in holdings.items()},
+            captured_at=datetime.fromisoformat(item["captured_at"]["S"]),
+        )
+
     def approve(
         self,
         intent: OrderIntent,
@@ -182,6 +258,10 @@ class DynamoLiveOrderStore:
         submitted_states = {
             LiveOrderState.SUBMITTING.value,
             LiveOrderState.ACKNOWLEDGED.value,
+            LiveOrderState.PARTIALLY_FILLED.value,
+            LiveOrderState.FILLED.value,
+            LiveOrderState.CANCELLED.value,
+            LiveOrderState.REJECTED.value,
             LiveOrderState.UNCERTAIN.value,
         }
         result: set[str] = set()
@@ -204,6 +284,129 @@ class DynamoLiveOrderStore:
             if not start_key:
                 break
         return frozenset(result)
+
+    def program_quantity(self, code: str) -> int:
+        response = self.ddb.get_item(
+            TableName=self.table_name,
+            Key={"pk": {"S": _program_position_pk(code)}},
+            ConsistentRead=True,
+        )
+        item = response.get("Item")
+        return max(0, int(item.get("quantity", {}).get("N", "0"))) if item else 0
+
+    def reconcile_fill(
+        self,
+        order: BrokerOrder,
+        status: BrokerOrderStatus,
+    ) -> FillReconciliation:
+        if status.checked_at.tzinfo is None:
+            raise ValueError("fill reconciliation timestamp must be timezone-aware")
+        if status.broker_order_no != order.broker_order_no:
+            raise ValueError("broker order number mismatch")
+        if min(status.ordered_quantity, status.filled_quantity, status.remaining_quantity) < 0:
+            raise ValueError("broker quantities cannot be negative")
+        if status.filled_quantity + status.remaining_quantity > status.ordered_quantity:
+            raise ValueError("broker quantities are inconsistent")
+
+        stored = self.load(order.intent_id)
+        if stored is None or stored.broker_order is None:
+            raise RuntimeError("acknowledged live order is missing")
+        if stored.broker_order.broker_order_no != order.broker_order_no:
+            raise RuntimeError("stored broker order number mismatch")
+        if stored.state not in {LiveOrderState.ACKNOWLEDGED, LiveOrderState.PARTIALLY_FILLED}:
+            if stored.state in {LiveOrderState.FILLED, LiveOrderState.CANCELLED, LiveOrderState.REJECTED}:
+                return FillReconciliation(
+                    order.intent_id,
+                    order.broker_order_no,
+                    stored.state,
+                    status.filled_quantity,
+                    0,
+                    self.program_quantity(order.code),
+                    status.checked_at,
+                )
+            raise RuntimeError(f"order state cannot be reconciled: {stored.state.value}")
+
+        raw = self.ddb.get_item(
+            TableName=self.table_name,
+            Key={"pk": {"S": _pk(order.intent_id)}},
+            ConsistentRead=True,
+        ).get("Item", {})
+        previous = int(raw.get("last_filled_quantity", {}).get("N", "0"))
+        if status.filled_quantity < previous:
+            raise RuntimeError("broker cumulative fill quantity moved backwards")
+        delta = status.filled_quantity - previous
+        state = _reconciled_state(status)
+
+        values = {
+            ":previous": {"N": str(previous)},
+            ":filled": {"N": str(status.filled_quantity)},
+            ":remaining": {"N": str(status.remaining_quantity)},
+            ":state": {"S": state.value},
+            ":ack": {"S": LiveOrderState.ACKNOWLEDGED.value},
+            ":partial": {"S": LiveOrderState.PARTIALLY_FILLED.value},
+            ":number": {"S": order.broker_order_no},
+            ":checked": {"S": status.checked_at.isoformat()},
+            ":status_text": {"S": status.status_text[:200]},
+        }
+        transaction: list[dict[str, Any]] = [{
+            "Update": {
+                "TableName": self.table_name,
+                "Key": {"pk": {"S": _pk(order.intent_id)}},
+                "UpdateExpression": (
+                    "SET #status = :state, last_filled_quantity = :filled, "
+                    "remaining_quantity = :remaining, broker_status_text = :status_text, "
+                    "last_reconciled_at = :checked, updated_at = :checked"
+                ),
+                "ConditionExpression": (
+                    "broker_order_no = :number AND (#status = :ack OR #status = :partial) "
+                    "AND (attribute_not_exists(last_filled_quantity) OR last_filled_quantity = :previous)"
+                ),
+                "ExpressionAttributeNames": {"#status": "status"},
+                "ExpressionAttributeValues": values,
+            }
+        }]
+        if delta:
+            signed_delta = delta if order.side == OrderSide.BUY else -delta
+            position_update: dict[str, Any] = {
+                "TableName": self.table_name,
+                "Key": {"pk": {"S": _program_position_pk(order.code)}},
+                "UpdateExpression": (
+                    "SET code = :code, updated_at = :checked ADD quantity :delta"
+                ),
+                "ExpressionAttributeValues": {
+                    ":code": {"S": order.code},
+                    ":checked": {"S": status.checked_at.isoformat()},
+                    ":delta": {"N": str(signed_delta)},
+                },
+            }
+            if order.side == OrderSide.SELL:
+                position_update["ConditionExpression"] = "attribute_exists(pk) AND quantity >= :required"
+                position_update["ExpressionAttributeValues"][":required"] = {"N": str(delta)}
+            transaction.append({"Update": position_update})
+        try:
+            self.ddb.transact_write_items(TransactItems=transaction)
+        except Exception as exc:
+            if not _conditional_failure(exc):
+                raise
+            latest = self.ddb.get_item(
+                TableName=self.table_name,
+                Key={"pk": {"S": _pk(order.intent_id)}},
+                ConsistentRead=True,
+            ).get("Item", {})
+            latest_filled = int(latest.get("last_filled_quantity", {}).get("N", "-1"))
+            latest_state = latest.get("status", {}).get("S", "")
+            if latest_filled != status.filled_quantity or latest_state != state.value:
+                raise
+            delta = 0
+        return FillReconciliation(
+            order.intent_id,
+            order.broker_order_no,
+            state,
+            status.filled_quantity,
+            delta,
+            self.program_quantity(order.code),
+            status.checked_at,
+        )
 
     def set_kill_switch(
         self,
@@ -292,6 +495,23 @@ class DynamoLiveOrderStore:
 
 def _pk(intent_id: str) -> str:
     return f"LIVE_ORDER#{intent_id}"
+
+
+def _program_position_pk(code: str) -> str:
+    return f"PROGRAM_POSITION#{code}"
+
+
+def _reconciled_state(status: BrokerOrderStatus) -> LiveOrderState:
+    text = status.status_text.strip().upper()
+    if status.remaining_quantity == 0 and status.filled_quantity == status.ordered_quantity:
+        return LiveOrderState.FILLED
+    if any(token in text for token in ("거부", "REJECT")):
+        return LiveOrderState.REJECTED
+    if any(token in text for token in ("취소", "CANCEL")):
+        return LiveOrderState.CANCELLED
+    if status.filled_quantity > 0:
+        return LiveOrderState.PARTIALLY_FILLED
+    return LiveOrderState.ACKNOWLEDGED
 
 
 def _approval_json(approval: UserApproval) -> str:

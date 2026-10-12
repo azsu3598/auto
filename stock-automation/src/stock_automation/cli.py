@@ -15,6 +15,8 @@ from .reporting import append_training_event, write_markdown_report
 from .learning import TuningPolicy, tune_strategy, write_paper_champion, write_tuning_result
 from .medium_term import MediumTermEngine
 from .medium_term_io import load_medium_term_snapshot
+from .day_trade import DayTradeEngine
+from .day_trade_io import load_day_trade_snapshot
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,6 +47,23 @@ def build_parser() -> argparse.ArgumentParser:
     medium.add_argument("--ledger", required=True)
     medium.add_argument("--cash", type=int, default=600_000)
     medium.add_argument("--output")
+    day_trade = sub.add_parser(
+        "daytrade-analyze",
+        help="score one isolated intraday snapshot and record a paper decision",
+    )
+    day_trade.add_argument("--snapshot", required=True)
+    day_trade.add_argument("--ledger", required=True)
+    day_trade.add_argument("--cash", type=int, default=600_000)
+    day_trade.add_argument("--output")
+    day_trade_kiwoom = sub.add_parser(
+        "daytrade-kiwoom-scan",
+        help="run one on-demand Kiwoom read-only scan and record a paper decision",
+    )
+    day_trade_kiwoom.add_argument("--catalysts", required=True)
+    day_trade_kiwoom.add_argument("--ledger", required=True)
+    day_trade_kiwoom.add_argument("--cash", type=int, default=600_000)
+    day_trade_kiwoom.add_argument("--candidate-limit", type=int, default=30)
+    day_trade_kiwoom.add_argument("--output")
     doctor = sub.add_parser(
         "doctor",
         help="validate paper-only credentials and optionally probe read APIs",
@@ -87,6 +106,20 @@ def build_parser() -> argparse.ArgumentParser:
     live_kill.add_argument("--account-alias", required=True)
     live_kill.add_argument("--confirm")
     live_kill.add_argument("--table")
+    live_baseline = sub.add_parser(
+        "live-account-baseline",
+        help="lock the current real-account holdings as protected (does not order)",
+    )
+    live_baseline.add_argument("--account-alias", required=True)
+    live_baseline.add_argument("--exchange", choices=("KRX", "NXT", "SOR"), default="KRX")
+    live_baseline.add_argument("--confirm", required=True)
+    live_baseline.add_argument("--table")
+    live_reconcile = sub.add_parser(
+        "live-reconcile",
+        help="read one broker order and reconcile cumulative fills (does not submit)",
+    )
+    live_reconcile.add_argument("--intent-id", required=True)
+    live_reconcile.add_argument("--table")
     return parser
 
 
@@ -124,6 +157,8 @@ def main(argv: list[str] | None = None) -> int:
             "live-approve": live_cli.approve,
             "live-execute": live_cli.execute,
             "live-kill-switch": live_cli.set_kill_switch,
+            "live-account-baseline": live_cli.initialize_account_baseline,
+            "live-reconcile": live_cli.reconcile,
         }
         return handlers[args.command](args)
     if args.command in {"backtest", "tune"}:
@@ -173,6 +208,23 @@ def main(argv: list[str] | None = None) -> int:
             output.write_text(rendered + "\n", encoding="utf-8")
         print(rendered)
         return 0
+    if args.command == "daytrade-analyze":
+        snapshot = load_day_trade_snapshot(args.snapshot)
+        decision = DayTradeEngine().evaluate(snapshot, cash=args.cash)
+        ledger = JsonlLedger(args.ledger)
+        try:
+            ledger.append(decision)
+        except DuplicateDecisionError as exc:
+            raise SystemExit(f"duplicate day-trade decision: {exc}") from exc
+        rendered = json.dumps(decision.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
+        if args.output:
+            output = Path(args.output)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(rendered + "\n", encoding="utf-8")
+        print(rendered)
+        return 0
+    if args.command == "daytrade-kiwoom-scan":
+        return _run_day_trade_kiwoom(args)
     if args.command != "analyze":
         raise AssertionError(args.command)
 
@@ -191,6 +243,71 @@ def main(argv: list[str] | None = None) -> int:
         write_markdown_report(args.report_dir, snapshot, decision)
 
     rendered = json.dumps(decision.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
+    if args.output:
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(rendered + "\n", encoding="utf-8")
+    print(rendered)
+    return 0
+
+
+def _run_day_trade_kiwoom(args) -> int:
+    import os
+    from datetime import datetime, timedelta, timezone
+
+    from .providers.kiwoom import Catalyst, KiwoomSnapshotBuilder
+    from .providers.reliable import KiwoomRetryPolicy, ReliableKiwoomClient
+
+    now = datetime.now(timezone(timedelta(hours=9)))
+    raw = json.loads(Path(args.catalysts).read_text(encoding="utf-8"))
+    catalysts: dict[str, Catalyst] = {}
+    for code, item in raw.items():
+        if not isinstance(item, dict):
+            continue
+        verified_at = datetime.fromisoformat(str(item.get("verified_at", "")))
+        if verified_at.tzinfo is None:
+            raise ValueError(f"catalyst timezone is required: {code}")
+        if (
+            item.get("verified") is True
+            and str(item.get("source", "")).strip()
+            and verified_at.astimezone(now.tzinfo).date() == now.date()
+        ):
+            catalysts[str(code)] = Catalyst(
+                str(item.get("theme", "")),
+                str(item.get("summary", "")),
+                float(item.get("score", 0.0)),
+                True,
+            )
+    from kiwoom import get_client
+
+    client = ReliableKiwoomClient(
+        get_client(mode=os.getenv("KIWOOM_MODE", "mock"), timeout_seconds=20),
+        KiwoomRetryPolicy(
+            min_interval_seconds=float(os.getenv("KIWOOM_MIN_INTERVAL_SECONDS", "0.25")),
+            max_attempts=int(os.getenv("KIWOOM_READ_MAX_ATTEMPTS", "4")),
+        ),
+    )
+    builder = KiwoomSnapshotBuilder(client)
+    snapshot = builder.build_day_trade_snapshot(
+        captured_at=now,
+        catalysts=catalysts,
+        kospi_change_pct=builder.market_change_pct(market="0", index_code="001"),
+        kosdaq_change_pct=builder.market_change_pct(market="1", index_code="101"),
+        candidate_limit=args.candidate_limit,
+    )
+    decision = DayTradeEngine().evaluate(snapshot, cash=args.cash)
+    ledger = JsonlLedger(args.ledger)
+    try:
+        ledger.append(decision)
+    except DuplicateDecisionError as exc:
+        raise SystemExit(f"duplicate day-trade decision: {exc}") from exc
+    payload = decision.to_dict()
+    payload.update({
+        "snapshot_source": snapshot.source,
+        "snapshot_quote_count": len(snapshot.quotes),
+        "paper_only": True,
+    })
+    rendered = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output:
         output = Path(args.output)
         output.parent.mkdir(parents=True, exist_ok=True)

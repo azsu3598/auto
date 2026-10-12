@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+from hashlib import sha256
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .live_broker import KiwoomLiveBroker
-from .live_execution import DynamoLiveOrderStore, LiveOrderExecutor, LiveOrderState
+from .live_execution import (
+    AccountGuard,
+    DynamoLiveOrderStore,
+    LiveOrderExecutor,
+    LiveOrderState,
+)
 from .order_safety import (
     LiveOrderPolicy,
     OrderSide,
@@ -93,6 +99,12 @@ def execute(args) -> int:
     account_alias = _approved_account_alias(stored.intent.account_alias)
     if store.kill_switch_active(account_alias=account_alias):
         raise RuntimeError("live kill switch is active")
+    guard = store.load_account_guard()
+    if guard is None:
+        raise RuntimeError("protected account baseline is missing")
+    observed_fingerprint = _account_fingerprint()
+    if guard.account_alias != account_alias or guard.account_fingerprint != observed_fingerprint:
+        raise RuntimeError("account guard does not match the active account")
 
     raw, read = _real_clients()
     observed_at, current_price = _current_quote(read, stored.intent.code, now)
@@ -108,12 +120,17 @@ def execute(args) -> int:
             raise RuntimeError("market moved beyond approved buy-slippage limit")
 
     read_broker = KiwoomLiveBroker(read, account_alias=account_alias)
+    program_quantity = store.program_quantity(stored.intent.code)
     risk_state = read_broker.account_risk_state(
         code=stored.intent.code,
         trading_date=now.strftime("%Y%m%d"),
         kill_switch_active=False,
         already_submitted_intent_ids=store.submitted_intent_ids(),
         exchange=args.exchange,
+        observed_account_fingerprint=observed_fingerprint,
+        protected_baseline_quantity=guard.protected_quantity(stored.intent.code),
+        program_owned_quantity=program_quantity,
+        holdings_reconciled=True,
     )
     authorization = authorize_live_order(
         stored.intent,
@@ -167,6 +184,64 @@ def set_kill_switch(args) -> int:
     return 0
 
 
+def initialize_account_baseline(args) -> int:
+    """Capture existing holdings once while the kill switch remains active."""
+    if args.confirm != "PROTECT_EXISTING_HOLDINGS":
+        raise RuntimeError(
+            "baseline capture requires --confirm PROTECT_EXISTING_HOLDINGS"
+        )
+    now = datetime.now(KST)
+    account_alias = _approved_account_alias(args.account_alias)
+    store = _store(args.table)
+    if not store.kill_switch_active(account_alias=account_alias):
+        raise RuntimeError("turn the live kill switch ON before baseline capture")
+    _raw, read = _real_clients()
+    broker = KiwoomLiveBroker(read, account_alias=account_alias)
+    guard = AccountGuard(
+        account_alias=account_alias,
+        account_fingerprint=_account_fingerprint(),
+        protected_holdings=broker.holdings(exchange=args.exchange),
+        captured_at=now,
+    )
+    if not store.initialize_account_guard(guard):
+        raise RuntimeError("account baseline is already locked; it was not overwritten")
+    print(json.dumps({
+        "status": "ACCOUNT_BASELINE_LOCKED",
+        "account_alias": account_alias,
+        "protected_symbol_count": len(guard.protected_holdings),
+        "captured_at": now.isoformat(),
+        "warning": "account number and quantities are intentionally not printed",
+    }, ensure_ascii=False))
+    return 0
+
+
+def reconcile(args) -> int:
+    """Poll one known broker order and apply only its new cumulative fill delta."""
+    now = datetime.now(KST)
+    store = _store(args.table)
+    stored = store.load(args.intent_id)
+    if stored is None or stored.broker_order is None:
+        raise RuntimeError("acknowledged broker order was not found")
+    account_alias = _approved_account_alias(stored.intent.account_alias)
+    _raw, read = _real_clients()
+    broker = KiwoomLiveBroker(read, account_alias=account_alias)
+    status = broker.order_status(stored.broker_order, checked_at=now)
+    if status.status_text == "NOT_FOUND_REQUIRES_MANUAL_RECONCILIATION":
+        store.set_kill_switch(account_alias=account_alias, active=True, updated_at=now)
+        raise RuntimeError("broker order was not found; kill switch turned ON")
+    result = store.reconcile_fill(stored.broker_order, status)
+    print(json.dumps({
+        "status": result.state.value,
+        "intent_id": result.intent_id,
+        "broker_order_no": result.broker_order_no,
+        "cumulative_filled_quantity": result.cumulative_filled_quantity,
+        "new_fill_quantity": result.fill_delta,
+        "program_quantity": result.program_quantity,
+        "checked_at": result.checked_at.isoformat(),
+    }, ensure_ascii=False))
+    return 0
+
+
 def _store(table_name: str | None) -> DynamoLiveOrderStore:
     import boto3
 
@@ -210,7 +285,20 @@ def _policy() -> LiveOrderPolicy:
         maximum_quote_age_seconds=int(os.getenv("LIVE_MAX_QUOTE_AGE_SECONDS", "60")),
         maximum_buy_slippage_pct=float(os.getenv("LIVE_MAX_BUY_SLIPPAGE_PCT", "0.5")),
         approval_ttl_seconds=int(os.getenv("LIVE_APPROVAL_TTL_SECONDS", "300")),
+        expected_account_fingerprint=(
+            os.getenv("LIVE_APPROVED_ACCOUNT_FINGERPRINT", "").strip() or None
+        ),
     )
+
+
+def _account_fingerprint() -> str:
+    account_number = os.getenv("KIWOOM_ACCOUNT_NUMBER", "").strip()
+    salt = os.getenv("LIVE_ACCOUNT_FINGERPRINT_SALT", "").strip()
+    if not account_number or len(salt) < 16:
+        raise RuntimeError(
+            "KIWOOM_ACCOUNT_NUMBER and a 16+ character LIVE_ACCOUNT_FINGERPRINT_SALT are required"
+        )
+    return sha256(f"{salt}|{account_number}".encode()).hexdigest()
 
 
 def _current_quote(client: Any, code: str, fallback: datetime) -> tuple[datetime, int]:

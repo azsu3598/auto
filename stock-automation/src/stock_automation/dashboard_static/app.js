@@ -1,6 +1,8 @@
 const won = new Intl.NumberFormat("ko-KR", { style: "currency", currency: "KRW", maximumFractionDigits: 0 });
 const number = new Intl.NumberFormat("ko-KR");
 const byId = (id) => document.getElementById(id);
+let equityHistory = { PAPER: [], LIVE: [] };
+let activeEquityMode = "PAPER";
 
 function setClock() {
   byId("clock").textContent = new Intl.DateTimeFormat("ko-KR", {
@@ -58,9 +60,57 @@ function renderPositions(rows) {
   });
 }
 
+function svgEl(tag, attributes = {}) {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  Object.entries(attributes).forEach(([key, value]) => node.setAttribute(key, String(value)));
+  return node;
+}
+
+function renderEquityChart() {
+  const rows = equityHistory[activeEquityMode] || [];
+  const root = byId("equity-chart"); root.replaceChildren();
+  document.querySelectorAll(".equity-mode").forEach((button) => {
+    button.classList.toggle("active", button.dataset.equityMode === activeEquityMode);
+  });
+  if (!rows.length) {
+    byId("equity-current").textContent = "-"; byId("equity-change").textContent = "-";
+    root.append(empty("기록 없음", `${activeEquityMode === "PAPER" ? "모의" : "실거래"} 일별 총금액이 아직 없습니다.`));
+    return;
+  }
+  const values = rows.map((row) => Number(row.total_assets));
+  const first = values[0]; const latest = values[values.length - 1]; const change = latest - first;
+  byId("equity-current").textContent = won.format(latest);
+  const changeNode = byId("equity-change");
+  changeNode.textContent = `${change >= 0 ? "+" : ""}${won.format(change)}`;
+  changeNode.className = change > 0 ? "positive" : change < 0 ? "negative" : "";
+
+  const width = 900; const height = 220; const left = 18; const right = 18; const top = 18; const bottom = 32;
+  const minimum = Math.min(...values); const maximum = Math.max(...values); const span = Math.max(1, maximum - minimum);
+  const points = rows.map((row, index) => ({
+    x: left + (rows.length === 1 ? (width - left - right) / 2 : index * (width - left - right) / (rows.length - 1)),
+    y: top + (maximum - Number(row.total_assets)) * (height - top - bottom) / span,
+    row,
+  }));
+  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "일별 총금액 선그래프" });
+  [0, .5, 1].forEach((ratio) => {
+    const y = top + ratio * (height - top - bottom);
+    svg.append(svgEl("line", { x1: left, y1: y, x2: width - right, y2: y, class: "chart-grid" }));
+  });
+  const line = points.map((point, index) => `${index ? "L" : "M"}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+  const area = `${line} L${points.at(-1).x.toFixed(1)},${height - bottom} L${points[0].x.toFixed(1)},${height - bottom} Z`;
+  svg.append(svgEl("path", { d: area, class: "equity-area" }), svgEl("path", { d: line, class: "equity-line" }));
+  points.forEach((point, index) => {
+    const dot = svgEl("circle", { cx: point.x, cy: point.y, r: index === points.length - 1 ? 5 : 3, class: "equity-dot" });
+    const title = svgEl("title"); title.textContent = `${point.row.recorded_at.slice(0, 10)} · ${won.format(point.row.total_assets)}`; dot.append(title); svg.append(dot);
+    const label = svgEl("text", { x: point.x, y: height - 10, class: "chart-date", "text-anchor": "middle" });
+    label.textContent = point.row.recorded_at.slice(5, 10); svg.append(label);
+  });
+  root.append(svg);
+}
+
 function renderEvents(rows) {
   const root = byId("events"); root.replaceChildren();
-  if (!rows.length) { const tr = el("tr"); const td = el("td"); td.colSpan = 6; td.append(empty("기록 없음", "첫 모의실행 이후 이력이 표시됩니다.")); tr.append(td); root.append(tr); return; }
+  if (!rows.length) { const tr = el("tr"); const td = el("td"); td.colSpan = 7; td.append(empty("기록 없음", "첫 모의실행 이후 이력이 표시됩니다.")); tr.append(td); root.append(tr); return; }
   rows.forEach((row) => {
     const tr = el("tr");
     const time = el("td", "", formatTime(row.occurred_at));
@@ -69,7 +119,10 @@ function renderEvents(rows) {
     const decision = el("td", "", row.decision || "-");
     const price = el("td", "", row.price ? won.format(row.price) : "-");
     const pnl = el("td", row.pnl > 0 ? "positive" : row.pnl < 0 ? "negative" : "", row.pnl === null || row.pnl === undefined ? "-" : won.format(row.pnl));
-    tr.append(time, type, stock, decision, price, pnl); root.append(tr);
+    const reasons = el("td", "reason-cell");
+    if (row.reasons?.length) row.reasons.forEach((reason) => reasons.append(el("span", "reason-chip", reason)));
+    else reasons.textContent = "기록 없음";
+    tr.append(time, type, stock, decision, price, pnl, reasons); root.append(tr);
   });
 }
 
@@ -79,6 +132,23 @@ function renderSafety(rows) {
     const item = el("div", "safety-row"); const name = el("div", "safety-name");
     name.append(el("strong", "", row.label), el("small", "", row.detail));
     item.append(name, el("span", `state-dot ${row.state}`)); root.append(item);
+  });
+}
+
+function renderStrategyModes(rows) {
+  const root = byId("strategy-modes"); root.replaceChildren();
+  rows.forEach((row) => {
+    const item = el("div", "strategy-mode-row");
+    const heading = el("div", "strategy-mode-heading");
+    heading.append(el("strong", "", row.label), el("small", "", row.detail));
+    const choices = el("div", "mode-choices");
+    [["paper_selected", "모의"], ["live_selected", "실거래"]].forEach(([field, label]) => {
+      const choice = el("label", `mode-choice ${field === "live_selected" ? "live" : "paper"}`);
+      const input = document.createElement("input"); input.type = "checkbox";
+      input.checked = Boolean(row[field]); input.disabled = Boolean(row.controls_locked);
+      choice.append(input, el("span", "", label)); choices.append(choice);
+    });
+    item.append(heading, choices); root.append(item);
   });
 }
 
@@ -119,8 +189,10 @@ function render(data) {
   byId("fees-taxes").textContent = `비용 ${won.format(data.metrics.fees_taxes || 0)}`;
   byId("open-positions").textContent = `${number.format(data.metrics.open_positions || 0)}개`;
   byId("pending-alerts").textContent = `알림 대기 ${number.format(data.metrics.pending_notifications || 0)}건`;
+  equityHistory = data.equity_history || { PAPER: [], LIVE: [] }; renderEquityChart();
   renderPositions(data.positions); renderEvents(data.recent_events); renderSafety(data.safety);
-  renderWallets(data.wallets); renderSchedules(data.schedules); renderWarnings(data.warnings);
+  renderStrategyModes(data.strategy_modes || []); renderWallets(data.wallets);
+  renderSchedules(data.schedules); renderWarnings(data.warnings);
 }
 
 let toastTimer;
@@ -139,4 +211,7 @@ async function load(manual = false) {
 }
 
 byId("refresh").addEventListener("click", () => load(true));
+document.querySelectorAll(".equity-mode").forEach((button) => button.addEventListener("click", () => {
+  activeEquityMode = button.dataset.equityMode; renderEquityChart();
+}));
 setClock(); setInterval(setClock, 1000); load(); setInterval(() => load(false), 60000);

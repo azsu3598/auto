@@ -77,6 +77,10 @@ main { padding: 28px 0 40px; }
 .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 16px; }
 .metric-card { padding: 19px 20px; border: 1px solid var(--line); border-radius: 15px; background: rgba(10, 24, 39, .65); }
 .metric-card p { margin: 0 0 12px; color: var(--muted); font-size: 12px; }.metric-card strong { display: block; font-size: 24px; font-variant-numeric: tabular-nums; letter-spacing: -.04em; }.metric-card small { display: block; color: #657c91; margin-top: 7px; font-size: 10px; }
+.equity-panel { margin-top: 16px; padding: 22px; }.equity-title { margin-bottom: 12px; }
+.equity-actions { display: flex; gap: 6px; }.equity-mode { border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.025); color: var(--muted); padding: 7px 11px; font-size: 10px; cursor: pointer; }.equity-mode.active { color: var(--cyan); background: var(--cyan-soft); border-color: rgba(68,215,200,.25); }
+.equity-summary { display: flex; gap: 28px; margin-bottom: 8px; }.equity-summary div { display: flex; flex-direction: column; gap: 4px; }.equity-summary span { color: var(--muted); font-size: 9px; }.equity-summary strong { font-size: 17px; font-variant-numeric: tabular-nums; }
+.equity-chart { width: 100%; min-height: 220px; }.equity-chart svg { display: block; width: 100%; height: 220px; overflow: visible; }.chart-grid { stroke: rgba(145,177,207,.1); stroke-width: 1; }.equity-area { fill: rgba(68,215,200,.08); }.equity-line { fill: none; stroke: var(--cyan); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 7px rgba(68,215,200,.25)); }.equity-dot { fill: var(--cyan); stroke: #0b1b2b; stroke-width: 2; }.chart-date { fill: var(--muted); font-size: 9px; }
 .positive { color: var(--cyan) !important; }.negative { color: var(--red) !important; }
 .warning-strip { margin-top: 14px; display: flex; gap: 12px; align-items: flex-start; color: #f7ca82; background: rgba(87, 57, 22, .3); border: 1px solid rgba(244,184,96,.18); border-radius: 13px; padding: 13px 16px; font-size: 12px; }
 .warning-strip.hidden { display: none; }.warning-icon { display: grid; place-items: center; min-width: 20px; height: 20px; border-radius: 50%; background: var(--amber); color: #34220d; font-weight: 900; }
@@ -93,8 +97,19 @@ main { padding: 28px 0 40px; }
 .empty { padding: 34px 18px; text-align: center; border: 1px dashed rgba(145,177,207,.2); border-radius: 13px; color: var(--muted); font-size: 12px; }.empty strong { color: #c8d4de; display: block; margin-bottom: 6px; font-size: 14px; }
 .table-wrap { overflow-x: auto; } table { width: 100%; border-collapse: collapse; min-width: 620px; } th { color: #667d91; font-size: 9px; letter-spacing: .09em; text-align: left; padding: 0 11px 10px; } td { border-top: 1px solid var(--line); padding: 13px 11px; color: #b5c4d0; font-size: 11px; white-space: nowrap; } td strong { color: var(--text); }
 .event-pill { display: inline-block; padding: 4px 7px; border-radius: 6px; color: var(--blue); background: var(--blue-soft); font-size: 9px; font-weight: 800; }
+.reason-cell { min-width: 210px; max-width: 320px; white-space: normal; }.reason-chip { display: inline-block; margin: 2px 4px 2px 0; padding: 4px 7px; border-radius: 999px; color: #b9cad7; background: rgba(145,177,207,.08); border: 1px solid rgba(145,177,207,.1); font-size: 9px; }
 
 .safety-list, .wallet-list { display: grid; gap: 9px; }.safety-row, .wallet-row { border-bottom: 1px solid var(--line); padding: 2px 0 11px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }.safety-row:last-child, .wallet-row:last-child { border: 0; padding-bottom: 0; }
+.mode-help { margin: -7px 0 15px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.strategy-mode-list { display: grid; gap: 10px; }
+.strategy-mode-row { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: rgba(5, 16, 28, .4); }
+.strategy-mode-heading { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.strategy-mode-heading strong { font-size: 12px; }.strategy-mode-heading small { color: var(--muted); font-size: 8px; text-align: right; }
+.mode-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mode-choice { display: flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 9px; color: #aebdcb; font-size: 10px; }
+.mode-choice input { margin: 0; accent-color: var(--cyan); }.mode-choice.live input { accent-color: var(--red); }
+.mode-choice:has(input:checked) { color: var(--cyan); background: var(--cyan-soft); }.mode-choice.live:has(input:checked) { color: var(--red); background: var(--red-soft); }
+.mode-choice:has(input:disabled) { cursor: not-allowed; opacity: .72; }
 .safety-name strong, .wallet-name strong { display: block; font-size: 12px; }.safety-name small, .wallet-name small { color: var(--muted); font-size: 9px; }
 .state-dot { min-width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 10px currentColor; }.state-dot.safe { color: var(--cyan); background: var(--cyan); }.state-dot.blocked { color: var(--amber); background: var(--amber); }.state-dot.danger { color: var(--red); background: var(--red); }
 .wallet-value { text-align: right; }.wallet-value strong { display: block; font-size: 12px; }.wallet-value small { color: var(--muted); font-size: 9px; }
@@ -117,6 +132,7 @@ footer { border-top: 1px solid var(--line); min-height: 76px; color: #63798d; fo
   .system-copy { line-height: 1.65; overflow-wrap: anywhere; }
   .system-meta { grid-template-columns: 1fr; }.mode-row h2 { font-size: 23px; }
   .metric-grid { gap: 9px; margin-top: 11px; }.metric-card { padding: 15px; }.metric-card strong { font-size: 19px; }
+  .equity-panel { margin-top: 11px; padding: 17px; }.equity-summary { gap: 18px; }.equity-chart, .equity-chart svg { min-height: 190px; height: 190px; }.chart-date { font-size: 8px; }
   .content-grid { margin-top: 11px; gap: 11px; }.primary-column, .side-column { gap: 11px; }.section-panel { padding: 17px; }
   .position-card { grid-template-columns: 1fr 1fr; }.position-name { grid-column: 1 / -1; }
   footer { flex-direction: column; align-items: flex-start; justify-content: center; padding: 18px 0; }

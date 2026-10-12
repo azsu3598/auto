@@ -102,6 +102,11 @@ class FakeClient:
                     "stk_cd": "123456", "netprps_prica": "+35",
                 }],
             })
+        if api_id == "ka20001":
+            return Response({
+                "return_code": 0,
+                "flu_rt": "+0.42" if body["mrkt_tp"] == "0" else "-0.35",
+            })
         raise AssertionError(api_id)
 
 
@@ -142,6 +147,25 @@ class FlowFailureClient(FakeClient):
 
 
 class KiwoomProviderTests(unittest.TestCase):
+    def test_builds_separate_on_demand_day_trade_snapshot(self):
+        builder = KiwoomSnapshotBuilder(FakeClient())
+        captured = datetime(2026, 10, 6, 13, 24, 30, tzinfo=KST)
+        result = builder.build_day_trade_snapshot(
+            captured_at=captured,
+            catalysts={"123456": Catalyst("robot", "confirmed contract", 0.8, True)},
+            kospi_change_pct=builder.market_change_pct(market="0", index_code="001"),
+            kosdaq_change_pct=builder.market_change_pct(market="1", index_code="101"),
+        )
+        self.assertEqual("KIWOOM_REST_ON_DEMAND", result.source)
+        self.assertEqual(0.42, result.kospi_change_pct)
+        self.assertEqual(-0.35, result.kosdaq_change_pct)
+        self.assertEqual(1, len(result.quotes))
+        quote = result.quotes[0]
+        self.assertEqual("KOSPI", quote.market)
+        self.assertEqual(20_010, quote.best_ask)
+        self.assertTrue(quote.catalyst_verified)
+        self.assertFalse(quote.nxt_eligible)
+
     def test_optional_flow_failure_is_unknown_instead_of_estimated(self):
         snapshot = KiwoomSnapshotBuilder(FlowFailureClient()).build(
             captured_at=datetime(2026, 10, 6, 15, 20, 30, tzinfo=KST),

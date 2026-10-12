@@ -183,6 +183,10 @@ class KiwoomLiveBroker:
         kill_switch_active: bool,
         already_submitted_intent_ids: frozenset[str] = frozenset(),
         exchange: str = "KRX",
+        observed_account_fingerprint: str | None = None,
+        protected_baseline_quantity: int = 0,
+        program_owned_quantity: int = 0,
+        holdings_reconciled: bool = False,
     ) -> AccountRiskState:
         cash = self._single("kt00001", {"qry_tp": "3"})
         holdings = self._single(
@@ -203,7 +207,18 @@ class KiwoomLiveBroker:
             for row in open_rows
             if str(row.get("stk_cd", "")).replace("A", "", 1).strip() == code
         )
+        total_owned = sum(
+            _integer(row.get("rmnd_qty"))
+            for row in open_rows
+            if str(row.get("stk_cd", "")).replace("A", "", 1).strip() == code
+        )
         exposure = sum(_integer(row.get("evlt_amt")) for row in open_rows)
+        normalized_baseline = max(0, protected_baseline_quantity)
+        normalized_program = max(0, program_owned_quantity)
+        reconciled = bool(
+            holdings_reconciled
+            and total_owned >= normalized_baseline + normalized_program
+        )
         return AccountRiskState(
             account_alias=self.account_alias,
             available_cash=_integer(cash.get("ord_alow_amt")),
@@ -213,7 +228,29 @@ class KiwoomLiveBroker:
             owned_quantity=owned,
             kill_switch_active=kill_switch_active,
             already_submitted_intent_ids=already_submitted_intent_ids,
+            observed_account_fingerprint=observed_account_fingerprint,
+            protected_baseline_quantity=normalized_baseline,
+            program_owned_quantity=normalized_program,
+            holdings_reconciled=reconciled,
+            total_owned_quantity=total_owned,
         )
+
+    def holdings(self, *, exchange: str = "KRX") -> dict[str, int]:
+        body = self._single(
+            "kt00018", {"qry_tp": "1", "dmst_stex_tp": exchange.upper()}
+        )
+        rows = body.get("acnt_evlt_remn_indv_tot")
+        if not isinstance(rows, list):
+            return {}
+        result: dict[str, int] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            code = str(row.get("stk_cd", "")).replace("A", "", 1).strip()
+            quantity = _integer(row.get("rmnd_qty"))
+            if code and quantity > 0:
+                result[code] = quantity
+        return result
 
     def _single(self, api_id: str, body: dict[str, str]) -> dict[str, Any]:
         response = self.client.fetch_page(

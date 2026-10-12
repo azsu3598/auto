@@ -53,7 +53,9 @@ def dashboard_payload(
     wallets: list[dict[str, Any]] = []
     positions: list[dict[str, Any]] = []
     events: list[dict[str, Any]] = []
+    equity_history: dict[str, list[dict[str, Any]]] = {"PAPER": [], "LIVE": []}
     pending_notifications = 0
+    mode_configuration: dict[str, dict[str, bool]] = {}
 
     for item in rows:
         key = str(item.get("pk", ""))
@@ -68,11 +70,29 @@ def dashboard_payload(
                 "fees_taxes": _integer(item.get("fees_taxes")),
                 "updated_at": item.get("updated_at"),
             })
+        elif key.startswith("EQUITY#"):
+            mode = str(item.get("mode", "PAPER")).strip().upper()
+            if mode in equity_history:
+                recorded_at = item.get("recorded_at") or key.rsplit("#", 1)[-1]
+                total_assets = _integer(item.get("total_assets"))
+                if recorded_at and total_assets > 0:
+                    equity_history[mode].append({
+                        "recorded_at": recorded_at,
+                        "total_assets": total_assets,
+                        "available_cash": _integer(item.get("available_cash")),
+                        "market_value": _integer(item.get("market_value")),
+                    })
         elif key.startswith("OPEN#"):
             positions.append(_position_row(key, item, payload))
         elif key.startswith("OUTBOX#"):
             if item.get("delivery_status") == "PENDING":
                 pending_notifications += 1
+        elif key.startswith("CONTROL#STRATEGY_MODE#"):
+            strategy_id = key.removeprefix("CONTROL#STRATEGY_MODE#")
+            mode_configuration[strategy_id] = {
+                "paper_selected": bool(item.get("paper_enabled", False)),
+                "live_selected": bool(item.get("live_enabled", False)),
+            }
         elif _is_event(key):
             events.append(_event_row(key, item, payload))
 
@@ -80,6 +100,9 @@ def dashboard_payload(
     positions.sort(key=lambda row: row.get("entry_at") or "", reverse=True)
     events.sort(key=lambda row: row.get("occurred_at") or "", reverse=True)
     events = events[:30]
+    for history in equity_history.values():
+        history.sort(key=lambda row: str(row["recorded_at"]))
+        del history[:-90]
 
     cash = sum(row["available_cash"] for row in wallets)
     principal = sum(row["invested_principal"] for row in wallets)
@@ -114,12 +137,14 @@ def dashboard_payload(
         "wallets": wallets,
         "positions": positions,
         "recent_events": events,
+        "strategy_modes": _strategy_mode_rows(mode_configuration),
+        "equity_history": equity_history,
         "schedules": _schedule_rows(),
         "safety": [
             {"label": "실주문", "state": "danger" if live_enabled else "safe", "detail": "감지됨" if live_enabled else "잠금"},
             {"label": "NXT 전략", "state": "safe", "detail": "기본 비활성"},
-            {"label": "기존 잔고 보호", "state": "blocked", "detail": "실거래 전 구현 필요"},
-            {"label": "체결 원장 대사", "state": "blocked", "detail": "실거래 전 구현 필요"},
+            {"label": "기존 잔고 보호", "state": "blocked", "detail": "코드 구현·통합검증 필요"},
+            {"label": "체결 원장 대사", "state": "blocked", "detail": "키움 통합검증 필요"},
             {"label": "모의전략 분리", "state": "safe", "detail": "전략별 지갑"},
             {"label": "일손실 한도", "state": "safe", "detail": "10,000원"},
         ],
@@ -127,8 +152,8 @@ def dashboard_payload(
         "live_transition": {
             "allowed": False,
             "reason": (
-                "현재는 모의운용 단계입니다. 기존 잔고 보호와 체결 원장 대사가 "
-                "완성·검증되면 별도 사용자 승인 절차를 제공할 예정입니다."
+                "현재는 모의운용 단계입니다. 기존 잔고 보호와 체결 원장을 키움·AWS에서 "
+                "통합 검증한 뒤 별도 사용자 승인 절차를 제공할 예정입니다."
             ),
         },
     }
@@ -284,11 +309,77 @@ def _event_row(key: str, item: dict[str, Any], payload: dict[str, Any]) -> dict[
             or nested_position.get("quantity")
         ),
         "pnl": payload.get("realized_pnl"),
+        "reasons": _event_reasons(item, payload, nested_position),
     }
 
 
+def _event_reasons(
+    item: dict[str, Any],
+    payload: dict[str, Any],
+    position: dict[str, Any],
+) -> list[str]:
+    raw: list[Any] = []
+    for source in (item.get("reason_codes"), payload.get("reason_codes")):
+        if isinstance(source, (list, tuple)):
+            raw.extend(source)
+    selected_code = str(position.get("code") or payload.get("code") or "")
+    candidates = payload.get("candidates")
+    if isinstance(candidates, list):
+        selected = next(
+            (
+                candidate for candidate in candidates
+                if isinstance(candidate, dict)
+                and (not selected_code or str(candidate.get("code", "")) == selected_code)
+            ),
+            None,
+        )
+        if isinstance(selected, dict) and isinstance(selected.get("reasons"), list):
+            raw.extend(selected["reasons"])
+    if not raw and payload.get("action"):
+        raw.append(payload["action"])
+    labels = []
+    for reason in raw:
+        code = str(reason).strip().upper()
+        if not code or code == "PAPER_EXECUTION_ONLY":
+            continue
+        label = _REASON_LABELS.get(code, code.replace("_", " "))
+        if label not in labels:
+            labels.append(label)
+    return labels[:5]
+
+
+_REASON_LABELS = {
+    "TOP_SCORE_SELECTED": "종가배팅 종합점수 1위",
+    "TOP_INTRADAY_SCORE_SELECTED": "단타 종합점수 1위",
+    "TOP_DAILY_CHART_SELECTED": "중기 차트점수 1위",
+    "HIGH_TRADING_VALUE": "거래대금 충분",
+    "VOLUME_EXPANSION": "거래량 증가",
+    "INTRADAY_VOLUME_EXPANSION": "5분봉 거래량 증가",
+    "STRONG_CLOSE": "고가권 마감",
+    "ABOVE_5M_MA20": "5분봉 20이평 위",
+    "MA20_RECLAIM": "5분봉 20이평 재돌파",
+    "ABOVE_VWAP": "VWAP 위",
+    "BREAKOUT_HOLD": "돌파 가격 유지",
+    "FIVE_MIN_HIGHER_LOWS": "5분봉 저점 상승",
+    "CATALYST_CONFIRMED": "당일 촉매 확인",
+    "RSI_HEALTHY_MOMENTUM": "RSI 과열 전 상승",
+    "NO_QUALIFYING_CANDIDATE": "종가배팅 기준 충족 종목 없음",
+    "NO_QUALIFYING_DAY_TRADE_CANDIDATE": "단타 기준 충족 종목 없음",
+    "NO_QUALIFYING_MEDIUM_TERM_CANDIDATE": "중기 기준 충족 종목 없음",
+    "TARGET1_REACHED": "1차 목표가 도달",
+    "TARGET2_REACHED": "2차 목표가 도달",
+    "FIVE_MIN_CONFIRMATION": "5분봉 손절 확인",
+    "FIVE_MIN_STOP_CONFIRMED": "5분봉 손절 확인",
+    "EMERGENCY_INVALIDATION": "비상 손절 조건",
+    "NEXT_SESSION_0910": "다음 거래일 09:10 청산",
+    "MANDATORY_SAME_DAY_EXIT": "단타 당일 의무 청산",
+    "MAXIMUM_HOLDING_PERIOD": "최대 보유기간 도달",
+    "NO_EXIT_TRIGGER": "청산 조건 없음",
+}
+
+
 def _is_event(key: str) -> bool:
-    return key.startswith(("EXIT#", "MEDIUM#", "202"))
+    return key.startswith(("EXIT#", "MEDIUM#", "DAY#", "202"))
 
 
 def _event_type(key: str) -> str:
@@ -296,10 +387,14 @@ def _event_type(key: str) -> str:
         return "청산"
     if key.startswith("MEDIUM#"):
         return "중기"
+    if key.startswith("DAY#"):
+        return "단타"
     return "종가배팅"
 
 
 def _strategy_label(key: str) -> str:
+    if "DAY_TRADE" in key:
+        return "장중 단타"
     if "MEDIUM_TERM" in key:
         return "중기 전략"
     if "NXT" in key:
@@ -325,6 +420,7 @@ def _signed_integer(value: Any) -> int:
 
 def _schedule_rows() -> list[dict[str, str]]:
     return [
+        {"time": "요청 시", "label": "단타 모의 스캔", "strategy": "단타", "state": "manual"},
         {"time": "09:05", "label": "비상 손절·목표 점검", "strategy": "KRX", "state": "configured"},
         {"time": "09:10", "label": "잔여 수량 청산", "strategy": "KRX", "state": "configured"},
         {"time": "14:50", "label": "시장 후보 스캔", "strategy": "KRX", "state": "configured"},
@@ -333,3 +429,26 @@ def _schedule_rows() -> list[dict[str, str]]:
         {"time": "15:35", "label": "중기 포지션 검토", "strategy": "중기", "state": "configured"},
         {"time": "15:40", "label": "중기 신호 생성", "strategy": "중기", "state": "configured"},
     ]
+
+
+def _strategy_mode_rows(
+    configured: dict[str, dict[str, bool]],
+) -> list[dict[str, Any]]:
+    strategies = (
+        ("CLOSING_BET", "종가배팅"),
+        ("MEDIUM_TERM", "중기 전략"),
+        ("DAY_TRADE", "장중 단타"),
+    )
+    rows = []
+    for strategy_id, label in strategies:
+        selected = configured.get(strategy_id, {})
+        rows.append({
+            "strategy": strategy_id,
+            "label": label,
+            "paper_selected": selected.get("paper_selected", True),
+            "live_selected": selected.get("live_selected", False),
+            "live_effective": False,
+            "controls_locked": True,
+            "detail": "인증·키움 통합검증 후 변경 가능",
+        })
+    return rows

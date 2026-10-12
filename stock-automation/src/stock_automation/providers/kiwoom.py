@@ -6,6 +6,7 @@ from typing import Any, Protocol
 
 from ..indicators import Bar, atr, compute_features, rsi, sma
 from ..medium_term import MediumTermQuote, MediumTermSnapshot
+from ..day_trade import DayTradeQuote, DayTradeSnapshot
 from ..models import MarketSnapshot, Quote, Session
 
 KST = timezone(timedelta(hours=9))
@@ -220,6 +221,78 @@ class KiwoomSnapshotBuilder:
                         verified=False,
                     )
         return result
+
+    def build_day_trade_snapshot(
+        self,
+        *,
+        captured_at: datetime,
+        catalysts: dict[str, Catalyst],
+        kospi_change_pct: float,
+        kosdaq_change_pct: float,
+        candidate_limit: int = 30,
+    ) -> DayTradeSnapshot:
+        """Build one on-demand, paper-only intraday snapshot from KRX read APIs."""
+        if not 1 <= candidate_limit <= 60:
+            raise ValueError("day-trade candidate_limit must be between 1 and 60")
+        base = self.build(
+            captured_at=captured_at,
+            session=Session.KRX_1520,
+            catalysts=catalysts,
+            kospi_change_pct=kospi_change_pct,
+            kosdaq_change_pct=kosdaq_change_pct,
+            candidate_limit=candidate_limit,
+            candidate_codes=tuple(catalysts),
+        )
+        quotes = tuple(
+            DayTradeQuote(
+                code=quote.code,
+                name=quote.name,
+                observed_at=quote.observed_at,
+                market=quote.market,
+                price=quote.price,
+                high_price=quote.high_price,
+                low_price=quote.low_price,
+                trading_value=quote.trading_value,
+                day_change_pct=quote.day_change_pct,
+                five_min_ma20=quote.five_min_ma20,
+                five_min_ma20_slope=quote.five_min_ma20_slope,
+                vwap=float(quote.vwap or 0.0),
+                five_min_volume_ratio=float(quote.five_min_volume_ratio or 0.0),
+                support_price=quote.support_price,
+                nxt_eligible=quote.nxt_eligible,
+                catalyst=quote.catalyst,
+                catalyst_verified=quote.catalyst_verified,
+                theme=quote.theme,
+                breakout_holds=bool(quote.breakout_holds),
+                reclaimed_ma20=bool(quote.reclaimed_five_min_ma20),
+                higher_lows=bool(quote.higher_lows),
+                last_fifteen_min_return_pct=float(
+                    quote.last_fifteen_min_return_pct or 0.0
+                ),
+                institution_net=quote.institution_net,
+                program_net=quote.program_net,
+                best_ask=quote.best_ask,
+                warnings=quote.warnings,
+            )
+            for quote in base.quotes
+        )
+        return DayTradeSnapshot(
+            captured_at=base.captured_at,
+            kospi_change_pct=base.kospi_change_pct,
+            kosdaq_change_pct=base.kosdaq_change_pct,
+            quotes=quotes,
+            source="KIWOOM_REST_ON_DEMAND",
+            delayed=base.delayed,
+        )
+
+    def market_change_pct(self, *, market: str, index_code: str) -> float:
+        response = self.client.fetch_page(
+            api_id="ka20001",
+            path="/api/dostk/sect",
+            body={"mrkt_tp": market, "inds_cd": index_code},
+        )
+        self._check_response(response.body)
+        return _number(response.body.get("flu_rt"), signed=True)
 
     def historical_five_minute_bars(
         self,
@@ -544,7 +617,9 @@ class KiwoomSnapshotBuilder:
             vwap=technical.vwap,
             five_min_volume_ratio=technical.five_min_volume_ratio,
             last_hour_return_pct=technical.last_hour_return_pct,
+            last_fifteen_min_return_pct=technical.last_fifteen_min_return_pct,
             higher_lows=technical.higher_lows,
+            reclaimed_five_min_ma20=technical.reclaimed_five_min_ma20,
             breakout_level=technical.breakout_level,
             breakout_holds=technical.breakout_holds,
         )

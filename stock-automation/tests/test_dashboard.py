@@ -57,6 +57,92 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(500_000, result["metrics"]["available_cash"])
         self.assertEqual(-1_200, result["metrics"]["realized_pnl"])
         self.assertEqual(8, result["positions"][0]["remaining_quantity"])
+        self.assertTrue(result["strategy_modes"][0]["paper_selected"])
+        self.assertFalse(result["strategy_modes"][0]["live_selected"])
+
+    def test_paper_and_live_mode_selection_are_independent_not_exclusive(self):
+        items = [{
+            "pk": "CONTROL#STRATEGY_MODE#CLOSING_BET",
+            "paper_enabled": True,
+            "live_enabled": True,
+        }]
+        with patch.dict(os.environ, {}, clear=True):
+            result = dashboard_payload(items, now=datetime(2026, 10, 12, tzinfo=KST))
+        closing = result["strategy_modes"][0]
+        self.assertTrue(closing["paper_selected"])
+        self.assertTrue(closing["live_selected"])
+        self.assertFalse(closing["live_effective"])
+        self.assertTrue(closing["controls_locked"])
+
+    def test_daily_equity_history_is_sorted_and_separated_by_mode(self):
+        items = [{
+            "pk": "EQUITY#PAPER#2026-10-02",
+            "mode": "PAPER",
+            "recorded_at": "2026-10-02T15:30:00+09:00",
+            "total_assets": 601_000,
+        }, {
+            "pk": "EQUITY#PAPER#2026-10-01",
+            "mode": "PAPER",
+            "recorded_at": "2026-10-01T15:30:00+09:00",
+            "total_assets": 600_000,
+        }, {
+            "pk": "EQUITY#LIVE#2026-10-01",
+            "mode": "LIVE",
+            "recorded_at": "2026-10-01T15:30:00+09:00",
+            "total_assets": 500_000,
+        }]
+        with patch.dict(os.environ, {}, clear=True):
+            result = dashboard_payload(items, now=datetime(2026, 10, 12, tzinfo=KST))
+        self.assertEqual(
+            [600_000, 601_000],
+            [row["total_assets"] for row in result["equity_history"]["PAPER"]],
+        )
+        self.assertEqual(500_000, result["equity_history"]["LIVE"][0]["total_assets"])
+
+    def test_trade_reasons_are_extracted_and_translated(self):
+        payload = {
+            "decision": "BUY",
+            "position": {"code": "123456", "name": "이유테스트"},
+            "reason_codes": ["TOP_SCORE_SELECTED", "PAPER_EXECUTION_ONLY"],
+            "candidates": [{
+                "code": "123456",
+                "reasons": ["HIGH_TRADING_VALUE", "ABOVE_5M_MA20", "CATALYST_CONFIRMED"],
+            }],
+        }
+        with patch.dict(os.environ, {}, clear=True):
+            result = dashboard_payload([{
+                "pk": "2026-10-12:KRX_1520:CLOSING_BET",
+                "decided_at": "2026-10-12T15:20:00+09:00",
+                "payload_json": json.dumps(payload),
+            }], now=datetime(2026, 10, 12, 16, 0, tzinfo=KST))
+        reasons = result["recent_events"][0]["reasons"]
+        self.assertEqual(
+            ["종가배팅 종합점수 1위", "거래대금 충분", "5분봉 20이평 위", "당일 촉매 확인"],
+            reasons,
+        )
+
+    def test_labels_day_trade_wallet_position_and_event_separately(self):
+        items = [{
+            "pk": "WALLET#DAY_TRADE",
+            "available_cash": 600_000,
+        }, {
+            "pk": "OPEN#DAY_TRADE",
+            "remaining_quantity": 3,
+            "payload_json": json.dumps({
+                "code": "123456", "name": "단타", "quantity": 3,
+                "entry_price": 20_000,
+            }),
+        }, {
+            "pk": "DAY#2026-10-12T1030#DAY_TRADE_SCAN",
+            "decision": "BUY",
+            "decided_at": "2026-10-12T10:30:00+09:00",
+            "payload_json": json.dumps({"name": "단타", "entry_price": 20_000}),
+        }]
+        with patch.dict(os.environ, {}, clear=True):
+            result = dashboard_payload(items, now=datetime(2026, 10, 12, 11, 0, tzinfo=KST))
+        self.assertEqual("장중 단타", result["wallets"][0]["strategy"])
+        self.assertEqual("장중 단타", result["positions"][0]["strategy"])
+        self.assertEqual("단타", result["recent_events"][0]["type"])
 
     def test_detects_live_environment_flag_as_a_warning(self):
         with patch.dict(os.environ, {"LIVE_ORDER_ENABLED": "1"}, clear=True):

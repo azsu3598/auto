@@ -33,7 +33,7 @@ aws --version
 프로그램은 다음 구조를 전제로 합니다.
 
 ```text
-D:\Test\
+C:\Test\
 ├─ stock-automation\
 ├─ Kiwoom-REST-API\
 ├─ AWS_자동매매_실행가이드.md
@@ -46,8 +46,8 @@ D:\Test\
 키움 공식 라이브러리는 새 PC에서 다시 받습니다.
 
 ```powershell
-New-Item -ItemType Directory -Force D:\Test
-cd D:\Test
+New-Item -ItemType Directory -Force C:\Test
+cd C:\Test
 git clone https://github.com/Kiwoom-Securities/Kiwoom-REST-API.git
 git -C Kiwoom-REST-API checkout 234560d213acd8871ae344b5481aecd2f30287fa
 ```
@@ -58,7 +58,7 @@ git -C Kiwoom-REST-API checkout 234560d213acd8871ae344b5481aecd2f30287fa
 ## 3. 로컬 Python 환경 구성
 
 ```powershell
-cd D:\Test
+cd C:\Test
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
@@ -76,7 +76,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 ## 4. 이전 직후 검증
 
 ```powershell
-cd D:\Test\stock-automation
+cd C:\Test\stock-automation
 $env:PYTHONPATH = "src"
 python -m unittest discover -s tests -v
 python -m compileall -q src tests
@@ -110,7 +110,7 @@ Manager로 주입하며, 로컬 셸 기록에 키를 남기지 않는 것이 원
 저장된 예제 스냅샷으로 주문 없이 분석 엔진을 확인합니다.
 
 ```powershell
-cd D:\Test\stock-automation
+cd C:\Test\stock-automation
 New-Item -ItemType Directory -Force runtime\reports
 stock-automation analyze `
   --snapshot examples\krx_snapshot.json `
@@ -124,10 +124,10 @@ stock-automation analyze `
 
 ## 7. Docker 이미지 확인
 
-Docker 빌드는 반드시 `D:\Test`를 컨텍스트로 사용합니다.
+Docker 빌드는 반드시 `C:\Test`를 컨텍스트로 사용합니다.
 
 ```powershell
-cd D:\Test
+cd C:\Test
 docker build -f stock-automation\Dockerfile -t stock-automation:dev .
 docker image inspect stock-automation:dev
 ```
@@ -196,7 +196,7 @@ OpenDART Secret:
 ### 8.4 ECR 생성과 이미지 업로드
 
 ```powershell
-cd D:\Test
+cd C:\Test
 $Repo = "stock-automation"
 $Registry = "$AccountId.dkr.ecr.$Region.amazonaws.com"
 $ImageUri = "${Registry}/${Repo}:latest"
@@ -267,7 +267,7 @@ if ($LASTEXITCODE -ne 0) { throw "CloudFormation 배포 실패" }
 {"year":2026,"holidays":["2026-<MM>-<DD>","2026-<MM>-<DD>"]}
 ```
 
-파일명을 `D:\Test\calendar-current.json`으로 저장한 후 실행합니다.
+파일명을 `C:\Test\calendar-current.json`으로 저장한 후 실행합니다.
 
 ```powershell
 $Bucket = aws cloudformation describe-stacks `
@@ -276,14 +276,14 @@ $Bucket = aws cloudformation describe-stacks `
   --query "Stacks[0].Outputs[?OutputKey=='ArtifactBucketName'].OutputValue" `
   --output text
 
-aws s3 cp D:\Test\calendar-current.json `
+aws s3 cp C:\Test\calendar-current.json `
   "s3://$Bucket/config/calendar/current.json" `
   --region $Region
 ```
 
 ### 8.7 AWS 온라인 진단 실행
 
-`D:\Test\doctor-overrides.json` 파일을 만듭니다.
+`C:\Test\doctor-overrides.json` 파일을 만듭니다.
 
 ```json
 {"containerOverrides":[{"name":"stock-automation","command":["doctor","--aws","--online"]}]}
@@ -416,7 +416,7 @@ stock-automation live-kill-switch
 
 ## 이전 완료 체크리스트
 
-- [ ] 두 프로젝트가 `D:\Test` 아래에 나란히 있음
+- [ ] 두 프로젝트가 `C:\Test` 아래에 나란히 있음
 - [ ] 키움 저장소가 지정 커밋을 사용함
 - [ ] Python 전체 테스트 통과
 - [ ] Docker 이미지 빌드 성공

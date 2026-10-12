@@ -45,6 +45,8 @@ def state(**changes):
         "open_positions": 0,
         "owned_quantity": 0,
         "kill_switch_active": False,
+        "observed_account_fingerprint": "fingerprint-main",
+        "holdings_reconciled": True,
     }
     values.update(changes)
     return AccountRiskState(**values)
@@ -57,6 +59,15 @@ def approval(order):
         approved_at=NOW,
         approved_by="USER",
     )
+
+
+def live_policy(**changes):
+    values = {
+        "live_order_enabled": True,
+        "expected_account_fingerprint": "fingerprint-main",
+    }
+    values.update(changes)
+    return LiveOrderPolicy(**values)
 
 
 class OrderSafetyTests(unittest.TestCase):
@@ -78,7 +89,7 @@ class OrderSafetyTests(unittest.TestCase):
             order,
             approval=None,
             state=state(),
-            policy=LiveOrderPolicy(live_order_enabled=True),
+            policy=live_policy(),
             checked_at=NOW,
         )
         self.assertIn("USER_APPROVAL_REQUIRED", result.reason_codes)
@@ -90,7 +101,7 @@ class OrderSafetyTests(unittest.TestCase):
             changed,
             approval=approval(original),
             state=state(),
-            policy=LiveOrderPolicy(live_order_enabled=True),
+            policy=live_policy(),
             checked_at=NOW,
         )
         self.assertIn("APPROVAL_INTENT_MISMATCH", result.reason_codes)
@@ -102,7 +113,7 @@ class OrderSafetyTests(unittest.TestCase):
             order,
             approval=approval(order),
             state=state(),
-            policy=LiveOrderPolicy(live_order_enabled=True),
+            policy=live_policy(),
             checked_at=NOW + timedelta(seconds=10),
         )
         self.assertTrue(result.authorized)
@@ -119,7 +130,7 @@ class OrderSafetyTests(unittest.TestCase):
             order,
             approval=approval(order),
             state=risky,
-            policy=LiveOrderPolicy(live_order_enabled=True),
+            policy=live_policy(),
             checked_at=NOW + timedelta(seconds=61),
         )
         self.assertTrue({
@@ -135,10 +146,47 @@ class OrderSafetyTests(unittest.TestCase):
             order,
             approval=approval(order),
             state=state(owned_quantity=10),
-            policy=LiveOrderPolicy(live_order_enabled=True),
+            policy=live_policy(),
             checked_at=NOW,
         )
-        self.assertIn("SELL_QUANTITY_EXCEEDS_HOLDING", result.reason_codes)
+        self.assertIn("SELL_QUANTITY_EXCEEDS_PROGRAM_HOLDING", result.reason_codes)
+
+    def test_account_fingerprint_and_reconciliation_are_mandatory(self):
+        order = intent()
+        result = authorize_live_order(
+            order,
+            approval=approval(order),
+            state=state(observed_account_fingerprint="wrong", holdings_reconciled=False),
+            policy=live_policy(),
+            checked_at=NOW,
+        )
+        self.assertIn("ACCOUNT_FINGERPRINT_MISMATCH", result.reason_codes)
+        self.assertIn("HOLDINGS_NOT_RECONCILED", result.reason_codes)
+
+    def test_sell_is_limited_to_program_quantity_above_protected_baseline(self):
+        order = intent(side=OrderSide.SELL, quantity=6)
+        safe = state(
+            owned_quantity=18,
+            protected_baseline_quantity=10,
+            program_owned_quantity=8,
+        )
+        result = authorize_live_order(
+            order,
+            approval=approval(order),
+            state=safe,
+            policy=live_policy(),
+            checked_at=NOW,
+        )
+        self.assertTrue(result.authorized)
+
+        reduced = authorize_live_order(
+            intent(side=OrderSide.SELL, quantity=9),
+            approval=approval(intent(side=OrderSide.SELL, quantity=9)),
+            state=safe,
+            policy=live_policy(),
+            checked_at=NOW,
+        )
+        self.assertIn("SELL_QUANTITY_EXCEEDS_PROGRAM_HOLDING", reduced.reason_codes)
 
 
 if __name__ == "__main__":

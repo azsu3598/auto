@@ -29,7 +29,9 @@ class TechnicalFeatures:
     five_min_ma20_slope: float
     five_min_volume_ratio: float
     last_hour_return_pct: float
+    last_fifteen_min_return_pct: float
     higher_lows: bool
+    reclaimed_five_min_ma20: bool
     breakout_level: float | None
     breakout_holds: bool
 
@@ -113,6 +115,14 @@ def compute_features(daily_bars: Sequence[Bar], five_minute_bars: Sequence[Bar])
     volume_ratio = recent_volume / baseline_volume if baseline_volume > 0 else 0.0
     hour_start = intraday[-13].close if len(intraday) >= 13 else intraday[0].close
     last_hour_return = ((intraday[-1].close / hour_start) - 1.0) * 100 if hour_start > 0 else 0.0
+    fifteen_start = intraday[-4].close
+    last_fifteen_return = (
+        ((intraday[-1].close / fifteen_start) - 1.0) * 100
+        if fifteen_start > 0 else 0.0
+    )
+    reclaimed_five_ma20 = bool(
+        intraday[-2].close < prior_five_ma20 and intraday[-1].close >= five_ma20
+    )
 
     return TechnicalFeatures(
         ma5=ma5,
@@ -127,7 +137,9 @@ def compute_features(daily_bars: Sequence[Bar], five_minute_bars: Sequence[Bar])
         five_min_ma20_slope=five_ma20 - prior_five_ma20,
         five_min_volume_ratio=volume_ratio,
         last_hour_return_pct=last_hour_return,
+        last_fifteen_min_return_pct=last_fifteen_return,
         higher_lows=higher_lows,
+        reclaimed_five_min_ma20=reclaimed_five_ma20,
         breakout_level=breakout_level,
         breakout_holds=breakout_holds,
     )

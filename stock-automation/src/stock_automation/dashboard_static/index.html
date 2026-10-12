@@ -66,6 +66,21 @@
         <article class="metric-card"><p>열린 포지션</p><strong id="open-positions">-</strong><small id="pending-alerts">알림 대기 -</small></article>
       </section>
 
+      <section class="panel equity-panel" aria-label="일별 총자산 추이">
+        <div class="section-title equity-title">
+          <div><p class="label">DAILY TOTAL ASSETS</p><h2>일별 총금액 추이</h2></div>
+          <div class="equity-actions">
+            <button class="equity-mode active" data-equity-mode="PAPER" type="button">모의</button>
+            <button class="equity-mode" data-equity-mode="LIVE" type="button">실거래</button>
+          </div>
+        </div>
+        <div class="equity-summary">
+          <div><span>현재 총금액</span><strong id="equity-current">-</strong></div>
+          <div><span>기간 변화</span><strong id="equity-change">-</strong></div>
+        </div>
+        <div id="equity-chart" class="equity-chart"><div class="skeleton tall"></div></div>
+      </section>
+
       <section id="warnings-section" class="warning-strip hidden" aria-live="polite">
         <span class="warning-icon">!</span><div id="warnings"></div>
       </section>
@@ -87,14 +102,20 @@
             </div>
             <div class="table-wrap">
               <table>
-                <thead><tr><th>시각</th><th>구분</th><th>종목</th><th>결정</th><th>가격</th><th>손익</th></tr></thead>
-                <tbody id="events"><tr><td colspan="6"><div class="skeleton"></div></td></tr></tbody>
+                <thead><tr><th>시각</th><th>구분</th><th>종목</th><th>결정</th><th>가격</th><th>손익</th><th>매매 이유</th></tr></thead>
+                <tbody id="events"><tr><td colspan="7"><div class="skeleton"></div></td></tr></tbody>
               </table>
             </div>
           </article>
         </div>
 
         <aside class="side-column">
+          <article class="panel section-panel">
+            <div class="section-title"><div><p class="label">EXECUTION MODES</p><h2>전략별 실행 모드</h2></div></div>
+            <p class="mode-help">모의와 실거래는 독립 선택입니다. 현재는 실거래와 설정 변경이 잠겨 있습니다.</p>
+            <div id="strategy-modes" class="strategy-mode-list"><div class="skeleton"></div></div>
+          </article>
+
           <article class="panel section-panel">
             <div class="section-title"><div><p class="label">SAFETY MATRIX</p><h2>안전장치</h2></div></div>
             <div id="safety" class="safety-list"><div class="skeleton"></div></div>

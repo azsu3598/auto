@@ -2,8 +2,21 @@
 
 > 목적: 회사 PC의 Codex와 집 PC의 Codex가 같은 프로젝트를 번갈아 작업할 때 변경
 > 내용, 검증 결과, 남은 위험과 다음 작업을 정확하게 전달한다.  
-> 프로젝트 기준 경로: `D:/Test/stock-automation`  
+> PC-D 프로젝트 경로: `D:/Test/stock-automation`
+> PC-C 프로젝트 경로: `C:/Test/stock-automation`
 > 최초 작성일: 2026-10-12 KST
+
+## 0. PC alias와 경로
+
+| alias | 구분 | 워크스페이스 | 주요 역할 |
+|---|---|---|---|
+| `PC-D` | 현재 PC | `D:/Test` | 코드·문서·설계·인수인계 |
+| `PC-C` | 타 PC | `C:/Test` | 실행·Docker·키움 모의·AWS |
+
+모든 새 `세션 전달 기록` 제목에 작업한 PC alias를 반드시 기록한다.
+경로는 문서의 PC별 경로를 따르고, 코드에 `C:` 또는 `D:` 절대경로를
+하드코딩하지 않는다. alias 도입 전 기록의 `현재/회사 PC`는 `PC-D`,
+`다른/집 PC`는 `PC-C`로 해석한다.
 
 ## 1. 사용 규칙
 
@@ -12,6 +25,9 @@
 
 작업을 마칠 때는 아래 `세션 전달 기록` 맨 위에 새로운 기록을 추가한다. 기존 기록은
 삭제하거나 고치지 않는다. 잘못된 기록이 있으면 새 기록에서 정정한다.
+
+**사용자 상시 요청:** 코드·문서 작업이 끝난 모든 세션은 사용자의 추가 요청을
+기다리지 말고 이 문서의 `세션 전달 기록` 맨 위에 결과를 기록한다.
 
 반드시 기록할 내용:
 
@@ -67,13 +83,13 @@
 
 새 Codex는 다음 문서를 우선순위대로 확인한다.
 
-1. `D:/Test/AGENTS.md`
-2. `D:/Test/stock-automation/README.md`
+1. `<WORKSPACE>/AGENTS.md`
+2. `<WORKSPACE>/stock-automation/README.md`
 3. 이 문서 `Codex_세션간_공동_인수인계.md`
 4. `주식_자동매매_사용자_준비_가이드.md`
 5. `실거래_개발_후속_Codex_프롬프트.md`
 6. `집에_가져갈_주식자동매매_파일목록.md`
-7. `D:/Test/docs/프로그램 설계/`의 설계 문서
+7. `<WORKSPACE>/docs/프로그램 설계/`의 설계 문서
 
 내용이 충돌하면 실제 코드와 `AGENTS.md`를 기준으로 판단하고 충돌 사실을 사용자에게
 알린다.
@@ -81,7 +97,7 @@
 ## 4. 프로젝트 폴더 구조
 
 ```text
-D:/Test/
+<WORKSPACE>/
 ├─ AGENTS.md
 ├─ .dockerignore
 ├─ stock-automation/
@@ -89,11 +105,11 @@ D:/Test/
 ```
 
 `stock-automation`과 `Kiwoom-REST-API`는 형제 폴더여야 한다. Docker 빌드는
-`D:/Test`를 컨텍스트로 사용한다.
+PC-D는 `D:/Test`, PC-C는 `C:/Test`를 Docker 빌드 컨텍스트로 사용한다.
 
 ## 4-1. PC별 역할
 
-### 현재 PC
+### PC-D(현재 PC)
 
 - 코드 검토와 설계 논의
 - Markdown 문서와 인수인계 관리
@@ -104,7 +120,7 @@ D:/Test/
 현재 PC는 프로그램 실행 환경으로 사용하지 않는다. 이 PC에서 테스트·Docker·AWS
 명령을 실행할 수 없는 경우 결과를 추측하지 않고 `미실행`으로 기록한다.
 
-### 다른 PC
+### PC-C(타 PC)
 
 - Python 전체 테스트의 기준 환경
 - Docker 이미지 빌드와 로컬 UI 실행
@@ -138,15 +154,25 @@ D:/Test/
 - 5분봉 확인 손절
 - S3·DynamoDB·텔레그램을 사용하는 AWS 모의 구조
 - 중기전략과 종가배팅 자금·원장 분리
+- 종목별 코스피·코스닥 약세 감점·그룹 급락 진입 차단
+- 키움 당일 기관·프로그램 수급 연동(외국인 미사용)
+- 종가배팅·중기와 분리된 `DAY_TRADE` 단타 기본 모의엔진
 - 수동 실주문 CLI 골격
 - 주문내용 해시·승인 유효시간·중복 제출 방지 골격
+- 키움 실계좌 지문 고정과 기존 키움 보유수량의 1회성 보호 기준선 골격
+- 키움 주문번호별 부분체결·완전체결·취소·거부 상태 분류
+- 누적 체결량 증가분만 원자적으로 반영하는 프로그램 보유수량 원장
+- 키움 읽기 API를 사용하는 단타 단발 모의 스캔과 대시보드 전략 구분 표시
+- 전략별 모의·실거래 독립 다중선택 UI와 DynamoDB 설정 형식(현재 변경 잠금)
+- 모의·실거래를 분리한 일별 총자산 추이 그래프와 `EQUITY#<MODE>#<날짜>` 형식
+- 최근 매수·매도·NO_TRADE의 판단 근거를 한글로 표시하는 UI
 - `SABU Trading Console` PC·모바일 읽기 전용 UI
 - UI의 실거래 준비상태 `안전조건 미충족` 잠금
 
 ### 마지막으로 확인된 테스트
 
 ```text
-전체 단위 테스트: 105개 통과
+전체 단위 테스트: 124개 통과
 Python compileall: 통과
 JavaScript 문법검사: 통과
 PC·모바일 브라우저 렌더링: 확인
@@ -155,7 +181,7 @@ PC·모바일 브라우저 렌더링: 확인
 테스트 명령:
 
 ```powershell
-cd D:\Test\stock-automation
+Set-Location <PC별 stock-automation 경로>
 $env:PYTHONPATH = "src"
 python -m unittest discover -s tests -v
 python -m compileall -q src tests
@@ -163,10 +189,8 @@ python -m compileall -q src tests
 
 ### 아직 완료되지 않은 항목
 
-- 기존 키움 보유종목 보호 기준선
-- 프로그램 실제 체결수량만 매도하는 원장
-- 부분체결·미체결·취소·거부 완전 처리
-- 키움 주문·체결·잔고 대사
+- 키움 주문 취소 요청 API와 장시간 미체결 자동 처리
+- 키움 주문·체결·잔고 대사의 실제 모의/실계좌 통합검증
 - 재시작 후 진행 중 주문 복구
 - 계좌 지문 고정
 - 불일치 자동 비상정지
@@ -175,7 +199,10 @@ python -m compileall -q src tests
 - AWS 모의환경 실제 배포와 5거래일 통합검증
 - Cognito·HTTPS가 적용된 대시보드 인터넷 배포
 - 대시보드의 실제 AWS 예약 상태와 CloudWatch 오류 연동
-- 신뢰 가능한 당일 기관·프로그램 수급 연결
+- Cognito 인증 기반 실행모드 설정 저장 API와 실제 런타임 모드 라우팅
+- AWS 작업 종료 시 일별 총자산 스냅샷을 자동 생성하는 집계 작업
+- 단타 JSONL 결과의 DynamoDB 저장과 대시보드 실제 데이터 연결
+- 단타 AWS 실행은 현재 방침상 상시감시·반복 스케줄 없이 단발 실행만 유지
 
 ## 6. 우선 작업 순서
 
@@ -226,8 +253,10 @@ python -m compileall -q src tests
 새 기록을 이 섹션 바로 아래, 가장 위에 추가한다.
 
 ```markdown
-### YYYY-MM-DD HH:MM KST — [보낸 PC/환경] → [받을 PC/환경]
+### YYYY-MM-DD HH:MM KST — [작업 PC alias] → [다음 PC alias]
 
+- 작업 PC alias: `PC-D` 또는 `PC-C`
+- 작업 경로:
 - 요청 목표:
 - 완료한 작업:
 - 변경 파일:
@@ -244,6 +273,233 @@ python -m compileall -q src tests
 ```
 
 ## 10. 세션 전달 기록
+
+### 2026-10-12 14:25 KST — PC-D → PC-C
+
+- 작업 PC alias: `PC-D`
+- 작업 경로: `D:/Test`
+- 요청 목표: 대시보드에서 매매를 진행하거나 진행하지 않은 이유 확인
+- 완료한 작업:
+  - 최근 실행 이력에 `매매 이유` 열 추가
+  - 결정의 `reason_codes`와 선택 후보의 기술적 근거를 함께 추출
+  - 종가배팅·단타·중기·익절·손절·예약청산 주요 코드를 한글 설명으로 변환
+  - 이유는 최대 5개까지 태그로 표시하고 없는 이유는 추정하지 않고 `기록 없음` 처리
+  - 샘플 매수·NO_TRADE·09:10 청산에 이유 데이터 추가
+  - 로컬 UI 서버를 변경 코드로 재시작
+- 변경 파일:
+  - `stock-automation/src/stock_automation/dashboard.py`
+  - `stock-automation/src/stock_automation/dashboard_static/index.html`
+  - `stock-automation/src/stock_automation/dashboard_static/app.js`
+  - `stock-automation/src/stock_automation/dashboard_static/styles.css`
+  - `stock-automation/examples/dashboard_fixture.json`
+  - `stock-automation/tests/test_dashboard.py`
+  - `stock-automation/README.md`
+  - `Codex_세션간_공동_인수인계.md`
+- 추가·변경 테스트: 결정 이유와 선택 후보 이유 병합, 모의 전용 내부 코드 제외, 한글 변환 검증
+- 전체 테스트 결과: `124개 통과`
+- 수동 검증 결과: Python compileall, JavaScript 문법검사, fixture JSON 검사, API에서 BUY·NO_TRADE·청산 이유 확인, `git diff --check` 통과
+- 실패·미확인 사항: 과거 이벤트에 `reason_codes`가 없으면 이유를 복원하지 않음
+- 남은 위험: 실제 AWS 이벤트 저장 시 모든 진입·청산 경로가 이유 코드를 빠뜨리지 않는지 통합검증 필요
+- 실거래 상태: `비활성화 / 읽기 전용 UI / 실제 주문 없음`
+- 다음 Codex의 첫 작업: PC-C AWS 모의 통합검증에서 실제 DynamoDB 이벤트의 매매 이유 표시 확인
+- 사용자에게 확인받을 사항: 이유 태그 수와 문구가 모바일에서 읽기 편한지 확인
+- 전달 파일 버전 또는 복사시각: Git 커밋·push 전 로컬 변경 상태
+
+### 2026-10-12 14:22 KST — PC-D → PC-C
+
+- 작업 PC alias: `PC-D`
+- 작업 경로: `D:/Test`
+- 요청 목표: 대시보드에서 날짜별 총금액 변화 추이를 간단한 그래프로 확인
+- 완료한 작업:
+  - 하루 한 점의 총자산을 표시하는 반응형 선그래프 추가
+  - 최신 총금액과 조회기간 증감액 표시
+  - 모의와 실거래 그래프 전환 버튼 추가, 두 이력은 합산하지 않음
+  - DynamoDB `EQUITY#<PAPER|LIVE>#<날짜>` 항목을 날짜순으로 읽는 데이터 계약 추가
+  - 샘플 모의 총자산 7일 이력 추가
+  - 기존 로컬 UI 서버를 새 코드로 재시작
+- 변경 파일:
+  - `stock-automation/src/stock_automation/dashboard.py`
+  - `stock-automation/src/stock_automation/dashboard_static/index.html`
+  - `stock-automation/src/stock_automation/dashboard_static/app.js`
+  - `stock-automation/src/stock_automation/dashboard_static/styles.css`
+  - `stock-automation/examples/dashboard_fixture.json`
+  - `stock-automation/tests/test_dashboard.py`
+  - `stock-automation/README.md`
+  - `Codex_세션간_공동_인수인계.md`
+- 추가·변경 테스트: 일별 자산 이력 날짜 정렬과 PAPER/LIVE 분리 검증
+- 전체 테스트 결과: `123개 통과`
+- 수동 검증 결과: Python compileall, JavaScript 문법검사, fixture JSON 검사, API에서 PAPER 7일 이력 확인, `git diff --check` 통과
+- 실패·미확인 사항: AWS 운영 원장에서 일별 평가금액을 자동 집계해 `EQUITY#` 항목을 생성하는 작업은 아직 미구현
+- 남은 위험: 실제 총자산 그래프는 보유종목의 검증된 현재가로 평가금액을 계산하는 일별 집계가 연결돼야 정확함
+- 실거래 상태: `비활성화 / 읽기 전용 UI / 실제 주문 없음`
+- 다음 Codex의 첫 작업: PC-C에서 UI를 확인한 뒤 AWS 모의작업 종료 시 일별 총자산 스냅샷 저장을 추가
+- 사용자에게 확인받을 사항: 그래프의 색상·위치·표시기간을 보고 원하는 UI 조정 여부 확인
+- 전달 파일 버전 또는 복사시각: Git 커밋·push 전 로컬 변경 상태
+
+### 2026-10-12 14:19 KST — PC-D → PC-C
+
+- 작업 PC alias: `PC-D`
+- 작업 경로: `D:/Test`
+- 요청 목표: 추후 UI에서 전략별로 모의매매와 실거래를 배타적 선택이 아닌 동시 선택 가능하게 준비
+- 완료한 작업:
+  - 종가배팅·중기·단타별로 `모의`와 `실거래`를 독립 체크하는 UI 추가
+  - 두 항목이 동시에 선택된 설정을 그대로 표현하는 대시보드 데이터 모델 추가
+  - 향후 DynamoDB 키 `CONTROL#STRATEGY_MODE#<전략>`에서 선택 상태를 읽는 형식 추가
+  - 인증과 키움 통합검증 전에는 모든 변경 컨트롤과 실거래 효력을 잠금
+  - 모의·실거래 동시 실행 시 원장·자금·포지션·성과를 분리한다는 운영 원칙 문서화
+- 변경 파일:
+  - `stock-automation/src/stock_automation/dashboard.py`
+  - `stock-automation/src/stock_automation/dashboard_static/index.html`
+  - `stock-automation/src/stock_automation/dashboard_static/app.js`
+  - `stock-automation/src/stock_automation/dashboard_static/styles.css`
+  - `stock-automation/tests/test_dashboard.py`
+  - `stock-automation/README.md`
+  - `Codex_세션간_공동_인수인계.md`
+- 추가·변경 테스트: 모의·실거래 동시 선택이 배타적으로 변환되지 않고 보존되며 실거래 효력은 잠기는지 검증
+- 전체 테스트 결과: `122개 통과`
+- 수동 검증 결과: Python compileall, JavaScript 문법검사, fixture JSON 검사, `git diff --check` 통과
+- 실패·미확인 사항: UI에서 설정을 실제 저장하는 인증 API와 실행 엔진의 모드 라우팅은 아직 미구현
+- 남은 위험: 인증 없는 웹 요청으로 실거래 설정을 변경할 수 없도록 Cognito·CSRF 방어·감사로그가 필요
+- 실거래 상태: `비활성화 / UI 선택 변경 잠금 / 실제 주문 없음`
+- 다음 Codex의 첫 작업: PC-C 통합검증 후 Cognito 인증이 적용된 전략 모드 설정 API를 별도 실거래 스택에 설계
+- 사용자에게 확인받을 사항: 없음(모의와 실거래의 전략별 동시 선택 요구 확정)
+- 전달 파일 버전 또는 복사시각: Git 커밋·push 전 로컬 변경 상태
+
+### 2026-10-12 14:16 KST — PC-D → PC-C
+
+- 작업 PC alias: `PC-D`
+- 작업 경로: `D:/Test`
+- 요청 목표: 키움 실거래 안전 기능을 계속 구현하고 이전에 시작한 단타 기능도 보완
+- 완료한 작업:
+  - 키움 주문상태에 `PARTIALLY_FILLED`, `FILLED`, `CANCELLED`, `REJECTED` 추가
+  - 키움 누적 체결수량에서 이전 반영량을 뺀 증가분만 프로그램 포지션에 반영
+  - 주문 상태와 프로그램 보유수량을 DynamoDB 트랜잭션으로 함께 변경
+  - 동일 체결 조회 반복과 동시 실행 시 수량 중복 증가 방지
+  - 프로그램 보유수량보다 많은 매도 및 보호 기준선을 침범하는 매도 차단
+  - 키움 총보유수량은 원장 대사, 주문가능수량은 실제 매도 한도로 분리
+  - 주문번호 미조회 시 비상정지를 켜고 수동 대사를 요구하는 `live-reconcile` 추가
+  - 키움 KRX 읽기 API에서 단타 전용 스냅샷을 만드는 변환기 추가
+  - 5분봉 20이평 재돌파와 최근 15분 수익률 계산 추가
+  - 당일 검증 촉매 종목만 조회하는 `daytrade-kiwoom-scan` 단발 모의 명령 추가
+  - 대시보드에서 단타 지갑·포지션·이벤트·단발 실행표를 별도 표시
+  - 토스 연동은 추가하지 않았으며 키움증권만 사용
+- 변경 파일:
+  - `stock-automation/src/stock_automation/live_execution.py`
+  - `stock-automation/src/stock_automation/live_broker.py`
+  - `stock-automation/src/stock_automation/live_cli.py`
+  - `stock-automation/src/stock_automation/order_safety.py`
+  - `stock-automation/src/stock_automation/providers/kiwoom.py`
+  - `stock-automation/src/stock_automation/indicators.py`
+  - `stock-automation/src/stock_automation/models.py`
+  - `stock-automation/src/stock_automation/cli.py`
+  - `stock-automation/src/stock_automation/dashboard.py`
+  - `stock-automation/examples/dashboard_fixture.json`
+  - `stock-automation/README.md`
+  - 관련 테스트 4개
+  - `Codex_세션간_공동_인수인계.md`
+- 추가·변경 테스트: 체결 증가분 멱등 반영, 키움 단타 스냅샷, 시장지수 조회, 단타 UI 분리, 총보유·주문가능수량 분리
+- 전체 테스트 결과: `121개 통과`
+- 수동 검증 결과: Python compileall, JavaScript 문법검사, 대시보드 fixture JSON 검사, 새 CLI 2개 등록, `git diff --check` 통과
+- 실패·미확인 사항: 키움 실제 모의 API와 AWS DynamoDB 트랜잭션은 PC-C에서 통합검증 필요, 단타 결과는 아직 로컬 JSONL이며 AWS 대시보드에 자동 저장되지 않음
+- 남은 위험: 미체결 주문 자동 취소, 재시작 복구, 주기적 체결 대사, 불일치 자동 비상정지의 PC-C 통합 흐름이 남음
+- 실거래 상태: `비활성화 / 비상정지 기본 ON / 실제 주문 없음 / UI 전환 불가`
+- 다음 Codex의 첫 작업: PC-C에서 121개 테스트를 재실행한 뒤 키움 모의 주문 응답과 DynamoDB Local로 부분체결 원장을 통합검증
+- 사용자에게 확인받을 사항: 없음(단타는 단발 모의운용, 토스 미연동으로 유지)
+- 전달 파일 버전 또는 복사시각: Git 커밋·push 전 로컬 변경 상태
+
+### 2026-10-12 14:10 KST — PC-D → PC-C
+
+- 작업 PC alias: `PC-D`
+- 작업 경로: `D:/Test`
+- 요청 목표: 이전 프로그램 제작을 계속하고 자동매매 증권사를 키움증권으로 한정
+- 완료한 작업:
+  - 토스 계좌·보유종목을 프로그램 범위에서 제외하고 키움 REST 계좌만 사용하도록 기준 확정
+  - 계좌번호 원문을 저장하지 않는 SHA-256 계좌 지문 검증 추가
+  - 키움 기존 보유종목 수량을 한 번만 기록하고 덮어쓰지 못하는 보호 기준선 추가
+  - 보호 기준선은 비상정지 ON 상태와 명시적 확인 문구가 있어야 생성되도록 제한
+  - 매도 가능 수량을 프로그램 확인 체결수량과 보호 기준선 초과수량 중 작은 값으로 제한
+  - 계좌 지문·잔고 대사가 없으면 주문 승인을 실패 처리
+  - 아직 체결 전용 원장이 없으므로 `holdings_reconciled=False`로 고정해 모든 실주문을 계속 차단
+- 변경 파일:
+  - `stock-automation/src/stock_automation/order_safety.py`
+  - `stock-automation/src/stock_automation/live_execution.py`
+  - `stock-automation/src/stock_automation/live_broker.py`
+  - `stock-automation/src/stock_automation/live_cli.py`
+  - `stock-automation/src/stock_automation/cli.py`
+  - `stock-automation/tests/test_order_safety.py`
+  - `stock-automation/tests/test_live_execution.py`
+  - `stock-automation/tests/test_live_broker.py`
+  - `stock-automation/README.md`
+  - `Codex_세션간_공동_인수인계.md`
+- 추가·변경 테스트: 계좌 지문 불일치 차단, 잔고 미대사 차단, 프로그램 수량 외 매도 차단, 보호 기준선 1회 저장·복원, 키움 보유종목 조회
+- 전체 테스트 결과: `118개 통과`
+- 수동 검증 결과: `python3 -m compileall -q src tests`, `git diff --check` 통과
+- 실패·미확인 사항: 키움 실제 모의 API·AWS에서는 미검증, 체결수량 전용 원장과 부분체결 상태 머신은 미구현
+- 남은 위험: 체결 원장이 연결되기 전에는 실주문을 안전하게 허용할 수 없으며 현재 코드도 이를 강제로 차단함
+- 실거래 상태: `비활성화 / 비상정지 ON / 실제 주문 없음 / 잔고대사 잠금 ON`
+- 다음 Codex의 첫 작업: 키움 주문번호별 부분체결·취소·거부 상태 머신과 프로그램 체결수량 전용 원장을 구현
+- 사용자에게 확인받을 사항: 없음(토스 미연동, 키움 전용으로 확정)
+- 전달 파일 버전 또는 복사시각: Git 커밋·push 전 로컬 변경 상태
+
+### 2026-10-12 11:20 KST — PC-D → PC-C
+
+- 작업 PC alias: `PC-D`
+- 작업 경로: `D:/Test`
+- 요청 목표: D 드라이브가 없는 타 PC의 C 드라이브 경로 반영과 PC별 세션 식별 alias 추가
+- 완료한 작업:
+  - 현재 PC를 `PC-D`, 타 PC를 `PC-C`로 고정
+  - PC-D `D:/Test`, PC-C `C:/Test` 워크스페이스 경로 기록
+  - 세션 작성 양식에 작업 PC alias와 실제 작업 경로 필드 추가
+  - 공통 경로 안내를 `<WORKSPACE>` 기준으로 변경
+  - 타 PC 실행 가이드의 모든 `D:\Test` 경로를 `C:\Test`로 정정
+- 변경 파일:
+  - `Codex_세션간_공동_인수인계.md`
+  - `다른_PC_프로그램_실행방법.md`
+- 추가·변경 테스트: 없음(문서 변경)
+- 전체 테스트 결과: 미실행(코드 변경 없음)
+- 수동 검증 결과: Markdown 차이 공백 검사 통과
+- 실패·미확인 사항: PC-C의 실제 폴더가 `C:/Test`가 맞는지 첫 세션에서 확인 필요
+- 남은 위험: PC-C의 실제 경로가 다르면 alias는 유지하고 경로만 정정해야 함
+- 실거래 상태: `비활성화 / 비상정지 ON / 실제 주문 없음`
+- 다음 Codex의 첫 작업: PC-C에서 `C:/Test/stock-automation`의 실제 존재를 확인하고 alias `PC-C`로 세션 기록
+- 사용자에게 확인받을 사항: PC-C 실제 프로젝트 경로가 다를 경우에만 정정 경로 확인
+- 전달 파일 버전 또는 복사시각: Git 커밋·push 전 로컬 변경 상태
+
+### 2026-10-12 11:18 KST — 현재 PC Codex → 다른 PC Codex
+
+- 요청 목표: 종가배팅 점수 보완과 세 번째 전략인 장중 단타의 설계·기본 모의엔진 추가
+- 완료한 작업:
+  - 코스피·코스닥 종목별 시장 약세 감점과 -3% 신규진입 차단
+  - 키움 `ka90009` 기관 수급과 `ka90004` 프로그램 수급 연동
+  - 외국인 수급 미사용, 수급 API 실패 시 추정 없이 확인 불가 처리
+  - 종가배팅 규칙 버전을 `closing-v0.2`로 갱신
+  - 전용 `DAY_TRADE` 모델·점수·포지션·청산 엔진 추가
+  - 단타 진입시간 09:10~14:50, 15:10 의무 당일청산, 자금 25%, 계획손실 8천원
+  - 단타용 `daytrade-analyze` CLI와 별도 JSONL 원장 경로 추가
+  - 종가배팅·중기·단타가 규칙, 자금, 포지션, 원장을 공유하지 않도록 분리
+- 변경 파일:
+  - `stock-automation/src/stock_automation/config.py`
+  - `stock-automation/src/stock_automation/models.py`
+  - `stock-automation/src/stock_automation/engine.py`
+  - `stock-automation/src/stock_automation/providers/kiwoom.py`
+  - `stock-automation/src/stock_automation/day_trade.py`
+  - `stock-automation/src/stock_automation/day_trade_io.py`
+  - `stock-automation/src/stock_automation/cli.py`
+  - `stock-automation/src/stock_automation/reporting.py`
+  - `stock-automation/README.md`
+  - `stock-automation/tests/test_engine.py`
+  - `stock-automation/tests/test_kiwoom_provider.py`
+  - `stock-automation/tests/test_kiwoom_spec_contract.py`
+  - `stock-automation/tests/test_day_trade.py`
+- 추가·변경 테스트: 시장별 급락, 시장 약세 감점, 수급 API 정규화·실패, 단타 진입·NXT 제외·시장 급락·시간창·손절·당일 청산
+- 전체 테스트 결과: `114개 통과`
+- 수동 검증 결과: `daytrade-analyze --help` CLI 등록 확인, `git diff --check` 통과
+- 실패·미확인 사항: 키움 실제 모의 API 통합, AWS 배포, 모바일 대시보드의 단타 화면은 미실행
+- 남은 위험: 단타 입력 스냅샷 자동수집과 AWS 반복 스케줄러가 아직 없으며, 기본 엔진은 상시감시가 아님
+- 실거래 상태: `비활성화 / 비상정지 ON / 실제 주문 없음`
+- 다음 Codex의 첫 작업: Git 변경을 확인한 뒤 다른 PC에서 114개 전체 테스트를 재실행하고 키움 모의 스냅샷 수집 연결을 설계
+- 사용자에게 확인받을 사항: 단타 AWS 스캔 주기와 단타 전용 모의자금
+- 전달 파일 버전 또는 복사시각: Git 커밋·push 전 로컬 변경 상태
 
 ### 2026-10-12 — 회사 PC Codex → 집 PC Codex
 
@@ -297,7 +553,8 @@ python -m compileall -q src tests
 
 ```text
 첨부한 Codex 세션 간 공동 인수인계에서 가장 최신 전달 기록을 먼저 읽어줘.
-그 기록에 적힌 변경 내용을 현재 D:/Test/stock-automation 코드와 테스트로 재검증해줘.
+너의 PC alias를 `PC-C`로 기록하고, 그 기록에 적힌 변경 내용을
+C:/Test/stock-automation 코드와 테스트로 재검증해줘.
 다른 PC에서 수정한 파일을 임의로 되돌리지 말고, 충돌이나 미완성 변경이 있으면 먼저
 보고해줘. 실제 주문과 실계좌 연결은 계속 비활성화한 상태로 작업을 이어가줘.
 작업이 끝나면 같은 문서의 세션 전달 기록 맨 위에 이번 결과를 추가해줘.
@@ -309,6 +566,7 @@ python -m compileall -q src tests
 이 프로젝트는 두 PC의 Codex가 번갈아 작업한다. 첨부한 공동 인수인계 문서의 최신
 기록과 AGENTS.md를 먼저 읽고 실제 코드로 확인해줘. 기존 변경을 보존하고, 이번
 세션에서 수정한 파일·테스트·미완성 위험을 작업 종료 전에 공동 인수인계에 추가해줘.
+이 PC의 alias는 `PC-C`, 기본 워크스페이스는 `C:/Test`로 기록해줘.
 실계좌 주문은 실행하지 말고 실거래 안전 기능의 코드와 테스트만 진행해줘.
 ```
 

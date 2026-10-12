@@ -64,6 +64,7 @@ class LiveOrderPolicy:
     maximum_buy_slippage_pct: float = 0.5
     approval_ttl_seconds: int = 300
     allowed_strategies: tuple[str, ...] = ("CLOSING_BET", "MEDIUM_TERM")
+    expected_account_fingerprint: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +77,17 @@ class AccountRiskState:
     owned_quantity: int
     kill_switch_active: bool
     already_submitted_intent_ids: frozenset[str] = frozenset()
+    observed_account_fingerprint: str | None = None
+    protected_baseline_quantity: int = 0
+    program_owned_quantity: int = 0
+    holdings_reconciled: bool = False
+    total_owned_quantity: int = 0
+
+    @property
+    def program_sellable_quantity(self) -> int:
+        """Quantity that can be sold without touching the protected baseline."""
+        quantity_above_baseline = max(0, self.owned_quantity - self.protected_baseline_quantity)
+        return min(self.program_owned_quantity, quantity_above_baseline)
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +164,14 @@ def authorize_live_order(
         reasons.append("KILL_SWITCH_ACTIVE")
     if state.account_alias != intent.account_alias:
         reasons.append("ACCOUNT_ALIAS_MISMATCH")
+    expected_fingerprint = (policy.expected_account_fingerprint or "").strip()
+    observed_fingerprint = (state.observed_account_fingerprint or "").strip()
+    if not expected_fingerprint:
+        reasons.append("ACCOUNT_FINGERPRINT_NOT_CONFIGURED")
+    elif not observed_fingerprint or observed_fingerprint != expected_fingerprint:
+        reasons.append("ACCOUNT_FINGERPRINT_MISMATCH")
+    if not state.holdings_reconciled:
+        reasons.append("HOLDINGS_NOT_RECONCILED")
     if intent.strategy not in policy.allowed_strategies:
         reasons.append("STRATEGY_NOT_ALLOWED")
     if intent.intent_id in state.already_submitted_intent_ids:
@@ -179,8 +199,8 @@ def authorize_live_order(
             reasons.append("TOTAL_EXPOSURE_LIMIT")
         if state.open_positions >= policy.maximum_open_positions:
             reasons.append("OPEN_POSITION_LIMIT")
-    elif intent.quantity > state.owned_quantity:
-        reasons.append("SELL_QUANTITY_EXCEEDS_HOLDING")
+    elif intent.quantity > state.program_sellable_quantity:
+        reasons.append("SELL_QUANTITY_EXCEEDS_PROGRAM_HOLDING")
 
     if approval is None:
         reasons.append("USER_APPROVAL_REQUIRED")

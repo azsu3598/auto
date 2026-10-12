@@ -1,5 +1,61 @@
 [
   {
+    "pk": "EQUITY#PAPER#2026-10-02",
+    "mode": "PAPER",
+    "recorded_at": "2026-10-02T15:30:00+09:00",
+    "total_assets": 1800000,
+    "available_cash": 1800000,
+    "market_value": 0
+  },
+  {
+    "pk": "EQUITY#PAPER#2026-10-03",
+    "mode": "PAPER",
+    "recorded_at": "2026-10-03T15:30:00+09:00",
+    "total_assets": 1804300,
+    "available_cash": 1580000,
+    "market_value": 224300
+  },
+  {
+    "pk": "EQUITY#PAPER#2026-10-04",
+    "mode": "PAPER",
+    "recorded_at": "2026-10-04T15:30:00+09:00",
+    "total_assets": 1797600,
+    "available_cash": 1580000,
+    "market_value": 217600
+  },
+  {
+    "pk": "EQUITY#PAPER#2026-10-05",
+    "mode": "PAPER",
+    "recorded_at": "2026-10-05T15:30:00+09:00",
+    "total_assets": 1809200,
+    "available_cash": 1580000,
+    "market_value": 229200
+  },
+  {
+    "pk": "EQUITY#PAPER#2026-10-06",
+    "mode": "PAPER",
+    "recorded_at": "2026-10-06T15:30:00+09:00",
+    "total_assets": 1813800,
+    "available_cash": 1580000,
+    "market_value": 233800
+  },
+  {
+    "pk": "EQUITY#PAPER#2026-10-07",
+    "mode": "PAPER",
+    "recorded_at": "2026-10-07T15:30:00+09:00",
+    "total_assets": 1806100,
+    "available_cash": 1580000,
+    "market_value": 226100
+  },
+  {
+    "pk": "EQUITY#PAPER#2026-10-08",
+    "mode": "PAPER",
+    "recorded_at": "2026-10-08T15:30:00+09:00",
+    "total_assets": 1801420,
+    "available_cash": 1581420,
+    "market_value": 220000
+  },
+  {
     "pk": "WALLET#CLOSING_BET#KRX_1520",
     "initial_cash": 600000,
     "available_cash": 381420,
@@ -18,6 +74,15 @@
     "updated_at": "2026-10-08T15:35:00+09:00"
   },
   {
+    "pk": "WALLET#DAY_TRADE",
+    "initial_cash": 600000,
+    "available_cash": 600000,
+    "invested_principal": 0,
+    "realized_pnl": 0,
+    "fees_taxes": 0,
+    "updated_at": "2026-10-08T13:30:00+09:00"
+  },
+  {
     "pk": "OPEN#CLOSING_BET#KRX_1520",
     "remaining_quantity": 11,
     "payload_json": "{\"position_id\":\"POS-DEMO001\",\"code\":\"123456\",\"name\":\"UI 샘플종목\",\"entry_price\":20000,\"quantity\":11,\"stop_price\":19400,\"emergency_stop\":19100,\"target1\":20900,\"target2\":21500,\"entry_at\":\"2026-10-08T15:20:30+09:00\",\"status\":\"OPEN\"}"
@@ -27,11 +92,17 @@
     "event_id": "SIM-20261008-KRX_1520-DEMO",
     "decision": "BUY",
     "decided_at": "2026-10-08T15:20:30+09:00",
-    "payload_json": "{\"decision\":\"BUY\",\"decided_at\":\"2026-10-08T15:20:30+09:00\",\"position\":{\"name\":\"UI 샘플종목\",\"code\":\"123456\"},\"reference_price\":20000}"
+    "payload_json": "{\"decision\":\"BUY\",\"decided_at\":\"2026-10-08T15:20:30+09:00\",\"position\":{\"name\":\"UI 샘플종목\",\"code\":\"123456\"},\"reference_price\":20000,\"reason_codes\":[\"TOP_SCORE_SELECTED\",\"PAPER_EXECUTION_ONLY\"],\"candidates\":[{\"code\":\"123456\",\"reasons\":[\"HIGH_TRADING_VALUE\",\"VOLUME_EXPANSION\",\"ABOVE_5M_MA20\",\"CATALYST_CONFIRMED\"]}]}"
   },
   {
     "pk": "EXIT#POS-OLD001#20261008T091005#SCHEDULED_EXIT",
     "position_id": "POS-OLD001",
-    "payload_json": "{\"name\":\"이전 샘플\",\"code\":\"654321\",\"action\":\"SCHEDULED_EXIT\",\"decided_at\":\"2026-10-08T09:10:05+09:00\",\"execution_price\":10200,\"execution_quantity\":20,\"realized_pnl\":3573}"
+    "payload_json": "{\"name\":\"이전 샘플\",\"code\":\"654321\",\"action\":\"SCHEDULED_EXIT\",\"decided_at\":\"2026-10-08T09:10:05+09:00\",\"execution_price\":10200,\"execution_quantity\":20,\"realized_pnl\":3573,\"reason_codes\":[\"NEXT_SESSION_0910\"]}"
+  },
+  {
+    "pk": "DAY#2026-10-08T13:30#DAY_TRADE_SCAN",
+    "decision": "NO_TRADE",
+    "decided_at": "2026-10-08T13:30:00+09:00",
+    "payload_json": "{\"decision\":\"NO_TRADE\",\"decided_at\":\"2026-10-08T13:30:00+09:00\",\"paper_only\":true,\"reason_codes\":[\"NO_QUALIFYING_DAY_TRADE_CANDIDATE\"]}"
   }
 ]

@@ -1,8 +1,9 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from stock_automation.live_broker import BrokerOrder
+from stock_automation.live_broker import BrokerOrder, BrokerOrderStatus
 from stock_automation.live_execution import (
+    AccountGuard,
     DynamoLiveOrderStore,
     LiveExecutionResult,
     LiveOrderExecutor,
@@ -76,6 +77,51 @@ class FakeDdb:
     def scan(self, **kwargs):
         return {"Items": [dict(item) for item in self.items.values()]}
 
+    def transact_write_items(self, **kwargs):
+        operations = kwargs["TransactItems"]
+        # Validate every condition before applying any update.
+        for operation in operations:
+            update = operation["Update"]
+            key = update["Key"]["pk"]["S"]
+            item = self.items.get(key)
+            values = update["ExpressionAttributeValues"]
+            if key.startswith("LIVE_ORDER#"):
+                if item is None:
+                    raise ConditionalFailure()
+                if item.get("broker_order_no", {}).get("S") != values[":number"]["S"]:
+                    raise ConditionalFailure()
+                if item.get("status", {}).get("S") not in {
+                    values[":ack"]["S"], values[":partial"]["S"]
+                }:
+                    raise ConditionalFailure()
+                previous = int(item.get("last_filled_quantity", {}).get("N", "0"))
+                if previous != int(values[":previous"]["N"]):
+                    raise ConditionalFailure()
+            elif ":required" in values:
+                if item is None or int(item.get("quantity", {}).get("N", "0")) < int(values[":required"]["N"]):
+                    raise ConditionalFailure()
+        for operation in operations:
+            update = operation["Update"]
+            key = update["Key"]["pk"]["S"]
+            item = self.items.setdefault(key, {"pk": {"S": key}})
+            values = update["ExpressionAttributeValues"]
+            if key.startswith("LIVE_ORDER#"):
+                item.update({
+                    "status": values[":state"],
+                    "last_filled_quantity": values[":filled"],
+                    "remaining_quantity": values[":remaining"],
+                    "broker_status_text": values[":status_text"],
+                    "last_reconciled_at": values[":checked"],
+                    "updated_at": values[":checked"],
+                })
+            else:
+                quantity = int(item.get("quantity", {}).get("N", "0"))
+                item.update({
+                    "code": values[":code"],
+                    "updated_at": values[":checked"],
+                    "quantity": {"N": str(quantity + int(values[":delta"]["N"]))},
+                })
+
 
 class MemoryStore:
     def __init__(self, ready=True):
@@ -135,6 +181,17 @@ def authorization(order):
 
 
 class LiveExecutionTests(unittest.TestCase):
+    def test_account_guard_is_write_once_and_round_trips(self):
+        ddb = FakeDdb()
+        store = DynamoLiveOrderStore(ddb, "table")
+        guard = AccountGuard("main", "fingerprint-main", {"123456": 10}, NOW)
+        self.assertTrue(store.initialize_account_guard(guard))
+        self.assertFalse(store.initialize_account_guard(guard))
+        loaded = store.load_account_guard()
+        self.assertEqual("fingerprint-main", loaded.account_fingerprint)
+        self.assertEqual(10, loaded.protected_quantity("123456"))
+        self.assertEqual(0, loaded.protected_quantity("000000"))
+
     def test_pending_approval_ready_claim_and_ack_are_one_way(self):
         ddb = FakeDdb()
         store = DynamoLiveOrderStore(ddb, "table")
@@ -158,6 +215,41 @@ class LiveExecutionTests(unittest.TestCase):
         self.assertEqual(
             frozenset({order_intent.intent_id}), store.submitted_intent_ids()
         )
+
+    def test_partial_and_full_fills_update_program_quantity_by_delta_once(self):
+        ddb = FakeDdb()
+        store = DynamoLiveOrderStore(ddb, "table")
+        order_intent = intent()
+        store.create_pending(order_intent, created_at=NOW)
+        store.approve(
+            order_intent,
+            UserApproval(order_intent.intent_id, approval_challenge(order_intent), NOW, "USER"),
+            updated_at=NOW,
+        )
+        store.claim(order_intent.intent_id, claimed_at=NOW)
+        order = BrokerOrder(
+            order_intent.intent_id, "777", OrderSide.BUY, "123456", 10, 10_000,
+            "KRX", NOW,
+        )
+        store.acknowledge(order, updated_at=NOW)
+
+        partial_status = BrokerOrderStatus(
+            "777", 10, 6, 4, 10_020, "부분체결", NOW + timedelta(seconds=10)
+        )
+        partial = store.reconcile_fill(order, partial_status)
+        repeated = store.reconcile_fill(order, partial_status)
+        full = store.reconcile_fill(
+            order,
+            BrokerOrderStatus(
+                "777", 10, 10, 0, 10_030, "체결", NOW + timedelta(seconds=20)
+            ),
+        )
+        self.assertEqual(LiveOrderState.PARTIALLY_FILLED, partial.state)
+        self.assertEqual(6, partial.fill_delta)
+        self.assertEqual(0, repeated.fill_delta)
+        self.assertEqual(LiveOrderState.FILLED, full.state)
+        self.assertEqual(4, full.fill_delta)
+        self.assertEqual(10, store.program_quantity("123456"))
 
     def test_kill_switch_defaults_on_and_requires_matching_account_control(self):
         ddb = FakeDdb()
