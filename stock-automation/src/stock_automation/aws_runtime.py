@@ -24,6 +24,7 @@ from .models import (
 )
 from .backtest import TradingCosts
 from .backtest_io import replay_case_from_dict
+from .day_trade import DayTradeDecisionType, DayTradeEngine
 from .learning import (
     TuningPolicy,
     config_from_champion,
@@ -683,6 +684,272 @@ def _ddb_json_item(pk: str, payload: dict[str, Any], **strings: str) -> dict[str
     }
     item.update({key: {"S": value} for key, value in strings.items()})
     return item
+
+
+def _save_day_trade_decision(
+    ddb,
+    table_name: str,
+    decision,
+    *,
+    wallet_key: str = "WALLET#DAY_TRADE",
+    costs: TradingCosts | None = None,
+) -> bool:
+    """Atomically store one isolated paper day-trade decision.
+
+    The caller must initialize the dedicated wallet first.  This function never
+    falls back to a closing-bet or medium-term wallet.
+    """
+    event_key = f"DAY#{decision.idempotency_key.replace(':', '#')}"
+    event = {
+        "Put": {
+            "TableName": table_name,
+            "Item": _ddb_json_item(
+                event_key,
+                decision.to_dict(),
+                event_id=decision.event_id,
+                decision=decision.decision.value,
+                strategy="DAY_TRADE",
+                decided_at=decision.decided_at.isoformat(),
+            ),
+            "ConditionExpression": "attribute_not_exists(pk)",
+        }
+    }
+    if decision.decision != DayTradeDecisionType.BUY or not decision.position:
+        try:
+            ddb.put_item(**event["Put"])
+            return True
+        except Exception as exc:
+            code = getattr(exc, "response", {}).get("Error", {}).get("Code")
+            if code == "ConditionalCheckFailedException":
+                return False
+            raise
+    if costs is None:
+        raise ValueError("trading costs are required for a day-trade entry")
+
+    position = decision.position
+    actions = [
+        event,
+        {
+            "Put": {
+                "TableName": table_name,
+                "Item": _ddb_json_item(
+                    "OPEN#DAY_TRADE",
+                    asdict(position),
+                    event_id=decision.event_id,
+                    position_id=position.position_id,
+                    strategy="DAY_TRADE",
+                ),
+                "ConditionExpression": "attribute_not_exists(pk)",
+            }
+        },
+        _wallet_entry_action(
+            table_name,
+            wallet_key,
+            price=position.entry_price,
+            quantity=position.quantity,
+            costs=costs,
+            now=decision.decided_at,
+        ),
+    ]
+    # The JSON helper stores metadata as strings; quantity stays numeric so a
+    # later exit can use DynamoDB's arithmetic and conditional expressions.
+    actions[1]["Put"]["Item"]["remaining_quantity"] = {"N": str(position.quantity)}
+    try:
+        ddb.transact_write_items(TransactItems=actions)
+        return True
+    except Exception as exc:
+        code = getattr(exc, "response", {}).get("Error", {}).get("Code")
+        if code in {"ConditionalCheckFailedException", "TransactionCanceledException"}:
+            return False
+        raise
+
+
+def _save_daily_equity_snapshot(
+    ddb,
+    table_name: str,
+    *,
+    mode: str,
+    recorded_at: datetime,
+    available_cash: int,
+    market_value: int,
+) -> bool:
+    """Store one immutable daily cash-plus-market-value point for the UI."""
+    normalized_mode = mode.strip().upper()
+    if normalized_mode not in {"PAPER", "LIVE"}:
+        raise ValueError("equity snapshot mode must be PAPER or LIVE")
+    if recorded_at.tzinfo is None:
+        raise ValueError("equity snapshot timestamp must be timezone-aware")
+    if available_cash < 0 or market_value < 0:
+        raise ValueError("equity snapshot values cannot be negative")
+    kst_time = recorded_at.astimezone(KST)
+    item = {
+        "pk": {"S": f"EQUITY#{normalized_mode}#{kst_time:%Y-%m-%d}"},
+        "mode": {"S": normalized_mode},
+        "recorded_at": {"S": kst_time.isoformat()},
+        "available_cash": {"N": str(available_cash)},
+        "market_value": {"N": str(market_value)},
+        "total_assets": {"N": str(available_cash + market_value)},
+    }
+    try:
+        ddb.put_item(
+            TableName=table_name,
+            Item=item,
+            ConditionExpression="attribute_not_exists(pk)",
+        )
+        return True
+    except Exception as exc:
+        code = getattr(exc, "response", {}).get("Error", {}).get("Code")
+        if code == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def _paper_equity_components(
+    items: list[dict[str, dict[str, str]]],
+    verified_prices: dict[str, int],
+) -> tuple[int, int]:
+    """Return aggregate paper cash and marked-to-market open positions.
+
+    Missing quotes fail closed: a daily point must never silently use entry
+    price or zero for a position whose current value is unknown.
+    """
+    available_cash = 0
+    market_value = 0
+    wallet_count = 0
+    for item in items:
+        key = item.get("pk", {}).get("S", "")
+        if key.startswith("WALLET#"):
+            available_cash += int(item.get("available_cash", {"N": "0"})["N"])
+            wallet_count += 1
+            continue
+        if not key.startswith("OPEN#"):
+            continue
+        raw_payload = item.get("payload_json", {}).get("S")
+        if not raw_payload:
+            raise RuntimeError(f"open position payload is missing: {key}")
+        payload = json.loads(raw_payload)
+        code = str(payload.get("code", "")).strip()
+        quantity = int(
+            item.get("remaining_quantity", {"N": str(payload.get("quantity", 0))})["N"]
+        )
+        price = verified_prices.get(code)
+        if not code or quantity <= 0 or price is None or price <= 0:
+            raise RuntimeError(f"verified position valuation is unavailable: {key}")
+        market_value += price * quantity
+    if wallet_count == 0:
+        raise RuntimeError("paper wallets are unavailable")
+    return available_cash, market_value
+
+
+def _scan_equity_items(ddb, table_name: str) -> list[dict[str, dict[str, str]]]:
+    items: list[dict[str, dict[str, str]]] = []
+    start_key = None
+    while True:
+        request: dict[str, Any] = {
+            "TableName": table_name,
+            "ProjectionExpression": "pk, available_cash, payload_json, remaining_quantity",
+        }
+        if start_key:
+            request["ExclusiveStartKey"] = start_key
+        response = ddb.scan(**request)
+        items.extend(response.get("Items", []))
+        start_key = response.get("LastEvaluatedKey")
+        if not start_key:
+            return items
+
+
+def _record_paper_equity_snapshot(
+    *, client, ddb, table_name: str, recorded_at: datetime
+) -> dict[str, Any]:
+    """Value every open paper position with a fresh quote, then save one point."""
+    items = _scan_equity_items(ddb, table_name)
+    codes: set[str] = set()
+    for item in items:
+        if not item.get("pk", {}).get("S", "").startswith("OPEN#"):
+            continue
+        raw_payload = item.get("payload_json", {}).get("S")
+        if not raw_payload:
+            raise RuntimeError("open position payload is missing")
+        code = str(json.loads(raw_payload).get("code", "")).strip()
+        if not code:
+            raise RuntimeError("open position code is missing")
+        codes.add(code)
+
+    prices: dict[str, int] = {}
+    quote_times: dict[str, str] = {}
+    for code in sorted(codes):
+        observed_at, price = _current_price(client, code, recorded_at)
+        prices[code] = price
+        quote_times[code] = observed_at.isoformat()
+    available_cash, market_value = _paper_equity_components(items, prices)
+    inserted = _save_daily_equity_snapshot(
+        ddb,
+        table_name,
+        mode="PAPER",
+        recorded_at=recorded_at,
+        available_cash=available_cash,
+        market_value=market_value,
+    )
+    return {
+        "status": "RECORDED" if inserted else "DUPLICATE_SKIPPED",
+        "mode": "PAPER",
+        "recorded_at": recorded_at.isoformat(),
+        "available_cash": available_cash,
+        "market_value": market_value,
+        "total_assets": available_cash + market_value,
+        "valued_positions": len(codes),
+        "quote_times": quote_times,
+    }
+
+
+def _run_day_trade_scan(
+    *, client, ddb, s3, bucket: str, table: str, now: datetime,
+    catalysts: dict[str, Catalyst], initial_cash: int, candidate_limit: int,
+) -> int:
+    """Run one explicitly invoked paper scan; this function is never scheduled."""
+    builder = KiwoomSnapshotBuilder(client)
+    snapshot = builder.build_day_trade_snapshot(
+        captured_at=now,
+        catalysts=catalysts,
+        kospi_change_pct=_market_change(client, "0", "001"),
+        kosdaq_change_pct=_market_change(client, "1", "101"),
+        candidate_limit=candidate_limit,
+    )
+    prefix = f"runs/{now:%Y/%m/%d}/DAY_TRADE/{now:%H%M%S}"
+    s3.put_object(
+        Bucket=bucket,
+        Key=f"{prefix}-snapshot.json",
+        Body=json.dumps(
+            asdict(snapshot), ensure_ascii=False, default=_json_default, sort_keys=True
+        ).encode("utf-8"),
+        ContentType="application/json; charset=utf-8",
+    )
+    wallet_key = "WALLET#DAY_TRADE"
+    available_cash = _load_or_create_wallet(
+        ddb, table, wallet_key, initial_cash, now
+    )
+    decision = DayTradeEngine().evaluate(snapshot, cash=available_cash)
+    inserted = _save_day_trade_decision(
+        ddb,
+        table,
+        decision,
+        wallet_key=wallet_key,
+        costs=_runtime_costs(),
+    )
+    s3.put_object(
+        Bucket=bucket,
+        Key=f"{prefix}-decision.json",
+        Body=json.dumps(
+            decision.to_dict(), ensure_ascii=False, sort_keys=True
+        ).encode("utf-8"),
+        ContentType="application/json; charset=utf-8",
+    )
+    print(json.dumps({
+        "status": "RECORDED" if inserted else "DUPLICATE_OR_OPEN_POSITION",
+        "paper_only": True,
+        **decision.to_dict(),
+    }, ensure_ascii=False))
+    return 0
 
 
 def _load_medium_pointer(ddb, table_name: str, pointer: str):
@@ -1423,6 +1690,28 @@ def run() -> int:
         ),
     )
     medium_cash = int(os.getenv("MEDIUM_STARTING_CASH", "600000"))
+    if phase == "EQUITY_SNAPSHOT_1550":
+        result = _record_paper_equity_snapshot(
+            client=client, ddb=ddb, table_name=table, recorded_at=now
+        )
+        print(json.dumps(result, ensure_ascii=False))
+        return 0
+    if phase == "DAY_TRADE_ON_DEMAND":
+        catalyst_key = f"{catalyst_prefix}/{now:%Y-%m-%d}.json"
+        catalysts = _verified_catalyst_overrides(
+            _load_optional_json(s3, bucket, catalyst_key), now=now
+        )
+        return _run_day_trade_scan(
+            client=client,
+            ddb=ddb,
+            s3=s3,
+            bucket=bucket,
+            table=table,
+            now=now,
+            catalysts=catalysts,
+            initial_cash=int(os.getenv("DAY_TRADE_STARTING_CASH", "600000")),
+            candidate_limit=int(os.getenv("DAY_TRADE_CANDIDATE_LIMIT", "30")),
+        )
     if phase == "MEDIUM_SIGNAL_1540":
         return _run_medium_signal(
             client=client, ddb=ddb, s3=s3, notifier=notifier,

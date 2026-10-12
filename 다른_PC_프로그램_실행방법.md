@@ -302,7 +302,7 @@ aws ecs run-task `
   --task-definition $Task `
   --launch-type FARGATE `
   --network-configuration "awsvpcConfiguration={subnets=[$Subnets],securityGroups=[$SecurityGroups],assignPublicIp=ENABLED}" `
-  --overrides file://D:/Test/doctor-overrides.json
+  --overrides file://C:/Test/doctor-overrides.json
 
 aws logs tail $LogGroup --region $Region --since 15m --follow
 ```
@@ -339,8 +339,36 @@ NXT는 별도 검증 전까지 `NxtScheduleState=DISABLED`로 유지합니다.
 - 다음 거래일 09:10: 남은 수량 모의청산
 - 15:35: 중기 보유종목 재검토
 - 15:40: 1~2개월 전략 신규 신호
+- 15:50: 모의 지갑 현금과 보유종목 평가액을 합산한 일일 총자산 기록
 - 다음 거래일 09:15: 중기 신호 모의진입 확인
 - 토요일 08:00: 기록 기반 규칙 검증 및 모의전략 개선
+
+단타는 위 예약에 포함되지 않습니다. 사용자가 요청한 날에만 아래 절차로 한 번
+실행하며, 실행 가능 시간은 KST 09:10~14:50입니다.
+
+1. 출처와 검증시각을 확인한 당일 촉매 JSON을 준비합니다.
+2. `s3://$Bucket/config/catalysts/YYYY-MM-DD.json`에 업로드합니다.
+3. `C:\Test\daytrade-overrides.json`을 다음 내용으로 만듭니다.
+
+```json
+{"containerOverrides":[{"name":"stock-automation","environment":[{"name":"RUN_PHASE","value":"DAY_TRADE_ON_DEMAND"}]}]}
+```
+
+4. 다음 명령으로 단발 작업을 실행합니다.
+
+```powershell
+aws ecs run-task `
+  --region $Region `
+  --cluster $Cluster `
+  --task-definition $Task `
+  --launch-type FARGATE `
+  --network-configuration "awsvpcConfiguration={subnets=[$Subnets],securityGroups=[$SecurityGroups],assignPublicIp=ENABLED}" `
+  --overrides file://C:/Test/daytrade-overrides.json
+```
+
+단타 작업을 반복 호출하거나 EventBridge 스케줄로 등록하지 않습니다. 로그의
+`paper_only: true`와 DynamoDB의 `DAY#`, `OPEN#DAY_TRADE`, `WALLET#DAY_TRADE`
+항목을 확인합니다. 실제 주문 API는 호출하지 않습니다.
 
 ### 8.9 실행 결과 확인
 
@@ -359,6 +387,20 @@ aws dynamodb scan --region $Region --table-name $PaperTable --max-items 20
 
 텔레그램에서 `[모의매수]`, 익절, 손절 또는 전략 승격 알림이 도착하는지도
 확인합니다.
+
+15:50 작업 이후에는 아래 항목도 확인합니다.
+
+```powershell
+aws dynamodb scan `
+  --region $Region `
+  --table-name $PaperTable `
+  --filter-expression "begins_with(pk, :prefix)" `
+  --expression-attribute-values '{":prefix":{"S":"EQUITY#PAPER#"}}'
+```
+
+해당 거래일의 `available_cash + market_value = total_assets`인지 확인합니다. 열린
+포지션이 있는데 확인 현재가가 없으면 일일 값이 생성되지 않는 것이 정상적인 안전
+동작입니다.
 
 ### 8.10 긴급 중지
 
@@ -381,7 +423,7 @@ aws cloudformation deploy `
 스케줄을 꺼도 S3와 DynamoDB 기록은 보존됩니다. 비용 확인을 위해 AWS Budgets에서
 월간 예산 알림도 설정합니다.
 
-더 상세한 배포 설명은 [AWS 자동매매 실행 가이드](D:/Test/AWS_자동매매_실행가이드.md)에도
+더 상세한 배포 설명은 [AWS 자동매매 실행 가이드](C:/Test/AWS_자동매매_실행가이드.md)에도
 정리되어 있습니다.
 
 ## 9. 텔레그램 알림
@@ -414,6 +456,42 @@ stock-automation live-kill-switch
 실제 주문 응답이 불명확하면 프로그램은 `UNCERTAIN`으로 잠그며 자동 재주문하지
 않습니다. 키움 주문내역을 직접 확인하기 전에는 해당 주문을 다시 실행하면 안 됩니다.
 
+## 11. 5거래일 모의운용과 PC-D 전달
+
+예약을 켠 날부터 거래일 기준 5일 동안 매일 다음 항목을 확인합니다.
+
+- 모든 예정 작업의 성공·실패와 실행 시각
+- `BUY`, `SELL`, `NO_TRADE` 결정 및 이유
+- 중복 이벤트·중복 포지션 유무
+- 전략별 지갑, 열린 포지션, 모의체결 수량의 일치
+- `EQUITY#PAPER#YYYY-MM-DD` 총자산 기록
+- 오래된 시세, API 오류, 알림 실패 및 재시도
+- 실주문 없음과 비상정지 기본 ON
+
+원본 확인 자료는 Git에 넣지 않는 `C:\Test\stock-automation\runtime\validation`에
+내보냅니다.
+
+```powershell
+New-Item -ItemType Directory -Force C:\Test\stock-automation\runtime\validation
+
+aws dynamodb scan --region $Region --table-name $PaperTable --output json `
+  > C:\Test\stock-automation\runtime\validation\paper-table.json
+
+aws logs filter-log-events --region $Region --log-group-name $LogGroup `
+  --start-time ([DateTimeOffset]::UtcNow.AddDays(-8).ToUnixTimeMilliseconds()) `
+  --output json `
+  > C:\Test\stock-automation\runtime\validation\cloudwatch-5days.json
+```
+
+계좌번호, 앱 키, Secret, 토큰이 없는지 확인한 뒤 결과만 요약한 Markdown을
+`C:\Test\docs\운영 검증\`에 작성합니다. 원본 JSON은 커밋하지 않습니다. 요약에는
+날짜별 성공 여부, 결정, 모의손익, 총자산, 오류, 원장 불일치와 최종 판정을 적고
+공동 인수인계와 함께 Git에 커밋·push합니다.
+
+5거래일이 지났다는 사실만으로 실거래를 켜지 않습니다. 주문 취소, 장시간 미체결,
+재시작 복구, 주기적 대사, 불일치 자동 비상정지, 실거래 전용 인프라가 모두 검증되고
+사용자가 별도로 승인한 뒤에만 소액 감독형 주문 검토 단계로 이동합니다.
+
 ## 이전 완료 체크리스트
 
 - [ ] 두 프로젝트가 `C:\Test` 아래에 나란히 있음
@@ -425,4 +503,7 @@ stock-automation live-kill-switch
 - [ ] 최초 AWS 스케줄이 비활성 상태임
 - [ ] 텔레그램 시험 알림 수신
 - [ ] 모의투자 온라인 점검 성공
+- [ ] 단타 단발 작업이 자동 스케줄에 등록되지 않음
+- [ ] 15:50 일일 총자산 항목 확인
+- [ ] 5거래일 운영 검증 보고서 작성 및 Git 전달
 - [ ] 실제 주문 비상정지가 `ON`임

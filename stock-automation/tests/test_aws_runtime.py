@@ -14,7 +14,12 @@ from stock_automation.aws_runtime import (
     _deliver_pending_outbox,
     _five_min_stop_confirmation,
     _load_or_create_wallet,
+    _paper_equity_components,
+    _record_paper_equity_snapshot,
+    _run_day_trade_scan,
     _run_exit,
+    _save_daily_equity_snapshot,
+    _save_day_trade_decision,
     _save_decision,
     _save_medium_entry,
     _save_medium_signal,
@@ -22,9 +27,11 @@ from stock_automation.aws_runtime import (
 )
 from stock_automation.backtest import TradingCosts
 from stock_automation.engine import ClosingBetEngine
+from stock_automation.day_trade import DayTradeEngine
 from stock_automation.medium_term import MediumTermEngine, confirm_medium_term_entry
 from stock_automation.models import Session
 from test_engine import quote, snapshot
+from test_day_trade import quote as day_trade_quote, snapshot as day_trade_snapshot
 from test_exit_engine import position
 from test_medium_term import snapshot as medium_snapshot
 
@@ -73,6 +80,8 @@ class FakeDdb:
         item["sent_at"] = kwargs["ExpressionAttributeValues"][":sent_at"]
 
     def scan(self, **kwargs):
+        if "FilterExpression" not in kwargs:
+            return {"Items": list(self.items.values())[: kwargs.get("Limit", 100)]}
         return {
             "Items": [
                 item
@@ -138,6 +147,20 @@ class FakeHistoricalClient:
         return SimpleNamespace(
             body={"return_code": 0, "stk_min_pole_chart_qry": rows},
             continuation=SimpleNamespace(cont_yn="N", next_key=None),
+        )
+
+
+class FakeEquityQuoteClient:
+    def fetch_page(self, **kwargs):
+        code = kwargs["body"]["stk_cd"]
+        prices = {"123456": "+20500", "654321": "+11000"}
+        return SimpleNamespace(
+            body={
+                "return_code": 0,
+                "date": "20261012",
+                "tm": "155001",
+                "cur_prc": prices[code],
+            }
         )
 
 
@@ -279,6 +302,165 @@ class AwsRuntimeTests(unittest.TestCase):
         self.assertEqual(1, len(updates))
         values = updates[0]["ExpressionAttributeValues"]
         self.assertGreater(int(values[":debit"]["N"]), decision.position.invested_amount)
+
+    def test_day_trade_entry_uses_isolated_pointer_wallet_and_event(self):
+        decision = DayTradeEngine().evaluate(
+            day_trade_snapshot(day_trade_quote()), cash=600_000
+        )
+        ddb = FakeDdb()
+        costs = TradingCosts(1.5, 1.5, 18.0)
+
+        self.assertTrue(
+            _save_day_trade_decision(ddb, "paper", decision, costs=costs)
+        )
+
+        actions = ddb.transactions[0]["TransactItems"]
+        self.assertTrue(actions[0]["Put"]["Item"]["pk"]["S"].startswith("DAY#"))
+        self.assertEqual("OPEN#DAY_TRADE", actions[1]["Put"]["Item"]["pk"]["S"])
+        self.assertEqual(
+            str(decision.position.quantity),
+            actions[1]["Put"]["Item"]["remaining_quantity"]["N"],
+        )
+        self.assertEqual(
+            "WALLET#DAY_TRADE", actions[2]["Update"]["Key"]["pk"]["S"]
+        )
+
+    def test_day_trade_no_trade_stores_event_without_position(self):
+        decision = DayTradeEngine().evaluate(
+            day_trade_snapshot(day_trade_quote(nxt_eligible=True)), cash=600_000
+        )
+        ddb = FakeDdb()
+
+        self.assertTrue(_save_day_trade_decision(ddb, "paper", decision))
+        self.assertEqual(1, len(ddb.puts))
+        self.assertEqual([], ddb.transactions)
+        self.assertTrue(ddb.puts[0]["Item"]["pk"]["S"].startswith("DAY#"))
+
+    def test_daily_equity_snapshot_is_cash_plus_market_value(self):
+        ddb = FakeDdb()
+        recorded_at = datetime(2026, 10, 12, 15, 40, tzinfo=KST)
+
+        self.assertTrue(
+            _save_daily_equity_snapshot(
+                ddb,
+                "paper",
+                mode="paper",
+                recorded_at=recorded_at,
+                available_cash=1_300_000,
+                market_value=520_000,
+            )
+        )
+
+        item = ddb.items["EQUITY#PAPER#2026-10-12"]
+        self.assertEqual("1820000", item["total_assets"]["N"])
+        self.assertEqual("1300000", item["available_cash"]["N"])
+        self.assertEqual("520000", item["market_value"]["N"])
+
+    def test_daily_equity_snapshot_rejects_invalid_values(self):
+        with self.assertRaisesRegex(ValueError, "cannot be negative"):
+            _save_daily_equity_snapshot(
+                FakeDdb(),
+                "paper",
+                mode="PAPER",
+                recorded_at=datetime(2026, 10, 12, 15, 40, tzinfo=KST),
+                available_cash=-1,
+                market_value=0,
+            )
+
+    def test_paper_equity_uses_wallet_cash_and_verified_open_position_price(self):
+        items = [
+            {
+                "pk": {"S": "WALLET#CLOSING_BET#KRX_1520"},
+                "available_cash": {"N": "410000"},
+            },
+            {
+                "pk": {"S": "WALLET#DAY_TRADE"},
+                "available_cash": {"N": "500000"},
+            },
+            {
+                "pk": {"S": "OPEN#DAY_TRADE"},
+                "remaining_quantity": {"N": "5"},
+                "payload_json": {"S": json.dumps({"code": "123456", "quantity": 5})},
+            },
+        ]
+
+        cash, market_value = _paper_equity_components(items, {"123456": 20_500})
+
+        self.assertEqual(910_000, cash)
+        self.assertEqual(102_500, market_value)
+
+    def test_paper_equity_fails_closed_when_position_quote_is_missing(self):
+        items = [
+            {"pk": {"S": "WALLET#DAY_TRADE"}, "available_cash": {"N": "500000"}},
+            {
+                "pk": {"S": "OPEN#DAY_TRADE"},
+                "remaining_quantity": {"N": "5"},
+                "payload_json": {"S": json.dumps({"code": "123456", "quantity": 5})},
+            },
+        ]
+        with self.assertRaisesRegex(RuntimeError, "valuation is unavailable"):
+            _paper_equity_components(items, {})
+
+    def test_record_paper_equity_fetches_fresh_quotes_and_writes_daily_point(self):
+        ddb = FakeDdb()
+        ddb.items = {
+            "WALLET#DAY_TRADE": {
+                "pk": {"S": "WALLET#DAY_TRADE"},
+                "available_cash": {"N": "500000"},
+            },
+            "OPEN#DAY_TRADE": {
+                "pk": {"S": "OPEN#DAY_TRADE"},
+                "remaining_quantity": {"N": "5"},
+                "payload_json": {"S": json.dumps({"code": "123456", "quantity": 5})},
+            },
+        }
+
+        result = _record_paper_equity_snapshot(
+            client=FakeEquityQuoteClient(),
+            ddb=ddb,
+            table_name="paper",
+            recorded_at=datetime(2026, 10, 12, 15, 50, 5, tzinfo=KST),
+        )
+
+        self.assertEqual("RECORDED", result["status"])
+        self.assertEqual(602_500, result["total_assets"])
+        self.assertEqual(1, result["valued_positions"])
+        self.assertIn("EQUITY#PAPER#2026-10-12", ddb.items)
+
+    def test_on_demand_day_trade_scan_records_s3_and_dynamodb_without_schedule(self):
+        ddb = FakeDdb()
+        s3 = FakeS3()
+        builder = SimpleNamespace(
+            build_day_trade_snapshot=lambda **kwargs: day_trade_snapshot(
+                day_trade_quote(), captured_at=kwargs["captured_at"]
+            )
+        )
+        with patch(
+            "stock_automation.aws_runtime.KiwoomSnapshotBuilder",
+            return_value=builder,
+        ), patch(
+            "stock_automation.aws_runtime._market_change",
+            side_effect=[0.2, 0.5],
+        ), patch(
+            "stock_automation.aws_runtime._runtime_costs",
+            return_value=TradingCosts(1.5, 1.5, 18.0),
+        ):
+            result = _run_day_trade_scan(
+                client=object(),
+                ddb=ddb,
+                s3=s3,
+                bucket="paper",
+                table="paper",
+                now=datetime(2026, 10, 12, 10, 30, 30, tzinfo=KST),
+                catalysts={},
+                initial_cash=600_000,
+                candidate_limit=30,
+            )
+
+        self.assertEqual(0, result)
+        self.assertEqual(2, len(s3.objects))
+        self.assertIn("WALLET#DAY_TRADE", ddb.items)
+        self.assertIn("OPEN#DAY_TRADE", ddb.items)
 
     def test_0910_run_closes_verified_open_position(self):
         ddb = FakeDdb(open_position=position())

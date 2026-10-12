@@ -11,6 +11,7 @@ from .live_execution import (
     AccountGuard,
     DynamoLiveOrderStore,
     LiveOrderExecutor,
+    LiveOrderSupervisor,
     LiveOrderState,
 )
 from .order_safety import (
@@ -240,6 +241,41 @@ def reconcile(args) -> int:
         "checked_at": result.checked_at.isoformat(),
     }, ensure_ascii=False))
     return 0
+
+
+def supervise(args) -> int:
+    """Run one explicitly confirmed safety cycle; this is not an always-on loop."""
+    if args.confirm != "SUPERVISE_REAL_ORDERS":
+        raise RuntimeError(
+            "supervision may cancel stale orders; use --confirm SUPERVISE_REAL_ORDERS"
+        )
+    if os.getenv("LIVE_ORDER_ENABLED", "") != "1":
+        raise RuntimeError("LIVE_ORDER_ENABLED must be exactly 1")
+    now = datetime.now(KST)
+    account_alias = _approved_account_alias(args.account_alias)
+    store = _store(args.table)
+    raw, _read = _real_clients()
+    # One raw client is intentional: a cancellation is a state-changing request
+    # and must never inherit automatic retry behavior from the read client.
+    broker = KiwoomLiveBroker(raw, account_alias=account_alias)
+    result = LiveOrderSupervisor(
+        broker,
+        store,
+        account_alias=account_alias,
+        max_unfilled_seconds=args.max_unfilled_seconds,
+        exchange=args.exchange,
+    ).run_once(
+        checked_at=now,
+        observed_account_fingerprint=_account_fingerprint(),
+    )
+    print(json.dumps({
+        "status": "KILL_SWITCH_ON" if result.kill_switch_activated else "SUPERVISION_OK",
+        "checked_at": result.checked_at.isoformat(),
+        "inspected_orders": result.inspected_orders,
+        "actions": result.actions,
+        "holding_mismatches": result.holding_mismatches,
+    }, ensure_ascii=False))
+    return 5 if result.kill_switch_activated else 0
 
 
 def _store(table_name: str | None) -> DynamoLiveOrderStore:

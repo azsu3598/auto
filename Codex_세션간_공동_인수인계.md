@@ -84,12 +84,13 @@
 새 Codex는 다음 문서를 우선순위대로 확인한다.
 
 1. `<WORKSPACE>/AGENTS.md`
-2. `<WORKSPACE>/stock-automation/README.md`
-3. 이 문서 `Codex_세션간_공동_인수인계.md`
-4. `주식_자동매매_사용자_준비_가이드.md`
-5. `실거래_개발_후속_Codex_프롬프트.md`
-6. `집에_가져갈_주식자동매매_파일목록.md`
-7. `<WORKSPACE>/docs/프로그램 설계/`의 설계 문서
+2. `PC-C_단독진행_전체인수인계.md`
+3. `<WORKSPACE>/stock-automation/README.md`
+4. 이 문서 `Codex_세션간_공동_인수인계.md`
+5. `주식_자동매매_사용자_준비_가이드.md`
+6. `실거래_개발_후속_Codex_프롬프트.md`
+7. `집에_가져갈_주식자동매매_파일목록.md`
+8. `<WORKSPACE>/docs/프로그램 설계/`의 설계 문서
 
 내용이 충돌하면 실제 코드와 `AGENTS.md`를 기준으로 판단하고 충돌 사실을 사용자에게
 알린다.
@@ -166,13 +167,15 @@ PC-D는 `D:/Test`, PC-C는 `C:/Test`를 Docker 빌드 컨텍스트로 사용한�
 - 전략별 모의·실거래 독립 다중선택 UI와 DynamoDB 설정 형식(현재 변경 잠금)
 - 모의·실거래를 분리한 일별 총자산 추이 그래프와 `EQUITY#<MODE>#<날짜>` 형식
 - 최근 매수·매도·NO_TRADE의 판단 근거를 한글로 표시하는 UI
+- 단타 단발 AWS 실행의 S3·DynamoDB 저장 경로(자동 반복 스케줄 없음)
+- 거래일 15:50 일일 총자산 집계 작업과 기본 비활성 AWS 예약 템플릿
 - `SABU Trading Console` PC·모바일 읽기 전용 UI
 - UI의 실거래 준비상태 `안전조건 미충족` 잠금
 
 ### 마지막으로 확인된 테스트
 
 ```text
-전체 단위 테스트: 124개 통과
+전체 단위 테스트: 132개 통과
 Python compileall: 통과
 JavaScript 문법검사: 통과
 PC·모바일 브라우저 렌더링: 확인
@@ -192,7 +195,7 @@ python -m compileall -q src tests
 - 키움 주문 취소 요청 API와 장시간 미체결 자동 처리
 - 키움 주문·체결·잔고 대사의 실제 모의/실계좌 통합검증
 - 재시작 후 진행 중 주문 복구
-- 계좌 지문 고정
+- 계좌 지문 고정의 실제 키움 계좌 통합검증
 - 불일치 자동 비상정지
 - 실거래 전용 AWS 인프라 분리
 - 촉매 자동수집
@@ -200,8 +203,8 @@ python -m compileall -q src tests
 - Cognito·HTTPS가 적용된 대시보드 인터넷 배포
 - 대시보드의 실제 AWS 예약 상태와 CloudWatch 오류 연동
 - Cognito 인증 기반 실행모드 설정 저장 API와 실제 런타임 모드 라우팅
-- AWS 작업 종료 시 일별 총자산 스냅샷을 자동 생성하는 집계 작업
-- 단타 JSONL 결과의 DynamoDB 저장과 대시보드 실제 데이터 연결
+- 일일 총자산 집계 작업의 실제 키움 현재가·DynamoDB 통합검증
+- 단타 단발 AWS 실행의 실제 S3·DynamoDB·대시보드 통합검증
 - 단타 AWS 실행은 현재 방침상 상시감시·반복 스케줄 없이 단발 실행만 유지
 
 ## 6. 우선 작업 순서
@@ -273,6 +276,188 @@ python -m compileall -q src tests
 ```
 
 ## 10. 세션 전달 기록
+
+### 2026-10-12 15:05 KST — PC-D → PC-C
+
+- 작업 PC alias: `PC-D`
+- 작업 경로: `D:/Test`
+- 요청 목표: 전문형 대시보드에 실거래 안전센터·주문 상태·모바일 UI 추가
+- 완료한 작업:
+  - 비상정지, 계좌 보호 기준선, 최근 체결·잔고 대사와 진행 주문을 모은 실거래 안전센터 추가
+  - 대사 기록은 최근 10분 이내일 때만 정상으로 표시하고 누락·오래된 데이터는 확인 불가 처리
+  - 실주문 환경변수·비상정지·보호 기준선·대사 상태를 네 개의 안전 게이트로 표시
+  - 승인→전송→접수→체결/취소 주문 타임라인과 주문·체결·미체결 수량 표시
+  - `SUBMITTING`, `CANCEL_SUBMITTING`, `UNCERTAIN`을 위험 상태로 표시
+  - 계좌번호·계좌 별칭·계좌 지문이 대시보드 API에 노출되지 않도록 구성 및 테스트
+  - 모바일 실행 이력을 표 대신 카드형으로 전환하고 홈·안전·포지션·이력 하단 메뉴 추가
+  - `PAPER_TABLE`과 별도 `LIVE_ORDER_TABLE`을 읽기 전용으로 합치는 저장소 추가
+  - 샘플 fixture에 비상정지·보호 기준선·부분체결 주문 예시 추가
+  - UI의 실거래 설정과 비상정지 해제 기능은 계속 잠금 유지
+- 변경 파일:
+  - `stock-automation/src/stock_automation/dashboard.py`
+  - `stock-automation/src/stock_automation/dashboard_static/index.html`
+  - `stock-automation/src/stock_automation/dashboard_static/app.js`
+  - `stock-automation/src/stock_automation/dashboard_static/styles.css`
+  - `stock-automation/examples/dashboard_fixture.json`
+  - `stock-automation/tests/test_dashboard.py`
+  - `stock-automation/README.md`
+  - `PC-C_단독진행_전체인수인계.md`
+  - `Codex_세션간_공동_인수인계.md`
+- 추가·변경 테스트: 모의·실거래 테이블 결합, 안전센터 정상/누락/불확실 상태, 개인정보 비노출, UI 자산·모바일 메뉴 존재 확인
+- 전체 테스트 결과: `140개 통과`
+- 수동 검증 결과: Python compileall, fixture JSON 구문, JavaScript 구문, 로컬 fixture API 응답, 변경 파일 공백 검사 통과
+- 실패·미확인 사항: 실제 DynamoDB 두 테이블 연결과 브라우저 시각 회귀 확인은 PC-C에서 수행하지 않음
+- 남은 위험: 모바일 외부 접속용 Cognito·HTTPS·감사로그 미구현; 실거래 테이블 읽기 IAM 권한도 PC-C에서 최소권한 검증 필요
+- 실거래 상태: `비활성화 / 비상정지 기본 ON / UI 변경기능 잠금 / 실제 주문 없음`
+- 다음 Codex의 첫 작업: PC-C에서 140개 테스트와 fixture UI를 확인한 뒤 읽기 전용 `PAPER_TABLE`·`LIVE_ORDER_TABLE` 연결을 검증
+- 사용자에게 확인받을 사항: 없음
+- 전달 파일 버전 또는 복사시각: Git 커밋·push 전 로컬 변경 상태
+
+### 2026-10-12 14:52 KST — PC-D → PC-C
+
+- 작업 PC alias: `PC-D`
+- 작업 경로: `D:/Test`
+- 요청 목표: 현재 PC에서 가능한 실거래 안전 기능의 남은 코드 작업 진행
+- 완료한 작업:
+  - 키움 국내주식 취소주문 `kt10003`을 정확한 미체결 잔량으로 한 번만 호출하도록 구현
+  - 주문 접수 시 최초 체결·잔량을 저장하고 누적 체결 증가분만 프로그램 포지션에 반영
+  - 기본 180초가 지난 미체결 주문의 잔량 취소 상태 전이 추가
+  - 취소 결과 불명확 시 자동 재시도 없이 `UNCERTAIN`으로 잠그고 비상정지하도록 구현
+  - 재시작 시 접수·부분체결 주문을 재조회하고 `SUBMITTING` 등 모호한 상태는 추측하지 않고 비상정지
+  - 실제 잔고와 `보호 기준선 + 프로그램 포지션`을 종목별 정확히 대사하고 불일치 시 비상정지
+  - 주문번호 미조회·상태조회 실패·대사 실패도 비상정지하는 실패 폐쇄형 처리
+  - 명시적 확인 문자열이 필요한 1회 실행 명령 `live-supervise` 추가
+  - 상시 루프와 AWS 실거래 예약은 추가하지 않음
+- 변경 파일:
+  - `stock-automation/src/stock_automation/live_broker.py`
+  - `stock-automation/src/stock_automation/live_execution.py`
+  - `stock-automation/src/stock_automation/live_cli.py`
+  - `stock-automation/src/stock_automation/cli.py`
+  - `stock-automation/tests/test_live_broker.py`
+  - `stock-automation/tests/test_live_execution.py`
+  - `stock-automation/README.md`
+  - `PC-C_단독진행_전체인수인계.md`
+  - `Codex_세션간_공동_인수인계.md`
+- 추가·변경 테스트: 취소 TR 요청값, 미체결 잔량만 취소, 취소 응답 불명확 잠금, 재시작 모호상태 비상정지, 보호 기준선과 프로그램 수량의 정확 대사
+- 전체 테스트 결과: `137개 통과`
+- 수동 검증 결과: Python compileall 통과, 전체 unittest 통과
+- 실패·미확인 사항: 키움 실제/모의 API와 실제 DynamoDB를 이용한 주문취소·재시작·잔고대사 통합검증은 수행하지 않음
+- 남은 위험: `live-supervise`는 실제 취소 요청이 가능한 명령이므로 PC-C 통합검증과 사용자 별도 승인 전 실행 금지; 실거래 전용 AWS 인프라·인증 UI·운영 주기는 아직 없음
+- 실거래 상태: `비활성화 / 비상정지 기본 ON / 실제 주문 없음`
+- 다음 Codex의 첫 작업: PC-C에서 137개 테스트를 재실행한 뒤 가짜/모의 환경으로 DynamoDB 상태 전이와 키움 취소 응답을 통합검증
+- 사용자에게 확인받을 사항: 실거래 통합검증 단계에 들어가기 전 전용 계좌 여부와 감독형 소액 1건 승인
+- 전달 파일 버전 또는 복사시각: Git 커밋·push 전 로컬 변경 상태
+
+### 2026-10-12 14:46 KST — PC-D → PC-C
+
+- 작업 PC alias: `PC-D`
+- 작업 경로: `D:/Test`
+- 요청 목표: PC-D와 대화할 수 없을 때 PC-C와 새 Codex만으로 전체 작업을 계속할 수 있는 단일 인수인계 문서 작성
+- 완료한 작업:
+  - 새 Codex에게 그대로 전달할 PC-C 시작 프롬프트 작성
+  - 안전 권한, 프로젝트 목적, 전략 분리, NXT·토스 제외 방침 정리
+  - 현재 구현 기능, 132개 테스트 기준, DynamoDB 키 구조 정리
+  - Git 확인부터 테스트·Docker·키움 모의·AWS 비활성 배포까지 실행 순서 작성
+  - 단타 단발 실행, 15:50 총자산, AWS 예약표와 5거래일 검증 절차 정리
+  - UI 외부 공개 제한, 현재 수동 배포 흐름과 CI/CD 미구현 상태 명시
+  - 월 예상비용과 NAT Gateway·RDS·상시 서버 임의 추가 금지 기록
+  - 실주문 가능 조건, 남은 개발 우선순위, 장애 중지 및 세션 종료 양식 작성
+  - 공동 인수인계의 기준 문서 목록에 새 문서를 추가
+- 변경 파일:
+  - `PC-C_단독진행_전체인수인계.md`
+  - `Codex_세션간_공동_인수인계.md`
+- 추가·변경 테스트: 문서 변경만 수행
+- 전체 테스트 결과: 코드 변경 없음, 직전 `132개 통과` 유지
+- 수동 검증 결과: 495줄 문서 생성, 경로·금지 플래그·실행 단계 검색 및 `git diff --check` 통과
+- 실패·미확인 사항: PC-C 실제 파일 복사·Git pull 및 새 Codex의 문서 읽기는 아직 확인하지 않음
+- 남은 위험: 문서와 실제 코드가 달라질 때마다 PC-C Codex가 최신 상태로 갱신해야 함
+- 실거래 상태: `비활성화 / 비상정지 기본 ON / 실제 주문 없음`
+- 다음 Codex의 첫 작업: PC-C에서 새 전체 인수인계의 0절 프롬프트로 시작한 뒤 Git 상태와 132개 테스트 재검증
+- 사용자에게 확인받을 사항: 없음
+- 전달 파일 버전 또는 복사시각: Git 커밋·push 전 로컬 변경 상태
+
+### 2026-10-12 14:42 KST — PC-D → PC-C
+
+- 작업 PC alias: `PC-D`
+- 작업 경로: `D:/Test`
+- 요청 목표: PC-C 실행 가이드에 실제 수행 항목이 모두 적혀 있는지 확인하고 최신 작업 반영
+- 완료한 작업:
+  - 다른 PC 실행 가이드에 15:50 일일 총자산 작업과 확인 명령 추가
+  - 단타는 KST 09:10~14:50에 `DAY_TRADE_ON_DEMAND`로만 단발 실행하는 절차와 ECS 명령 추가
+  - 단타 자동 스케줄 금지와 `paper_only`, 전용 DynamoDB 키 확인 항목 추가
+  - 5거래일 CloudWatch·DynamoDB 원본 내보내기와 비밀정보 제외 요약 보고서 작성 절차 추가
+  - PC-D가 확인할 수 있도록 운영 검증 보고서와 인수인계를 Git으로 전달하는 절차 추가
+  - 실거래 검토 전 주문취소·미체결·재시작 복구·대사·자동 비상정지·인프라 분리 필수조건 명시
+  - AWS 실행 가이드의 PC-C 경로를 `C:/Test`로 정정하고 NXT 비활성 방침 반영
+- 변경 파일:
+  - `다른_PC_프로그램_실행방법.md`
+  - `AWS_자동매매_실행가이드.md`
+  - `Codex_세션간_공동_인수인계.md`
+- 추가·변경 테스트: 문서 변경만 수행, 실행 명령과 현재 CloudFormation 출력·환경변수 이름 대조
+- 전체 테스트 결과: 코드 변경 없음, 직전 `132개 통과` 유지
+- 수동 검증 결과: 문서 변경 범위 `git diff --check` 통과, PC-C 경로의 남은 `D:/Test` 표기 제거
+- 실패·미확인 사항: AWS 콘솔과 실제 PC-C에서 명령을 아직 실행하지 않음
+- 남은 위험: Windows PowerShell 및 실제 AWS 계정에서 단발 ECS 명령과 5일 자료 내보내기를 검증해야 함
+- 실거래 상태: `비활성화 / 비상정지 기본 ON / 실제 주문 없음`
+- 다음 Codex의 첫 작업: PC-C에서 가이드 순서대로 비활성 배포 후 온라인 진단을 실행하고 출력 기록
+- 사용자에게 확인받을 사항: 없음
+- 전달 파일 버전 또는 복사시각: Git 커밋·push 전 로컬 변경 상태
+
+### 2026-10-12 14:36 KST — PC-D → PC-C
+
+- 작업 PC alias: `PC-D`
+- 작업 경로: `D:/Test`
+- 요청 목표: 현재 PC에서 가능한 후속 구현과 실주문 가능 조건 정리
+- 완료한 작업:
+  - `DAY_TRADE_ON_DEMAND` 실행 단계를 추가해 명시적 단발 실행만 허용
+  - 단타 스냅샷·결정을 S3에 남기고 전용 지갑·포지션·이벤트를 DynamoDB에 저장하도록 연결
+  - 단타 자동 반복 스케줄은 만들지 않아 상시 장중 감시 금지 방침 유지
+  - `EQUITY_SNAPSHOT_1550` 단계에서 모든 모의 지갑 현금과 열린 포지션의 검증 현재가를 합산
+  - 현재가 누락·지연 시 일일 총자산을 기록하지 않는 실패 차단 유지
+  - 15:50 일일 총자산 AWS Scheduler 항목 추가, `CoreScheduleState=DISABLED` 기본값 유지
+  - CloudFormation에 단타 전용 초기 모의자금 환경변수 추가
+- 변경 파일:
+  - `stock-automation/src/stock_automation/aws_runtime.py`
+  - `stock-automation/infra/cloudformation.yaml`
+  - `stock-automation/tests/test_aws_runtime.py`
+  - `stock-automation/README.md`
+  - `Codex_세션간_공동_인수인계.md`
+- 추가·변경 테스트: 단타 단발 AWS 저장 경로, 키움 확인가 기반 총자산 집계 및 일일 저장
+- 전체 테스트 결과: `132개 통과`
+- 수동 검증 결과: Python compileall, CloudFormation YAML 구문 로드, 변경 파일 범위 `git diff --check` 통과
+- 실패·미확인 사항: 실제 AWS와 키움 모의 API 호출은 PC-C에서만 통합검증 가능
+- 남은 위험: 실주문 취소·장시간 미체결·재시작 복구·주기적 대사·불일치 비상정지 및 실거래 전용 인프라가 미완성
+- 실거래 상태: `비활성화 / 비상정지 기본 ON / 실제 주문 없음`
+- 다음 Codex의 첫 작업: PC-C에서 모의 테이블로 `DAY_TRADE_ON_DEMAND`와 `EQUITY_SNAPSHOT_1550`을 수동 실행해 결과 확인
+- 사용자에게 확인받을 사항: 5거래일 모의운용 완료 후 소액 실거래 전환을 별도로 승인할지 여부
+- 전달 파일 버전 또는 복사시각: Git 커밋·push 전 로컬 변경 상태
+
+### 2026-10-12 14:32 KST — PC-D → PC-C
+
+- 작업 PC alias: `PC-D`
+- 작업 경로: `D:/Test`
+- 요청 목표: 현재 PC에서 가능한 DynamoDB 저장 계층 보완 및 PC-C 역할 확인
+- 완료한 작업:
+  - 단타 결정을 `DAY#` 이벤트로 저장하는 DynamoDB 함수 추가
+  - 단타 매수 시 `OPEN#DAY_TRADE` 생성과 `WALLET#DAY_TRADE` 차감을 하나의 트랜잭션으로 묶음
+  - 단타 `NO_TRADE`도 중복 방지 조건과 함께 이벤트로 보존
+  - 모의·실거래별 일일 총자산을 `EQUITY#<MODE>#<날짜>`로 한 번만 저장하는 함수 추가
+  - 모의 지갑 현금과 열린 포지션 평가액 집계 추가
+  - 열린 포지션의 검증 현재가가 없으면 진입가나 0원으로 대체하지 않고 스냅샷 생성을 중단하도록 처리
+- 변경 파일:
+  - `stock-automation/src/stock_automation/aws_runtime.py`
+  - `stock-automation/tests/test_aws_runtime.py`
+  - `stock-automation/README.md`
+  - `Codex_세션간_공동_인수인계.md`
+- 추가·변경 테스트: 단타 BUY/NO_TRADE DynamoDB 저장, 전용 지갑 분리, 일일 총자산 합산, 미확인가 실패 차단
+- 전체 테스트 결과: `130개 통과`
+- 수동 검증 결과: Python compileall 통과, 이번 변경 파일 범위 `git diff --check` 통과
+- 실패·미확인 사항: 실제 AWS 자격증명·테이블·키움 현재가를 사용한 통합실행은 이 PC에서 수행하지 않음
+- 남은 위험: 단타 단발 명령과 실제 DynamoDB 호출 연결, 일일 평가용 키움 현재가 수집 및 AWS 예약 작업 연결 필요
+- 실거래 상태: `비활성화 / 저장 계층은 모의 기준 / 실제 주문 없음`
+- 다음 Codex의 첫 작업: PC-C에서 AWS 모의 테이블과 키움 모의 API로 단타 저장 및 일일 총자산 스냅샷을 통합검증
+- 사용자에게 확인받을 사항: 없음
+- 전달 파일 버전 또는 복사시각: Git 커밋·push 전 로컬 변경 상태
 
 ### 2026-10-12 14:25 KST — PC-D → PC-C
 

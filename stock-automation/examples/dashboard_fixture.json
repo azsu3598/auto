@@ -104,5 +104,31 @@
     "decision": "NO_TRADE",
     "decided_at": "2026-10-08T13:30:00+09:00",
     "payload_json": "{\"decision\":\"NO_TRADE\",\"decided_at\":\"2026-10-08T13:30:00+09:00\",\"paper_only\":true,\"reason_codes\":[\"NO_QUALIFYING_DAY_TRADE_CANDIDATE\"]}"
+  },
+  {
+    "pk": "CONTROL#LIVE",
+    "status": "KILL_SWITCH_ON",
+    "account_alias": "demo",
+    "updated_at": "2026-10-08T15:24:00+09:00"
+  },
+  {
+    "pk": "CONTROL#ACCOUNT_GUARD",
+    "status": "BASELINE_LOCKED",
+    "account_alias": "demo",
+    "account_fingerprint": "not-shown-in-ui",
+    "protected_holdings_json": "{\"005930\":10,\"035420\":3}",
+    "captured_at": "2026-10-08T09:00:00+09:00",
+    "updated_at": "2026-10-08T09:00:00+09:00"
+  },
+  {
+    "pk": "LIVE_ORDER#DEMO-PARTIAL-001",
+    "status": "PARTIALLY_FILLED",
+    "intent_json": "{\"intent_id\":\"DEMO-PARTIAL-001\",\"strategy\":\"CLOSING_BET\",\"side\":\"BUY\",\"code\":\"123456\",\"name\":\"실주문 UI 샘플\",\"quantity\":10,\"limit_price\":20000}",
+    "broker_order_json": "{\"intent_id\":\"DEMO-PARTIAL-001\",\"broker_order_no\":\"DEMO777\",\"side\":\"BUY\",\"code\":\"123456\",\"quantity\":10,\"limit_price\":20000}",
+    "broker_order_no": "DEMO777",
+    "last_filled_quantity": 6,
+    "remaining_quantity": 4,
+    "last_reconciled_at": "2026-10-08T15:23:50+09:00",
+    "updated_at": "2026-10-08T15:23:50+09:00"
   }
 ]

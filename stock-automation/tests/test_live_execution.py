@@ -1,13 +1,17 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from stock_automation.live_broker import BrokerOrder, BrokerOrderStatus
+from stock_automation.live_broker import BrokerCancellation, BrokerOrder, BrokerOrderStatus
 from stock_automation.live_execution import (
     AccountGuard,
     DynamoLiveOrderStore,
+    FillReconciliation,
     LiveExecutionResult,
     LiveOrderExecutor,
+    LiveOrderSupervisor,
     LiveOrderState,
+    StoredLiveOrder,
+    holding_mismatches,
 )
 from stock_automation.order_safety import (
     AuthorizationStatus,
@@ -32,7 +36,7 @@ class FakeDdb:
 
     def put_item(self, **kwargs):
         key = kwargs["Item"]["pk"]["S"]
-        if key in self.items:
+        if kwargs.get("ConditionExpression") and key in self.items:
             raise ConditionalFailure()
         self.items[key] = dict(kwargs["Item"])
 
@@ -55,20 +59,32 @@ class FakeDdb:
                 raise ConditionalFailure()
         elif ":ready" in condition:
             expected = values[":ready"]["S"]
+        elif ":cancel_submitting" in condition and ":cancel_submitting" in values:
+            expected = values[":cancel_submitting"]["S"]
         elif ":submitting" in condition:
             expected = values[":submitting"]["S"]
+        elif ":ack" in condition and ":partial" in condition:
+            if current not in {values[":ack"]["S"], values[":partial"]["S"]}:
+                raise ConditionalFailure()
+            if item.get("broker_order_no") != values[":number"]:
+                raise ConditionalFailure()
+            if item.get("remaining_quantity") != values[":remaining"]:
+                raise ConditionalFailure()
         if expected is not None and current != expected:
             raise ConditionalFailure()
+        target_tokens = (
+            ":cancel_ack", ":cancel_submitting", ":uncertain", ":ack", ":submitting", ":ready"
+        )
         status_value = next(
-            (values[name]["S"] for name in (":ready", ":submitting", ":ack", ":uncertain")
-             if name in values and values[name]["S"] != current),
-            current,
+            (values[name]["S"] for name in target_tokens if name in values), current
         )
         item["status"] = {"S": status_value}
         mappings = {
             ":approval": "approval_json", ":broker": "broker_order_json",
             ":number": "broker_order_no", ":reason": "uncertainty_reason",
-            ":updated": "updated_at",
+            ":updated": "updated_at", ":zero": "last_filled_quantity",
+            ":remaining": "remaining_quantity", ":cancellation": "cancellation_json",
+            ":cancel_number": "cancellation_order_no",
         }
         for token, field in mappings.items():
             if token in values:
@@ -163,6 +179,73 @@ class FakeBroker:
         )
 
 
+class SupervisorStore:
+    def __init__(self, stored, *, guard=None, positions=None, remaining=4):
+        self.stored = tuple(stored)
+        self.guard = guard
+        self.positions = positions or {}
+        self.remaining = remaining
+        self.cancel_claims = []
+        self.cancellations = []
+        self.uncertain = []
+        self.kill = False
+
+    def load_account_guard(self):
+        return self.guard
+
+    def active_orders(self):
+        return self.stored
+
+    def reconcile_fill(self, order, status):
+        state = LiveOrderState.PARTIALLY_FILLED if status.filled_quantity else LiveOrderState.ACKNOWLEDGED
+        return FillReconciliation(
+            order.intent_id, order.broker_order_no, state, status.filled_quantity,
+            status.remaining_quantity, status.filled_quantity, status.filled_quantity,
+            status.checked_at,
+        )
+
+    def claim_cancel(self, order, *, remaining_quantity, requested_at):
+        self.cancel_claims.append((order.intent_id, remaining_quantity))
+        return True
+
+    def acknowledge_cancel(self, cancellation, *, updated_at):
+        self.cancellations.append(cancellation)
+
+    def mark_cancel_uncertain(self, intent_id, *, reason, updated_at):
+        self.uncertain.append((intent_id, reason))
+
+    def program_positions(self):
+        return dict(self.positions)
+
+    def set_kill_switch(self, *, account_alias, active, updated_at):
+        self.kill = active
+
+
+class SupervisorBroker:
+    def __init__(self, order, *, holdings, cancel_failure=None):
+        self.order = order
+        self.current_holdings = holdings
+        self.cancel_failure = cancel_failure
+        self.cancel_quantities = []
+
+    def order_status(self, order, *, checked_at):
+        return BrokerOrderStatus(
+            order.broker_order_no, order.quantity, order.quantity - 4, 4,
+            order.limit_price, "부분체결", checked_at,
+        )
+
+    def cancel_order(self, order, *, quantity, requested_at):
+        self.cancel_quantities.append(quantity)
+        if self.cancel_failure:
+            raise self.cancel_failure
+        return BrokerCancellation(
+            order.intent_id, order.broker_order_no, "C-777", quantity, requested_at
+        )
+
+    def holdings(self, *, exchange):
+        return dict(self.current_holdings)
+
+
 def intent():
     return build_order_intent(
         event_id="EVENT-1", strategy="CLOSING_BET", side=OrderSide.BUY,
@@ -251,6 +334,44 @@ class LiveExecutionTests(unittest.TestCase):
         self.assertEqual(4, full.fill_delta)
         self.assertEqual(10, store.program_quantity("123456"))
 
+    def test_cancel_state_transition_is_claimed_once_and_acknowledged(self):
+        ddb = FakeDdb()
+        store = DynamoLiveOrderStore(ddb, "table")
+        order_intent = intent()
+        store.create_pending(order_intent, created_at=NOW)
+        store.approve(
+            order_intent,
+            UserApproval(order_intent.intent_id, approval_challenge(order_intent), NOW, "USER"),
+            updated_at=NOW,
+        )
+        store.claim(order_intent.intent_id, claimed_at=NOW)
+        order = BrokerOrder(
+            order_intent.intent_id, "777", OrderSide.BUY, "123456", 10, 10_000,
+            "KRX", NOW,
+        )
+        store.acknowledge(order, updated_at=NOW)
+        store.reconcile_fill(
+            order,
+            BrokerOrderStatus(
+                "777", 10, 6, 4, 10_020, "부분체결", NOW + timedelta(seconds=10)
+            ),
+        )
+        self.assertTrue(store.claim_cancel(
+            order, remaining_quantity=4, requested_at=NOW + timedelta(seconds=181)
+        ))
+        self.assertFalse(store.claim_cancel(
+            order, remaining_quantity=4, requested_at=NOW + timedelta(seconds=182)
+        ))
+        store.acknowledge_cancel(
+            BrokerCancellation(
+                order.intent_id, "777", "C-777", 4, NOW + timedelta(seconds=181)
+            ),
+            updated_at=NOW + timedelta(seconds=181),
+        )
+        self.assertEqual(
+            LiveOrderState.CANCEL_ACKNOWLEDGED, store.load(order.intent_id).state
+        )
+
     def test_kill_switch_defaults_on_and_requires_matching_account_control(self):
         ddb = FakeDdb()
         store = DynamoLiveOrderStore(ddb, "table")
@@ -311,6 +432,62 @@ class LiveExecutionTests(unittest.TestCase):
                 changed, authorization(order_intent), submitted_at=NOW
             )
         self.assertEqual(0, changed_store.claims)
+
+    def test_holding_mismatch_requires_exact_baseline_plus_program_quantity(self):
+        self.assertEqual(
+            {}, holding_mismatches({"123456": 16}, {"123456": 10}, {"123456": 6})
+        )
+        self.assertEqual(
+            {"123456": (16, 15)},
+            holding_mismatches({"123456": 15}, {"123456": 10}, {"123456": 6}),
+        )
+
+    def test_supervisor_cancels_only_remaining_quantity_after_timeout(self):
+        order_intent = intent()
+        order = BrokerOrder(
+            order_intent.intent_id, "777", OrderSide.BUY, "123456", 10, 10_000,
+            "KRX", NOW,
+        )
+        guard = AccountGuard("main", "fp", {"123456": 10}, NOW)
+        stored = StoredLiveOrder(order_intent, LiveOrderState.ACKNOWLEDGED, broker_order=order)
+        store = SupervisorStore([stored], guard=guard, positions={"123456": 6})
+        broker = SupervisorBroker(order, holdings={"123456": 16})
+        result = LiveOrderSupervisor(
+            broker, store, account_alias="main", max_unfilled_seconds=180
+        ).run_once(checked_at=NOW + timedelta(seconds=181), observed_account_fingerprint="fp")
+        self.assertEqual([4], broker.cancel_quantities)
+        self.assertEqual(1, len(store.cancellations))
+        self.assertFalse(result.kill_switch_activated)
+
+    def test_supervisor_cancel_uncertainty_and_restart_ambiguity_turn_on_kill_switch(self):
+        order_intent = intent()
+        order = BrokerOrder(
+            order_intent.intent_id, "777", OrderSide.BUY, "123456", 10, 10_000,
+            "KRX", NOW,
+        )
+        guard = AccountGuard("main", "fp", {"123456": 10}, NOW)
+        acknowledged = StoredLiveOrder(
+            order_intent, LiveOrderState.ACKNOWLEDGED, broker_order=order
+        )
+        store = SupervisorStore([acknowledged], guard=guard, positions={"123456": 6})
+        broker = SupervisorBroker(
+            order, holdings={"123456": 16}, cancel_failure=TimeoutError("unknown")
+        )
+        result = LiveOrderSupervisor(broker, store, account_alias="main").run_once(
+            checked_at=NOW + timedelta(seconds=181), observed_account_fingerprint="fp"
+        )
+        self.assertTrue(result.kill_switch_activated)
+        self.assertTrue(store.kill)
+        self.assertEqual(1, len(store.uncertain))
+
+        ambiguous = StoredLiveOrder(order_intent, LiveOrderState.SUBMITTING)
+        restarted = SupervisorStore([ambiguous], guard=guard)
+        result = LiveOrderSupervisor(
+            SupervisorBroker(order, holdings={"123456": 10}), restarted,
+            account_alias="main",
+        ).run_once(checked_at=NOW + timedelta(seconds=10), observed_account_fingerprint="fp")
+        self.assertTrue(result.kill_switch_activated)
+        self.assertIn(f"{order_intent.intent_id}:AMBIGUOUS_ORDER_STATE", result.actions)
 
 
 if __name__ == "__main__":

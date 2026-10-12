@@ -40,6 +40,13 @@ class FakeClient:
                     "ord_remnq": "4", "cntr_uv": "10020", "acpt_tp": "부분체결",
                 }],
             })
+        if api_id == "kt10003":
+            return Response({
+                "return_code": 0,
+                "ord_no": "0001235",
+                "base_orig_ord_no": "0001234",
+                "cncl_qty": "000000000004",
+            })
         if api_id == "kt00001":
             return Response({"return_code": 0, "ord_alow_amt": "500000"})
         if api_id == "kt00018":
@@ -143,6 +150,27 @@ class KiwoomLiveBrokerTests(unittest.TestCase):
         self.assertEqual(6, status.filled_quantity)
         self.assertEqual(4, status.remaining_quantity)
         self.assertEqual(10_020, status.average_fill_price)
+
+    def test_cancels_only_the_verified_remaining_quantity_once(self):
+        client = FakeClient()
+        broker = KiwoomLiveBroker(client, account_alias="main")
+        intent, authorization = authorized_intent()
+        order = broker.submit_limit_order(intent, authorization, submitted_at=NOW)
+
+        result = broker.cancel_order(
+            order, quantity=4, requested_at=NOW + timedelta(minutes=3)
+        )
+
+        self.assertEqual("0001235", result.cancellation_order_no)
+        self.assertEqual(4, result.cancelled_quantity)
+        cancel_call = client.calls[-1]
+        self.assertEqual("kt10003", cancel_call["api_id"])
+        self.assertEqual({
+            "dmst_stex_tp": "KRX",
+            "orig_ord_no": "0001234",
+            "stk_cd": "123456",
+            "cncl_qty": "4",
+        }, cancel_call["body"])
 
     def test_account_risk_uses_orderable_cash_holdings_and_realized_pnl(self):
         broker = KiwoomLiveBroker(FakeClient(), account_alias="main")

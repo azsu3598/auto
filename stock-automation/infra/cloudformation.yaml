@@ -22,6 +22,10 @@ Parameters:
     Type: Number
     Default: 600000
     Description: Separate paper capital for the 20-40 trading-day strategy
+  DayTradeStartingCash:
+    Type: Number
+    Default: 600000
+    Description: Separate paper capital for explicitly invoked day-trade scans
   BuyFeeBps:
     Type: Number
     Description: Verified broker buy commission in basis points, used only by replay/tuning
@@ -211,6 +215,8 @@ Resources:
               Value: !Ref StartingCash
             - Name: MEDIUM_STARTING_CASH
               Value: !Ref MediumStartingCash
+            - Name: DAY_TRADE_STARTING_CASH
+              Value: !Ref DayTradeStartingCash
             - Name: BUY_FEE_BPS
               Value: !Ref BuyFeeBps
             - Name: SELL_FEE_BPS
@@ -467,6 +473,27 @@ Resources:
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
         Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"MEDIUM_REVIEW_1535"}]}]}'
+
+  EquitySnapshotSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      State: !Ref CoreScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(50 15 ? * MON-FRI *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !GetAtt Cluster.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        RetryPolicy: {MaximumEventAgeInSeconds: 1800, MaximumRetryAttempts: 2}
+        EcsParameters:
+          TaskDefinitionArn: !Ref TaskDefinition
+          LaunchType: FARGATE
+          NetworkConfiguration:
+            AwsVpcConfiguration:
+              AssignPublicIp: ENABLED
+              Subnets: !Ref SubnetIds
+              SecurityGroups: !Ref SecurityGroupIds
+        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"EQUITY_SNAPSHOT_1550"}]}]}'
 
 Outputs:
   ArtifactBucketName: {Value: !Ref ArtifactBucket}

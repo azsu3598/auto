@@ -113,16 +113,71 @@ function renderEvents(rows) {
   if (!rows.length) { const tr = el("tr"); const td = el("td"); td.colSpan = 7; td.append(empty("기록 없음", "첫 모의실행 이후 이력이 표시됩니다.")); tr.append(td); root.append(tr); return; }
   rows.forEach((row) => {
     const tr = el("tr");
-    const time = el("td", "", formatTime(row.occurred_at));
-    const type = el("td"); type.append(el("span", "event-pill", row.type));
-    const stock = el("td"); stock.append(el("strong", "", row.stock || "-"));
-    const decision = el("td", "", row.decision || "-");
-    const price = el("td", "", row.price ? won.format(row.price) : "-");
-    const pnl = el("td", row.pnl > 0 ? "positive" : row.pnl < 0 ? "negative" : "", row.pnl === null || row.pnl === undefined ? "-" : won.format(row.pnl));
+    const time = el("td", "", formatTime(row.occurred_at)); time.dataset.label = "시각";
+    const type = el("td"); type.dataset.label = "구분"; type.append(el("span", "event-pill", row.type));
+    const stock = el("td"); stock.dataset.label = "종목"; stock.append(el("strong", "", row.stock || "-"));
+    const decision = el("td", "", row.decision || "-"); decision.dataset.label = "결정";
+    const price = el("td", "", row.price ? won.format(row.price) : "-"); price.dataset.label = "가격";
+    const pnl = el("td", row.pnl > 0 ? "positive" : row.pnl < 0 ? "negative" : "", row.pnl === null || row.pnl === undefined ? "-" : won.format(row.pnl)); pnl.dataset.label = "손익";
     const reasons = el("td", "reason-cell");
+    reasons.dataset.label = "매매 이유";
     if (row.reasons?.length) row.reasons.forEach((reason) => reasons.append(el("span", "reason-chip", reason)));
     else reasons.textContent = "기록 없음";
     tr.append(time, type, stock, decision, price, pnl, reasons); root.append(tr);
+  });
+}
+
+function renderLiveSafety(summary, orders) {
+  summary = summary || {};
+  const tone = summary.overall || "blocked";
+  const badge = byId("live-safety-badge");
+  badge.className = `badge ${tone}`; badge.textContent = summary.title || "확인 불가";
+  byId("live-active-orders").textContent = `${number.format(summary.active_orders || 0)}건`;
+  const ambiguous = summary.ambiguous_orders || 0;
+  const ambiguousNode = byId("live-ambiguous-orders");
+  ambiguousNode.textContent = `${number.format(ambiguous)}건`;
+  ambiguousNode.className = ambiguous ? "negative" : "positive";
+  byId("live-last-reconciled").textContent = formatTime(summary.last_reconciled_at);
+
+  const gates = byId("live-gates"); gates.replaceChildren();
+  (summary.gates || []).forEach((gate) => {
+    const row = el("div", `live-gate ${gate.state || "blocked"}`);
+    const copy = el("div"); copy.append(el("span", "", gate.label), el("strong", "", gate.detail));
+    row.append(el("i", "gate-icon"), copy); gates.append(row);
+  });
+  if (!(summary.gates || []).length) gates.append(empty("안전정보 없음", "DynamoDB 안전 레코드를 확인하세요."));
+
+  const root = byId("live-orders"); root.replaceChildren();
+  if (!orders?.length) {
+    root.append(empty("실주문 이력 없음", "현재 실주문이 실행되지 않았거나 안전 원장이 연결되지 않았습니다."));
+    return;
+  }
+  orders.forEach((order) => {
+    const card = el("article", `live-order-card ${order.tone || "neutral"}`);
+    const header = el("div", "live-order-header");
+    const identity = el("div", "live-order-identity");
+    identity.append(
+      el("span", "", `${order.strategy || "전략 확인 불가"} · ${order.side || "-"}`),
+      el("strong", "", `${order.name || "확인 불가"} ${order.code ? `(${order.code})` : ""}`),
+    );
+    header.append(identity, el("span", `order-state ${order.tone || "neutral"}`, order.state_label || order.state));
+    const figures = el("div", "live-order-figures");
+    [["주문", `${number.format(order.quantity || 0)}주`], ["체결", `${number.format(order.filled_quantity || 0)}주`], ["미체결", `${number.format(order.remaining_quantity || 0)}주`], ["지정가", order.limit_price ? won.format(order.limit_price) : "-"]].forEach(([label, value]) => {
+      const figure = el("div"); figure.append(el("span", "", label), el("strong", "", value)); figures.append(figure);
+    });
+    const steps = el("div", "order-steps");
+    (order.steps || []).forEach((step) => {
+      const node = el("div", `order-step ${step.state}`);
+      node.append(el("i"), el("span", "", step.label)); steps.append(node);
+    });
+    const meta = el("div", "live-order-meta");
+    meta.append(
+      el("span", "", `갱신 ${formatTime(order.updated_at)}`),
+      el("span", "", order.broker_order_no ? `주문번호 ${order.broker_order_no}` : "주문번호 대기"),
+    );
+    card.append(header, figures, steps, meta);
+    if (order.uncertainty_reason) card.append(el("p", "order-warning", order.uncertainty_reason));
+    root.append(card);
   });
 }
 
@@ -190,6 +245,7 @@ function render(data) {
   byId("open-positions").textContent = `${number.format(data.metrics.open_positions || 0)}개`;
   byId("pending-alerts").textContent = `알림 대기 ${number.format(data.metrics.pending_notifications || 0)}건`;
   equityHistory = data.equity_history || { PAPER: [], LIVE: [] }; renderEquityChart();
+  renderLiveSafety(data.live_safety, data.live_orders || []);
   renderPositions(data.positions); renderEvents(data.recent_events); renderSafety(data.safety);
   renderStrategyModes(data.strategy_modes || []); renderWallets(data.wallets);
   renderSchedules(data.schedules); renderWarnings(data.warnings);

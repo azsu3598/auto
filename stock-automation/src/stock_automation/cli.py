@@ -120,6 +120,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     live_reconcile.add_argument("--intent-id", required=True)
     live_reconcile.add_argument("--table")
+    live_supervise = sub.add_parser(
+        "live-supervise",
+        help="reconcile all open orders, cancel stale remainders, and verify holdings",
+    )
+    live_supervise.add_argument("--account-alias", required=True)
+    live_supervise.add_argument("--exchange", choices=("KRX",), default="KRX")
+    live_supervise.add_argument("--max-unfilled-seconds", type=int, default=180)
+    live_supervise.add_argument("--confirm", required=True)
+    live_supervise.add_argument("--table")
     return parser
 
 
@@ -159,6 +168,7 @@ def main(argv: list[str] | None = None) -> int:
             "live-kill-switch": live_cli.set_kill_switch,
             "live-account-baseline": live_cli.initialize_account_baseline,
             "live-reconcile": live_cli.reconcile,
+            "live-supervise": live_cli.supervise,
         }
         return handlers[args.command](args)
     if args.command in {"backtest", "tune"}:

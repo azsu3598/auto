@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from stock_automation.dashboard import (
+    CombinedDashboardRepository,
     FixtureDashboardRepository,
     STATIC_DIR,
     _decode_item,
@@ -19,10 +20,33 @@ KST = timezone(timedelta(hours=9))
 
 
 class DashboardTests(unittest.TestCase):
+    def test_combines_paper_and_live_read_only_repositories(self):
+        class Repository:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def items(self):
+                return self.rows
+
+        combined = CombinedDashboardRepository((
+            Repository([{"pk": "WALLET#CLOSING_BET"}]),
+            Repository([{"pk": "CONTROL#LIVE"}]),
+        ))
+        self.assertEqual(
+            ["WALLET#CLOSING_BET", "CONTROL#LIVE"],
+            [row["pk"] for row in combined.items()],
+        )
+
     def test_static_console_assets_are_packaged_in_source_tree(self):
         self.assertTrue((STATIC_DIR / "index.html").is_file())
         self.assertTrue((STATIC_DIR / "styles.css").is_file())
         self.assertTrue((STATIC_DIR / "app.js").is_file())
+        html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        css = (STATIC_DIR / "styles.css").read_text(encoding="utf-8")
+        self.assertIn('id="safety-center"', html)
+        self.assertIn('id="live-orders"', html)
+        self.assertIn('class="mobile-nav"', html)
+        self.assertIn(".live-order-card", css)
 
     def test_builds_safe_summary_from_paper_ledger(self):
         position = {
@@ -151,6 +175,57 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual("LIVE_FLAG_DETECTED", result["mode"])
         self.assertTrue(any("실주문" in warning for warning in result["warnings"]))
         self.assertFalse(result["live_transition"]["allowed"])
+
+    def test_builds_live_safety_center_without_exposing_account_identity(self):
+        intent = {
+            "strategy": "CLOSING_BET", "side": "BUY", "code": "123456",
+            "name": "안전테스트", "quantity": 10, "limit_price": 20_000,
+        }
+        items = [{
+            "pk": "CONTROL#LIVE", "status": "KILL_SWITCH_ON",
+            "account_alias": "private-alias",
+        }, {
+            "pk": "CONTROL#ACCOUNT_GUARD", "account_alias": "private-alias",
+            "account_fingerprint": "private-fingerprint",
+            "protected_holdings_json": json.dumps({"005930": 10}),
+        }, {
+            "pk": "LIVE_ORDER#ORDER-1", "status": "PARTIALLY_FILLED",
+            "intent_json": json.dumps(intent, ensure_ascii=False),
+            "broker_order_no": "777", "last_filled_quantity": 6,
+            "remaining_quantity": 4,
+            "last_reconciled_at": "2026-10-12T14:50:00+09:00",
+            "updated_at": "2026-10-12T14:50:00+09:00",
+        }]
+        with patch.dict(os.environ, {}, clear=True):
+            result = dashboard_payload(
+                items, now=datetime(2026, 10, 12, 15, 0, tzinfo=KST)
+            )
+        self.assertEqual("safe", result["live_safety"]["overall"])
+        self.assertTrue(result["live_safety"]["kill_switch_active"])
+        self.assertTrue(result["live_safety"]["account_guard_locked"])
+        self.assertEqual(1, result["live_safety"]["active_orders"])
+        self.assertEqual("부분체결", result["live_orders"][0]["state_label"])
+        self.assertEqual(4, result["live_orders"][0]["remaining_quantity"])
+        serialized = json.dumps(result, ensure_ascii=False)
+        self.assertNotIn("private-alias", serialized)
+        self.assertNotIn("private-fingerprint", serialized)
+
+    def test_unknown_or_ambiguous_live_state_is_not_presented_as_safe(self):
+        with patch.dict(os.environ, {}, clear=True):
+            empty = dashboard_payload([], now=datetime(2026, 10, 12, tzinfo=KST))
+            uncertain = dashboard_payload([{
+                "pk": "LIVE_ORDER#ORDER-UNKNOWN", "status": "UNCERTAIN",
+                "intent_json": json.dumps({
+                    "strategy": "CLOSING_BET", "side": "BUY", "code": "123456",
+                    "name": "확인필요", "quantity": 1, "limit_price": 10_000,
+                }),
+                "uncertainty_reason": "TimeoutError: do not retry",
+                "updated_at": "2026-10-12T15:00:00+09:00",
+            }], now=datetime(2026, 10, 12, 15, 1, tzinfo=KST))
+        self.assertEqual("blocked", empty["live_safety"]["overall"])
+        self.assertEqual("danger", uncertain["live_safety"]["overall"])
+        self.assertEqual(1, uncertain["live_safety"]["ambiguous_orders"])
+        self.assertTrue(any("실주문 상태" in row for row in uncertain["warnings"]))
 
     def test_decodes_dynamodb_and_loads_fixture(self):
         decoded = _decode_item({

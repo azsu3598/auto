@@ -45,6 +45,17 @@ class FixtureDashboardRepository:
         return payload
 
 
+@dataclass(slots=True)
+class CombinedDashboardRepository:
+    repositories: tuple[DashboardRepository, ...]
+
+    def items(self) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        for repository in self.repositories:
+            result.extend(repository.items())
+        return result
+
+
 def dashboard_payload(
     items: Iterable[dict[str, Any]], *, now: datetime | None = None
 ) -> dict[str, Any]:
@@ -56,6 +67,9 @@ def dashboard_payload(
     equity_history: dict[str, list[dict[str, Any]]] = {"PAPER": [], "LIVE": []}
     pending_notifications = 0
     mode_configuration: dict[str, dict[str, bool]] = {}
+    live_orders: list[dict[str, Any]] = []
+    kill_switch: dict[str, Any] | None = None
+    account_guard: dict[str, Any] | None = None
 
     for item in rows:
         key = str(item.get("pk", ""))
@@ -93,6 +107,12 @@ def dashboard_payload(
                 "paper_selected": bool(item.get("paper_enabled", False)),
                 "live_selected": bool(item.get("live_enabled", False)),
             }
+        elif key == "CONTROL#LIVE":
+            kill_switch = item
+        elif key == "CONTROL#ACCOUNT_GUARD":
+            account_guard = item
+        elif key.startswith("LIVE_ORDER#"):
+            live_orders.append(_live_order_row(key, item))
         elif _is_event(key):
             events.append(_event_row(key, item, payload))
 
@@ -100,6 +120,7 @@ def dashboard_payload(
     positions.sort(key=lambda row: row.get("entry_at") or "", reverse=True)
     events.sort(key=lambda row: row.get("occurred_at") or "", reverse=True)
     events = events[:30]
+    live_orders.sort(key=lambda row: row.get("updated_at") or "", reverse=True)
     for history in equity_history.values():
         history.sort(key=lambda row: str(row["recorded_at"]))
         del history[:-90]
@@ -116,6 +137,17 @@ def dashboard_payload(
         warnings.append(f"전송 대기 알림이 {pending_notifications}건 있습니다.")
     if live_enabled:
         warnings.append("위험: 이 프로세스에 실주문 환경변수가 활성화되어 있습니다.")
+    live_safety = _live_safety_summary(
+        now=now,
+        live_enabled=live_enabled,
+        kill_switch=kill_switch,
+        account_guard=account_guard,
+        live_orders=live_orders,
+    )
+    if live_safety["ambiguous_orders"]:
+        warnings.append(
+            f"확인이 필요한 실주문 상태가 {live_safety['ambiguous_orders']}건 있습니다."
+        )
 
     return {
         "generated_at": now.isoformat(),
@@ -139,6 +171,8 @@ def dashboard_payload(
         "recent_events": events,
         "strategy_modes": _strategy_mode_rows(mode_configuration),
         "equity_history": equity_history,
+        "live_safety": live_safety,
+        "live_orders": live_orders[:20],
         "schedules": _schedule_rows(),
         "safety": [
             {"label": "실주문", "state": "danger" if live_enabled else "safe", "detail": "감지됨" if live_enabled else "잠금"},
@@ -228,7 +262,14 @@ def repository_from_environment(*, fixture: str | None = None) -> DashboardRepos
         raise RuntimeError("PAPER_TABLE is required unless --fixture is provided")
     import boto3
 
-    return DynamoDashboardRepository(table, boto3.client("dynamodb"))
+    client = boto3.client("dynamodb")
+    paper = DynamoDashboardRepository(table, client)
+    live_table = os.getenv("LIVE_ORDER_TABLE", "").strip()
+    if live_table and live_table != table:
+        return CombinedDashboardRepository(
+            (paper, DynamoDashboardRepository(live_table, client))
+        )
+    return paper
 
 
 def _decode_item(item: dict[str, Any]) -> dict[str, Any]:
@@ -346,6 +387,194 @@ def _event_reasons(
         if label not in labels:
             labels.append(label)
     return labels[:5]
+
+
+_LIVE_ORDER_LABELS = {
+    "PENDING_APPROVAL": "사용자 승인 대기",
+    "READY": "주문 준비",
+    "SUBMITTING": "주문 전송 결과 확인 필요",
+    "ACKNOWLEDGED": "증권사 접수",
+    "PARTIALLY_FILLED": "부분체결",
+    "FILLED": "전체체결",
+    "CANCEL_SUBMITTING": "취소 전송 결과 확인 필요",
+    "CANCEL_ACKNOWLEDGED": "취소 접수",
+    "CANCELLED": "취소 완료",
+    "REJECTED": "주문 거부",
+    "UNCERTAIN": "수동 확인 필요",
+}
+
+
+def _live_order_row(key: str, item: dict[str, Any]) -> dict[str, Any]:
+    intent = _json_object(item.get("intent_json"))
+    broker = _json_object(item.get("broker_order_json"))
+    state = str(item.get("status") or "UNKNOWN").strip().upper()
+    quantity = _integer(intent.get("quantity") or broker.get("quantity"))
+    filled = _integer(item.get("last_filled_quantity"))
+    remaining = _integer(item.get("remaining_quantity"))
+    if not remaining and state not in {"FILLED", "CANCELLED", "REJECTED"}:
+        remaining = max(0, quantity - filled)
+    return {
+        "intent_id": key.removeprefix("LIVE_ORDER#"),
+        "state": state,
+        "state_label": _LIVE_ORDER_LABELS.get(state, state.replace("_", " ")),
+        "tone": _live_order_tone(state),
+        "strategy": _strategy_label(str(intent.get("strategy") or "")),
+        "code": str(intent.get("code") or broker.get("code") or ""),
+        "name": str(intent.get("name") or intent.get("code") or "확인 불가"),
+        "side": "매수" if str(intent.get("side") or broker.get("side")) == "BUY" else "매도",
+        "quantity": quantity,
+        "filled_quantity": filled,
+        "remaining_quantity": remaining,
+        "limit_price": _integer(intent.get("limit_price") or broker.get("limit_price")),
+        "broker_order_no": str(item.get("broker_order_no") or ""),
+        "updated_at": item.get("updated_at"),
+        "last_reconciled_at": item.get("last_reconciled_at"),
+        "uncertainty_reason": item.get("uncertainty_reason"),
+        "steps": _live_order_steps(state),
+    }
+
+
+def _live_order_tone(state: str) -> str:
+    if state in {"SUBMITTING", "CANCEL_SUBMITTING", "UNCERTAIN", "REJECTED"}:
+        return "danger"
+    if state in {"ACKNOWLEDGED", "PARTIALLY_FILLED", "CANCEL_ACKNOWLEDGED"}:
+        return "warning"
+    if state in {"FILLED", "CANCELLED"}:
+        return "safe"
+    return "neutral"
+
+
+def _live_order_steps(state: str) -> list[dict[str, str]]:
+    stages = ["승인", "전송", "접수", "체결·취소"]
+    progress = {
+        "PENDING_APPROVAL": 0,
+        "READY": 1,
+        "SUBMITTING": 1,
+        "ACKNOWLEDGED": 2,
+        "PARTIALLY_FILLED": 2,
+        "CANCEL_SUBMITTING": 2,
+        "CANCEL_ACKNOWLEDGED": 3,
+        "FILLED": 4,
+        "CANCELLED": 4,
+        "REJECTED": 4,
+        "UNCERTAIN": 4,
+    }.get(state, 0)
+    danger = state in {"SUBMITTING", "CANCEL_SUBMITTING", "UNCERTAIN", "REJECTED"}
+    result = []
+    for index, label in enumerate(stages):
+        step_state = "done" if index < progress else "pending"
+        if danger and index == min(progress, len(stages) - 1):
+            step_state = "danger"
+        elif index == progress and progress < len(stages):
+            step_state = "current"
+        result.append({"label": label, "state": step_state})
+    return result
+
+
+def _live_safety_summary(
+    *,
+    now: datetime,
+    live_enabled: bool,
+    kill_switch: dict[str, Any] | None,
+    account_guard: dict[str, Any] | None,
+    live_orders: list[dict[str, Any]],
+) -> dict[str, Any]:
+    kill_status = str((kill_switch or {}).get("status") or "UNKNOWN").upper()
+    kill_active = kill_status != "KILL_SWITCH_OFF"
+    kill_known = kill_status in {"KILL_SWITCH_ON", "KILL_SWITCH_OFF"}
+    ambiguous_states = {"SUBMITTING", "CANCEL_SUBMITTING", "UNCERTAIN"}
+    ambiguous = sum(order["state"] in ambiguous_states for order in live_orders)
+    active_states = {
+        "READY", "SUBMITTING", "ACKNOWLEDGED", "PARTIALLY_FILLED",
+        "CANCEL_SUBMITTING", "CANCEL_ACKNOWLEDGED", "UNCERTAIN",
+    }
+    active = sum(order["state"] in active_states for order in live_orders)
+    reconciled_values = [
+        str(order["last_reconciled_at"])
+        for order in live_orders
+        if order.get("last_reconciled_at")
+    ]
+    last_reconciled_at = max(reconciled_values, default=None)
+    reconciliation_fresh = _recent_timestamp(
+        last_reconciled_at, now=now, maximum_age=timedelta(minutes=10)
+    )
+    gates = [
+        {
+            "label": "실주문 환경변수",
+            "state": "danger" if live_enabled else "safe",
+            "detail": "활성 감지" if live_enabled else "비활성",
+        },
+        {
+            "label": "비상정지",
+            "state": "safe" if kill_known and kill_active else "danger" if kill_known else "blocked",
+            "detail": "ON" if kill_known and kill_active else "OFF" if kill_known else "기록 없음 · ON 간주",
+        },
+        {
+            "label": "계좌 보호 기준선",
+            "state": "safe" if account_guard else "blocked",
+            "detail": (
+                f"잠금 · {len(_json_object((account_guard or {}).get('protected_holdings_json')))}종목"
+                if account_guard else "기록 없음"
+            ),
+        },
+        {
+            "label": "최근 체결·잔고 대사",
+            "state": "safe" if reconciliation_fresh and not ambiguous else "blocked",
+            "detail": (
+                str(last_reconciled_at) if reconciliation_fresh
+                else f"오래됨 · {last_reconciled_at}" if last_reconciled_at
+                else "기록 없음"
+            ),
+        },
+    ]
+    overall = "danger" if live_enabled or not kill_active or ambiguous else "safe"
+    if not kill_known or not account_guard or not reconciliation_fresh:
+        overall = "blocked" if overall == "safe" else overall
+    return {
+        "overall": overall,
+        "title": {
+            "safe": "안전 잠금 정상",
+            "blocked": "통합검증 대기",
+            "danger": "즉시 확인 필요",
+        }[overall],
+        "active_orders": active,
+        "ambiguous_orders": ambiguous,
+        "last_reconciled_at": last_reconciled_at,
+        "reconciliation_fresh": reconciliation_fresh,
+        "kill_switch_active": kill_active,
+        "account_guard_locked": bool(account_guard),
+        "gates": gates,
+    }
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _recent_timestamp(
+    value: Any,
+    *,
+    now: datetime,
+    maximum_age: timedelta,
+) -> bool:
+    if not value:
+        return False
+    try:
+        observed = datetime.fromisoformat(str(value))
+    except ValueError:
+        return False
+    if observed.tzinfo is None or now.tzinfo is None:
+        return False
+    age = now - observed
+    return timedelta(0) <= age <= maximum_age
 
 
 _REASON_LABELS = {

@@ -49,6 +49,15 @@ class BrokerOrderStatus:
     checked_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class BrokerCancellation:
+    intent_id: str
+    original_order_no: str
+    cancellation_order_no: str
+    cancelled_quantity: int
+    requested_at: datetime
+
+
 class KiwoomLiveBroker:
     """Minimal domestic-stock live broker using documented Kiwoom REST TRs.
 
@@ -173,6 +182,44 @@ class KiwoomLiveBroker:
             average_fill_price=_integer(match.get("cntr_uv")) or None,
             status_text=str(match.get("acpt_tp") or match.get("io_tp_nm") or "UNKNOWN"),
             checked_at=checked_at,
+        )
+
+    def cancel_order(
+        self,
+        order: BrokerOrder,
+        *,
+        quantity: int,
+        requested_at: datetime,
+    ) -> BrokerCancellation:
+        """Submit one exact cancellation attempt without automatic retry."""
+        if requested_at.tzinfo is None:
+            raise ValueError("requested_at must be timezone-aware")
+        if quantity <= 0 or quantity > order.quantity:
+            raise ValueError("cancellation quantity must be within the original order")
+        response = self.client.fetch_page(
+            api_id="kt10003",
+            path="/api/dostk/ordr",
+            body={
+                "dmst_stex_tp": order.exchange,
+                "orig_ord_no": order.broker_order_no,
+                "stk_cd": order.code,
+                "cncl_qty": str(quantity),
+            },
+        )
+        body = response.body
+        _ensure_success(body)
+        cancellation_order_no = str(body.get("ord_no", "")).strip()
+        cancelled_quantity = _integer(body.get("cncl_qty"))
+        if not cancellation_order_no:
+            raise RuntimeError("Kiwoom cancellation response has no order number")
+        if cancelled_quantity and cancelled_quantity != quantity:
+            raise RuntimeError("Kiwoom cancellation quantity does not match the request")
+        return BrokerCancellation(
+            intent_id=order.intent_id,
+            original_order_no=order.broker_order_no,
+            cancellation_order_no=cancellation_order_no,
+            cancelled_quantity=quantity,
+            requested_at=requested_at,
         )
 
     def account_risk_state(

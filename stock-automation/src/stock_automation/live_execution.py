@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any, Protocol
 
-from .live_broker import BrokerOrder, BrokerOrderStatus, KiwoomLiveBroker
+from .live_broker import BrokerCancellation, BrokerOrder, BrokerOrderStatus, KiwoomLiveBroker
 from .order_safety import (
     AuthorizationStatus,
     OrderAuthorization,
@@ -23,6 +23,8 @@ class LiveOrderState(StrEnum):
     SUBMITTING = "SUBMITTING"
     ACKNOWLEDGED = "ACKNOWLEDGED"
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
+    CANCEL_SUBMITTING = "CANCEL_SUBMITTING"
+    CANCEL_ACKNOWLEDGED = "CANCEL_ACKNOWLEDGED"
     FILLED = "FILLED"
     CANCELLED = "CANCELLED"
     REJECTED = "REJECTED"
@@ -36,6 +38,7 @@ class StoredLiveOrder:
     approval: UserApproval | None = None
     broker_order: BrokerOrder | None = None
     uncertainty_reason: str | None = None
+    updated_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +55,7 @@ class FillReconciliation:
     broker_order_no: str
     state: LiveOrderState
     cumulative_filled_quantity: int
+    remaining_quantity: int
     fill_delta: int
     program_quantity: int
     checked_at: datetime
@@ -66,6 +70,15 @@ class AccountGuard:
 
     def protected_quantity(self, code: str) -> int:
         return max(0, int(self.protected_holdings.get(code, 0)))
+
+
+@dataclass(frozen=True, slots=True)
+class SupervisionResult:
+    checked_at: datetime
+    inspected_orders: int
+    actions: tuple[str, ...]
+    holding_mismatches: dict[str, tuple[int, int]]
+    kill_switch_activated: bool
 
 
 class LiveOrderStore(Protocol):
@@ -259,6 +272,8 @@ class DynamoLiveOrderStore:
             LiveOrderState.SUBMITTING.value,
             LiveOrderState.ACKNOWLEDGED.value,
             LiveOrderState.PARTIALLY_FILLED.value,
+            LiveOrderState.CANCEL_SUBMITTING.value,
+            LiveOrderState.CANCEL_ACKNOWLEDGED.value,
             LiveOrderState.FILLED.value,
             LiveOrderState.CANCELLED.value,
             LiveOrderState.REJECTED.value,
@@ -294,6 +309,50 @@ class DynamoLiveOrderStore:
         item = response.get("Item")
         return max(0, int(item.get("quantity", {}).get("N", "0"))) if item else 0
 
+    def program_positions(self) -> dict[str, int]:
+        result: dict[str, int] = {}
+        start_key = None
+        while True:
+            request: dict[str, Any] = {"TableName": self.table_name}
+            if start_key:
+                request["ExclusiveStartKey"] = start_key
+            response = self.ddb.scan(**request)
+            for item in response.get("Items", []):
+                key = item.get("pk", {}).get("S", "")
+                if key.startswith("PROGRAM_POSITION#"):
+                    code = key.removeprefix("PROGRAM_POSITION#")
+                    quantity = max(0, int(item.get("quantity", {}).get("N", "0")))
+                    if code and quantity:
+                        result[code] = quantity
+            start_key = response.get("LastEvaluatedKey")
+            if not start_key:
+                return result
+
+    def active_orders(self) -> tuple[StoredLiveOrder, ...]:
+        active_states = {
+            LiveOrderState.SUBMITTING.value,
+            LiveOrderState.ACKNOWLEDGED.value,
+            LiveOrderState.PARTIALLY_FILLED.value,
+            LiveOrderState.CANCEL_SUBMITTING.value,
+            LiveOrderState.CANCEL_ACKNOWLEDGED.value,
+            LiveOrderState.UNCERTAIN.value,
+        }
+        result: list[StoredLiveOrder] = []
+        start_key = None
+        while True:
+            request: dict[str, Any] = {"TableName": self.table_name}
+            if start_key:
+                request["ExclusiveStartKey"] = start_key
+            response = self.ddb.scan(**request)
+            for item in response.get("Items", []):
+                key = item.get("pk", {}).get("S", "")
+                state = item.get("status", {}).get("S", "")
+                if key.startswith("LIVE_ORDER#") and state in active_states:
+                    result.append(_stored_order(item))
+            start_key = response.get("LastEvaluatedKey")
+            if not start_key:
+                return tuple(result)
+
     def reconcile_fill(
         self,
         order: BrokerOrder,
@@ -313,13 +372,18 @@ class DynamoLiveOrderStore:
             raise RuntimeError("acknowledged live order is missing")
         if stored.broker_order.broker_order_no != order.broker_order_no:
             raise RuntimeError("stored broker order number mismatch")
-        if stored.state not in {LiveOrderState.ACKNOWLEDGED, LiveOrderState.PARTIALLY_FILLED}:
+        if stored.state not in {
+            LiveOrderState.ACKNOWLEDGED,
+            LiveOrderState.PARTIALLY_FILLED,
+            LiveOrderState.CANCEL_ACKNOWLEDGED,
+        }:
             if stored.state in {LiveOrderState.FILLED, LiveOrderState.CANCELLED, LiveOrderState.REJECTED}:
                 return FillReconciliation(
                     order.intent_id,
                     order.broker_order_no,
                     stored.state,
                     status.filled_quantity,
+                    status.remaining_quantity,
                     0,
                     self.program_quantity(order.code),
                     status.checked_at,
@@ -336,6 +400,11 @@ class DynamoLiveOrderStore:
             raise RuntimeError("broker cumulative fill quantity moved backwards")
         delta = status.filled_quantity - previous
         state = _reconciled_state(status)
+        if (
+            stored.state == LiveOrderState.CANCEL_ACKNOWLEDGED
+            and state in {LiveOrderState.ACKNOWLEDGED, LiveOrderState.PARTIALLY_FILLED}
+        ):
+            state = LiveOrderState.CANCEL_ACKNOWLEDGED
 
         values = {
             ":previous": {"N": str(previous)},
@@ -344,6 +413,7 @@ class DynamoLiveOrderStore:
             ":state": {"S": state.value},
             ":ack": {"S": LiveOrderState.ACKNOWLEDGED.value},
             ":partial": {"S": LiveOrderState.PARTIALLY_FILLED.value},
+            ":cancel_ack": {"S": LiveOrderState.CANCEL_ACKNOWLEDGED.value},
             ":number": {"S": order.broker_order_no},
             ":checked": {"S": status.checked_at.isoformat()},
             ":status_text": {"S": status.status_text[:200]},
@@ -358,7 +428,8 @@ class DynamoLiveOrderStore:
                     "last_reconciled_at = :checked, updated_at = :checked"
                 ),
                 "ConditionExpression": (
-                    "broker_order_no = :number AND (#status = :ack OR #status = :partial) "
+                    "broker_order_no = :number AND (#status = :ack OR #status = :partial "
+                    "OR #status = :cancel_ack) "
                     "AND (attribute_not_exists(last_filled_quantity) OR last_filled_quantity = :previous)"
                 ),
                 "ExpressionAttributeNames": {"#status": "status"},
@@ -403,6 +474,7 @@ class DynamoLiveOrderStore:
             order.broker_order_no,
             state,
             status.filled_quantity,
+            status.remaining_quantity,
             delta,
             self.program_quantity(order.code),
             status.checked_at,
@@ -464,7 +536,8 @@ class DynamoLiveOrderStore:
             Key={"pk": {"S": _pk(order.intent_id)}},
             UpdateExpression=(
                 "SET #status = :ack, broker_order_json = :broker, "
-                "broker_order_no = :number, updated_at = :updated"
+                "broker_order_no = :number, last_filled_quantity = :zero, "
+                "remaining_quantity = :remaining, updated_at = :updated"
             ),
             ConditionExpression="#status = :submitting",
             ExpressionAttributeNames={"#status": "status"},
@@ -473,6 +546,90 @@ class DynamoLiveOrderStore:
                 ":submitting": {"S": LiveOrderState.SUBMITTING.value},
                 ":broker": {"S": _broker_order_json(order)},
                 ":number": {"S": order.broker_order_no},
+                ":zero": {"N": "0"},
+                ":remaining": {"N": str(order.quantity)},
+                ":updated": {"S": updated_at.isoformat()},
+            },
+        )
+
+    def claim_cancel(
+        self,
+        order: BrokerOrder,
+        *,
+        remaining_quantity: int,
+        requested_at: datetime,
+    ) -> bool:
+        if remaining_quantity <= 0:
+            return False
+        try:
+            self.ddb.update_item(
+                TableName=self.table_name,
+                Key={"pk": {"S": _pk(order.intent_id)}},
+                UpdateExpression="SET #status = :cancel_submitting, updated_at = :updated",
+                ConditionExpression=(
+                    "broker_order_no = :number AND remaining_quantity = :remaining AND "
+                    "(#status = :ack OR #status = :partial)"
+                ),
+                ExpressionAttributeNames={"#status": "status"},
+                ExpressionAttributeValues={
+                    ":ack": {"S": LiveOrderState.ACKNOWLEDGED.value},
+                    ":partial": {"S": LiveOrderState.PARTIALLY_FILLED.value},
+                    ":cancel_submitting": {"S": LiveOrderState.CANCEL_SUBMITTING.value},
+                    ":number": {"S": order.broker_order_no},
+                    ":remaining": {"N": str(remaining_quantity)},
+                    ":updated": {"S": requested_at.isoformat()},
+                },
+            )
+            return True
+        except Exception as exc:
+            if _conditional_failure(exc):
+                return False
+            raise
+
+    def acknowledge_cancel(
+        self,
+        cancellation: BrokerCancellation,
+        *,
+        updated_at: datetime,
+    ) -> None:
+        self.ddb.update_item(
+            TableName=self.table_name,
+            Key={"pk": {"S": _pk(cancellation.intent_id)}},
+            UpdateExpression=(
+                "SET #status = :cancel_ack, cancellation_json = :cancellation, "
+                "cancellation_order_no = :cancel_number, updated_at = :updated"
+            ),
+            ConditionExpression=(
+                "#status = :cancel_submitting AND broker_order_no = :original_number"
+            ),
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={
+                ":cancel_ack": {"S": LiveOrderState.CANCEL_ACKNOWLEDGED.value},
+                ":cancel_submitting": {"S": LiveOrderState.CANCEL_SUBMITTING.value},
+                ":cancellation": {"S": _cancellation_json(cancellation)},
+                ":cancel_number": {"S": cancellation.cancellation_order_no},
+                ":original_number": {"S": cancellation.original_order_no},
+                ":updated": {"S": updated_at.isoformat()},
+            },
+        )
+
+    def mark_cancel_uncertain(
+        self,
+        intent_id: str,
+        *,
+        reason: str,
+        updated_at: datetime,
+    ) -> None:
+        self.ddb.update_item(
+            TableName=self.table_name,
+            Key={"pk": {"S": _pk(intent_id)}},
+            UpdateExpression="SET #status = :uncertain, uncertainty_reason = :reason, updated_at = :updated",
+            ConditionExpression="#status = :cancel_submitting",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={
+                ":uncertain": {"S": LiveOrderState.UNCERTAIN.value},
+                ":cancel_submitting": {"S": LiveOrderState.CANCEL_SUBMITTING.value},
+                ":reason": {"S": reason[:500]},
                 ":updated": {"S": updated_at.isoformat()},
             },
         )
@@ -491,6 +648,153 @@ class DynamoLiveOrderStore:
                 ":updated": {"S": updated_at.isoformat()},
             },
         )
+
+
+class LiveOrderSupervisor:
+    """Reconcile open orders and fail closed on ambiguous broker/account state."""
+
+    def __init__(
+        self,
+        broker: KiwoomLiveBroker,
+        store: DynamoLiveOrderStore,
+        *,
+        account_alias: str,
+        max_unfilled_seconds: int = 180,
+        exchange: str = "KRX",
+    ) -> None:
+        if max_unfilled_seconds <= 0:
+            raise ValueError("max_unfilled_seconds must be positive")
+        self.broker = broker
+        self.store = store
+        self.account_alias = account_alias
+        self.max_unfilled = timedelta(seconds=max_unfilled_seconds)
+        self.exchange = exchange
+
+    def run_once(
+        self,
+        *,
+        checked_at: datetime,
+        observed_account_fingerprint: str,
+    ) -> SupervisionResult:
+        if checked_at.tzinfo is None:
+            raise ValueError("checked_at must be timezone-aware")
+        actions: list[str] = []
+        activate_kill = False
+        guard = self.store.load_account_guard()
+        if (
+            guard is None
+            or guard.account_alias != self.account_alias
+            or guard.account_fingerprint != observed_account_fingerprint
+        ):
+            activate_kill = True
+            actions.append("ACCOUNT_GUARD_MISMATCH")
+
+        active = self.store.active_orders()
+        for stored in active:
+            order = stored.broker_order
+            if order is None or stored.state in {
+                LiveOrderState.SUBMITTING,
+                LiveOrderState.CANCEL_SUBMITTING,
+                LiveOrderState.UNCERTAIN,
+            }:
+                activate_kill = True
+                actions.append(f"{stored.intent.intent_id}:AMBIGUOUS_ORDER_STATE")
+                continue
+            try:
+                status = self.broker.order_status(order, checked_at=checked_at)
+            except Exception as exc:
+                activate_kill = True
+                actions.append(
+                    f"{order.intent_id}:STATUS_CHECK_FAILED:{type(exc).__name__}"
+                )
+                continue
+            if status.status_text == "NOT_FOUND_REQUIRES_MANUAL_RECONCILIATION":
+                activate_kill = True
+                actions.append(f"{order.intent_id}:BROKER_ORDER_NOT_FOUND")
+                continue
+            try:
+                result = self.store.reconcile_fill(order, status)
+            except Exception as exc:
+                activate_kill = True
+                actions.append(
+                    f"{order.intent_id}:RECONCILIATION_FAILED:{type(exc).__name__}"
+                )
+                continue
+            actions.append(f"{order.intent_id}:RECONCILED:{result.state.value}")
+            if (
+                result.state in {LiveOrderState.ACKNOWLEDGED, LiveOrderState.PARTIALLY_FILLED}
+                and result.remaining_quantity > 0
+                and checked_at - order.submitted_at >= self.max_unfilled
+            ):
+                if not self.store.claim_cancel(
+                    order,
+                    remaining_quantity=result.remaining_quantity,
+                    requested_at=checked_at,
+                ):
+                    activate_kill = True
+                    actions.append(f"{order.intent_id}:CANCEL_CLAIM_FAILED")
+                    continue
+                try:
+                    cancellation = self.broker.cancel_order(
+                        order,
+                        quantity=result.remaining_quantity,
+                        requested_at=checked_at,
+                    )
+                except Exception as exc:
+                    reason = f"{type(exc).__name__}: cancellation result unknown; do not retry"
+                    self.store.mark_cancel_uncertain(
+                        order.intent_id, reason=reason, updated_at=checked_at
+                    )
+                    activate_kill = True
+                    actions.append(f"{order.intent_id}:CANCEL_UNCERTAIN")
+                else:
+                    self.store.acknowledge_cancel(cancellation, updated_at=checked_at)
+                    actions.append(f"{order.intent_id}:CANCEL_ACKNOWLEDGED")
+
+        mismatches: dict[str, tuple[int, int]] = {}
+        try:
+            actual_holdings = self.broker.holdings(exchange=self.exchange)
+            program_positions = self.store.program_positions()
+            protected = guard.protected_holdings if guard else {}
+            mismatches = holding_mismatches(
+                actual_holdings, protected, program_positions
+            )
+        except Exception as exc:
+            activate_kill = True
+            actions.append(f"HOLDINGS_CHECK_FAILED:{type(exc).__name__}")
+        else:
+            if mismatches:
+                activate_kill = True
+                actions.append("HOLDINGS_MISMATCH")
+        if activate_kill:
+            self.store.set_kill_switch(
+                account_alias=self.account_alias, active=True, updated_at=checked_at
+            )
+        return SupervisionResult(
+            checked_at=checked_at,
+            inspected_orders=len(active),
+            actions=tuple(actions),
+            holding_mismatches=mismatches,
+            kill_switch_activated=activate_kill,
+        )
+
+
+def holding_mismatches(
+    actual_holdings: dict[str, int],
+    protected_holdings: dict[str, int],
+    program_positions: dict[str, int],
+) -> dict[str, tuple[int, int]]:
+    """Return code -> (expected, actual) for exact account reconciliation."""
+    codes = set(actual_holdings) | set(protected_holdings) | set(program_positions)
+    result: dict[str, tuple[int, int]] = {}
+    for code in sorted(codes):
+        expected = max(0, int(protected_holdings.get(code, 0))) + max(
+            0, int(program_positions.get(code, 0))
+        )
+        actual = max(0, int(actual_holdings.get(code, 0)))
+        if expected != actual:
+            result[code] = (expected, actual)
+    return result
 
 
 def _pk(intent_id: str) -> str:
@@ -527,6 +831,12 @@ def _broker_order_json(order: BrokerOrder) -> str:
     return json.dumps(raw, ensure_ascii=False, sort_keys=True)
 
 
+def _cancellation_json(cancellation: BrokerCancellation) -> str:
+    raw = asdict(cancellation)
+    raw["requested_at"] = cancellation.requested_at.isoformat()
+    return json.dumps(raw, ensure_ascii=False, sort_keys=True)
+
+
 def _stored_order(item: dict[str, dict[str, str]]) -> StoredLiveOrder:
     raw_intent = json.loads(item["intent_json"]["S"])
     for key in ("reference_at", "created_at", "expires_at"):
@@ -550,6 +860,11 @@ def _stored_order(item: dict[str, dict[str, str]]) -> StoredLiveOrder:
         approval=approval,
         broker_order=broker_order,
         uncertainty_reason=item.get("uncertainty_reason", {}).get("S"),
+        updated_at=(
+            datetime.fromisoformat(item["updated_at"]["S"])
+            if item.get("updated_at", {}).get("S")
+            else None
+        ),
     )
 
 
