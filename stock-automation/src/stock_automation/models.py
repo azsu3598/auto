@@ -53,6 +53,7 @@ class Quote:
     catalyst: str
     catalyst_score: float
     catalyst_verified: bool = False
+    market: str = ""
     institution_net: int | None = None
     program_net: int | None = None
     best_ask: int | None = None
@@ -165,6 +166,7 @@ class Decision:
                     "theme": c.quote.theme,
                     "catalyst": c.quote.catalyst,
                     "catalyst_verified": c.quote.catalyst_verified,
+                    "market": c.quote.market,
                     "institution_net": c.quote.institution_net,
                     "program_net": c.quote.program_net,
                     "reasons": list(c.reasons),

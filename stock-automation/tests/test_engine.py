@@ -38,6 +38,7 @@ def quote(**overrides) -> Quote:
         catalyst="confirmed contract",
         catalyst_score=0.8,
         catalyst_verified=True,
+        market="KOSPI",
         institution_net=500_000_000,
         program_net=300_000_000,
         best_ask=20_000,
@@ -195,6 +196,34 @@ class ClosingBetEngineTests(unittest.TestCase):
         )
         decision = ClosingBetEngine().evaluate(snapshot(plain, breakout), cash=600_000)
         self.assertEqual("111111", decision.candidates[0].quote.code)
+
+    def test_market_specific_crash_rejects_only_exposed_market(self):
+        kosdaq_quote = quote(market="KOSDAQ")
+        kospi_quote = quote(code="222222", name="코스피", theme="battery", market="KOSPI")
+        snap = MarketSnapshot(
+            captured_at=datetime(2026, 10, 6, 15, 20, 30, tzinfo=KST),
+            session=Session.KRX_1520,
+            kospi_change_pct=0.2,
+            kosdaq_change_pct=-3.2,
+            quotes=(kosdaq_quote, kospi_quote),
+            source="fixture",
+        )
+        ranked = ClosingBetEngine().rank_candidates(snap)
+        self.assertEqual(["222222"], [candidate.quote.code for candidate in ranked])
+
+    def test_weak_market_reduces_score_and_records_risk(self):
+        normal = ClosingBetEngine().rank_candidates(snapshot(quote()))[0]
+        weak_snapshot = MarketSnapshot(
+            captured_at=datetime(2026, 10, 6, 15, 20, 30, tzinfo=KST),
+            session=Session.KRX_1520,
+            kospi_change_pct=-2.0,
+            kosdaq_change_pct=0.5,
+            quotes=(quote(),),
+            source="fixture",
+        )
+        weak = ClosingBetEngine().rank_candidates(weak_snapshot)[0]
+        self.assertLess(weak.score, normal.score)
+        self.assertIn("MARKET_WEAKNESS", weak.risks)
 
 
 if __name__ == "__main__":

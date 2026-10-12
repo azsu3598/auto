@@ -166,8 +166,13 @@ class ClosingBetEngine:
         if not q.catalyst_verified or not q.catalyst.strip():
             return None
 
+        market_change = self._market_change(snapshot, q)
+        if market_change <= cfg.maximum_market_decline_pct:
+            return None
+
         # Normalized 100-point suitability score.  It is a rule-fit score, not
         # a probability of profit.
+        risks: list[str] = list(q.warnings)
         score = min(15.0, max(0.0, (log10(max(q.trading_value, 1)) - 9.0) * 7.5))
         score += q.close_strength * 15.0
         score += min(7.0, max(0.0, (q.volume_ratio - 1.0) * 7.0))
@@ -207,6 +212,14 @@ class ClosingBetEngine:
             score += 1.5
         if q.institution_net is not None and q.institution_net > 0:
             score += 1.5
+        if market_change < cfg.market_weakness_start_pct:
+            market_penalty = min(
+                10.0,
+                (cfg.market_weakness_start_pct - market_change)
+                * cfg.market_weakness_penalty_per_pct,
+            )
+            score -= market_penalty
+            risks.append("MARKET_WEAKNESS")
         if q.price > cfg.preferred_max_price:
             score -= 5.0
         if q.day_change_pct > 8.0:
@@ -232,7 +245,6 @@ class ClosingBetEngine:
             reasons.append("RSI_HEALTHY_MOMENTUM")
         if q.catalyst.strip():
             reasons.append("CATALYST_CONFIRMED")
-        risks: list[str] = list(q.warnings)
         if q.day_change_pct >= 8.0:
             risks.append("LATE_ENTRY_RISK")
         if q.total_ask_size is None or q.total_bid_size is None:
@@ -243,6 +255,17 @@ class ClosingBetEngine:
             risks.append("RSI_OVERHEATED")
         score = min(100.0, max(0.0, score))
         return Candidate(q, round(score, 4), tuple(reasons), tuple(dict.fromkeys(risks)))
+
+    @staticmethod
+    def _market_change(snapshot: MarketSnapshot, quote: Quote) -> float:
+        market = quote.market.strip().upper()
+        if market in {"KOSPI", "KS", "0", "001", "P00101"}:
+            return snapshot.kospi_change_pct
+        if market in {"KOSDAQ", "KQ", "10", "101", "P10102"}:
+            return snapshot.kosdaq_change_pct
+        # Legacy/manual snapshots may not have a market field.  Use the weaker
+        # index so missing classification cannot bypass the risk-off gate.
+        return min(snapshot.kospi_change_pct, snapshot.kosdaq_change_pct)
 
     @staticmethod
     def _diversify(candidates: list[Candidate]) -> list[Candidate]:

@@ -104,6 +104,23 @@ class KiwoomSnapshotBuilder:
                 if str(row.get("stk_cd", "")).replace("_NX", "").strip() in allowed_codes
             ]
         ranked = ranked[:candidate_limit]
+        institution_flow: dict[str, int] = {}
+        program_flow: dict[str, int] = {}
+        if ranked:
+            try:
+                institution_flow = self._institution_flow(
+                    exchange=exchange,
+                    date=captured_at.strftime("%Y%m%d"),
+                )
+            except (ValueError, RuntimeError, TimeoutError, ConnectionError, OSError):
+                institution_flow = {}
+            try:
+                program_flow = self._program_flow(
+                    exchange=exchange,
+                    date=captured_at.strftime("%Y%m%d"),
+                )
+            except (ValueError, RuntimeError, TimeoutError, ConnectionError, OSError):
+                program_flow = {}
         quotes: list[Quote] = []
         for row in ranked:
             code = str(row.get("stk_cd", "")).replace("_NX", "").strip()
@@ -117,6 +134,8 @@ class KiwoomSnapshotBuilder:
                     captured_at=captured_at,
                     session=session,
                     catalyst=catalysts.get(code, Catalyst("", "", 0.0, False)),
+                    institution_net=institution_flow.get(code),
+                    program_net=program_flow.get(code),
                 )
             except (KeyError, ValueError):
                 continue
@@ -401,6 +420,8 @@ class KiwoomSnapshotBuilder:
         captured_at: datetime,
         session: Session,
         catalyst: Catalyst,
+        institution_net: int | None,
+        program_net: int | None,
     ) -> Quote:
         api_code = f"{code}_NX" if session == Session.NXT_1955 else code
         condition = self._single(
@@ -476,6 +497,10 @@ class KiwoomSnapshotBuilder:
             warnings.append("ORDERBOOK_UNKNOWN")
         if not catalyst.summary:
             warnings.append("CATALYST_UNKNOWN")
+        if institution_net is None:
+            warnings.append("INSTITUTION_FLOW_NOT_CONFIRMED")
+        if program_net is None:
+            warnings.append("PROGRAM_FLOW_NOT_CONFIRMED")
 
         return Quote(
             code=code,
@@ -504,6 +529,9 @@ class KiwoomSnapshotBuilder:
             catalyst=catalyst.summary,
             catalyst_score=max(0.0, min(1.0, catalyst.score)),
             catalyst_verified=catalyst.verified,
+            market=str(master.get("_market", "")),
+            institution_net=institution_net,
+            program_net=program_net,
             best_ask=int(_number(condition.get("sel_1bid"))) or None,
             best_bid=int(_number(condition.get("buy_1bid"))) or None,
             total_ask_size=total_ask or None,
@@ -535,7 +563,69 @@ class KiwoomSnapshotBuilder:
             for row in rows:
                 code = str(row.get("code", "")).strip()
                 if code:
-                    result[code] = row
+                    normalized = dict(row)
+                    normalized["_market"] = "KOSPI" if market == "0" else "KOSDAQ"
+                    result[code] = normalized
+        return result
+
+    def _institution_flow(self, *, exchange: str, date: str) -> dict[str, int]:
+        keys = (
+            "for_netslmt_stk_cd", "for_netslmt_stk_nm", "for_netslmt_amt",
+            "for_netslmt_qty", "for_netprps_stk_cd", "for_netprps_stk_nm",
+            "for_netprps_amt", "for_netprps_qty", "orgn_netslmt_stk_cd",
+            "orgn_netslmt_stk_nm", "orgn_netslmt_amt", "orgn_netslmt_qty",
+            "orgn_netprps_stk_cd", "orgn_netprps_stk_nm", "orgn_netprps_amt",
+            "orgn_netprps_qty",
+        )
+        rows = self._list(
+            "ka90009",
+            "/api/dostk/rkinfo",
+            {
+                "mrkt_tp": "000",
+                "amt_qty_tp": "1",
+                "qry_dt_tp": "1",
+                "stex_tp": exchange,
+                "date": date,
+            },
+            "frgnr_orgn_trde_upper",
+            keys,
+            page_limit=2,
+        )
+        result: dict[str, int] = {}
+        for row in rows:
+            sell_code = str(row.get("orgn_netslmt_stk_cd", "")).replace("_NX", "").strip()
+            buy_code = str(row.get("orgn_netprps_stk_cd", "")).replace("_NX", "").strip()
+            if sell_code:
+                result[sell_code] = -abs(
+                    int(_number(row.get("orgn_netslmt_amt"), signed=True) * 10_000_000)
+                )
+            if buy_code:
+                result[buy_code] = abs(
+                    int(_number(row.get("orgn_netprps_amt"), signed=True) * 10_000_000)
+                )
+        return result
+
+    def _program_flow(self, *, exchange: str, date: str) -> dict[str, int]:
+        keys = (
+            "stk_cd", "stk_nm", "cur_prc", "flu_sig", "pred_pre",
+            "buy_cntr_qty", "buy_cntr_amt", "sel_cntr_qty", "sel_cntr_amt",
+            "netprps_prica", "all_trde_rt",
+        )
+        result: dict[str, int] = {}
+        for market_type in ("P00101", "P10102"):
+            rows = self._list(
+                "ka90004",
+                "/api/dostk/stkinfo",
+                {"dt": date, "mrkt_tp": market_type, "stex_tp": exchange},
+                "stk_prm_trde_prst",
+                keys,
+            )
+            for row in rows:
+                code = str(row.get("stk_cd", "")).replace("_NX", "").strip()
+                if code:
+                    result[code] = int(
+                        _number(row.get("netprps_prica"), signed=True) * 1_000_000
+                    )
         return result
 
     def _trading_value_top(self, exchange: str) -> list[dict[str, Any]]:

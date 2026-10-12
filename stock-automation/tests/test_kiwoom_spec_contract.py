@@ -83,6 +83,19 @@ USED_CONTRACTS = {
         "request": {"date_tp", "thema_grp_cd", "stex_tp"},
         "response": {"thema_comp_stk", "stk_cd", "stk_nm"},
     },
+    "ka90009": {
+        "path": "/api/dostk/rkinfo",
+        "request": {"mrkt_tp", "amt_qty_tp", "qry_dt_tp", "date", "stex_tp"},
+        "response": {
+            "frgnr_orgn_trde_upper", "orgn_netslmt_stk_cd",
+            "orgn_netslmt_amt", "orgn_netprps_stk_cd", "orgn_netprps_amt",
+        },
+    },
+    "ka90004": {
+        "path": "/api/dostk/stkinfo",
+        "request": {"dt", "mrkt_tp", "stex_tp"},
+        "response": {"stk_prm_trde_prst", "stk_cd", "netprps_prica"},
+    },
     "kt10000": {
         "path": "/api/dostk/ordr",
         "request": {"dmst_stex_tp", "stk_cd", "ord_qty", "ord_uv", "trde_tp", "cond_uv"},

@@ -136,6 +136,7 @@ def write_markdown_report(
             lines.extend([
                 f"### {q.name}({q.code})",
                 "",
+                f"- 소속 시장: {q.market or '확인 불가'}",
                 f"- 종가 위치: 일중 범위 상단 {q.close_strength * 100:.1f}%",
                 f"- 거래량: 전일 대비 {q.volume_ratio:.2f}배",
                 f"- 일봉 이평: 5일 {q.ma5:,.0f} / 20일 {q.ma20:,.0f}"

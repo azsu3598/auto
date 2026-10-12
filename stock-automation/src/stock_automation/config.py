@@ -8,7 +8,7 @@ from .models import Session
 @dataclass(frozen=True, slots=True)
 class StrategyConfig:
     session: Session = Session.KRX_1520
-    rule_version: str = "closing-v0.1"
+    rule_version: str = "closing-v0.2"
     max_quote_age_seconds: int = 180
     minimum_trading_value: int = 10_000_000_000
     minimum_volume_ratio: float = 1.10
@@ -18,6 +18,9 @@ class StrategyConfig:
     hard_max_price: int = 150_000
     maximum_day_gain_pct: float = 15.0
     maximum_ma5_distance_pct: float = 8.0
+    market_weakness_start_pct: float = -1.0
+    market_weakness_penalty_per_pct: float = 5.0
+    maximum_market_decline_pct: float = -3.0
     max_final_candidates: int = 3
     max_positions: int = 1
     max_allocation_pct: float = 0.40

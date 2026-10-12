@@ -85,6 +85,23 @@ class FakeClient:
                 "return_code": 0,
                 "thema_comp_stk": [{"stk_cd": "123456", "stk_nm": "테스트"}],
             })
+        if api_id == "ka90009":
+            return Response({
+                "return_code": 0,
+                "frgnr_orgn_trde_upper": [{
+                    "orgn_netprps_stk_cd": "123456",
+                    "orgn_netprps_amt": "+12",
+                    "orgn_netslmt_stk_cd": "654321",
+                    "orgn_netslmt_amt": "7",
+                }],
+            })
+        if api_id == "ka90004":
+            return Response({
+                "return_code": 0,
+                "stk_prm_trde_prst": [{
+                    "stk_cd": "123456", "netprps_prica": "+35",
+                }],
+            })
         raise AssertionError(api_id)
 
 
@@ -115,7 +132,30 @@ class MixedSessionClient(FakeClient):
         return response
 
 
+class FlowFailureClient(FakeClient):
+    def fetch_page(self, *, api_id, path, body, cont_yn=None, next_key=None):
+        if api_id in {"ka90009", "ka90004"}:
+            raise RuntimeError("optional flow API unavailable")
+        return super().fetch_page(
+            api_id=api_id, path=path, body=body, cont_yn=cont_yn, next_key=next_key
+        )
+
+
 class KiwoomProviderTests(unittest.TestCase):
+    def test_optional_flow_failure_is_unknown_instead_of_estimated(self):
+        snapshot = KiwoomSnapshotBuilder(FlowFailureClient()).build(
+            captured_at=datetime(2026, 10, 6, 15, 20, 30, tzinfo=KST),
+            session=Session.KRX_1520,
+            catalysts={"123456": Catalyst("robot", "confirmed contract", 0.8, True)},
+            kospi_change_pct=0.2,
+            kosdaq_change_pct=0.5,
+        )
+        quote = snapshot.quotes[0]
+        self.assertIsNone(quote.institution_net)
+        self.assertIsNone(quote.program_net)
+        self.assertIn("INSTITUTION_FLOW_NOT_CONFIRMED", quote.warnings)
+        self.assertIn("PROGRAM_FLOW_NOT_CONFIRMED", quote.warnings)
+
     def test_entry_can_revalidate_only_the_recorded_shortlist(self):
         snapshot = KiwoomSnapshotBuilder(FakeClient()).build(
             captured_at=datetime(2026, 10, 6, 15, 20, 30, tzinfo=KST),
@@ -160,6 +200,9 @@ class KiwoomProviderTests(unittest.TestCase):
         self.assertFalse(quote.nxt_eligible)
         self.assertEqual("confirmed contract", quote.catalyst)
         self.assertTrue(quote.catalyst_verified)
+        self.assertEqual("KOSPI", quote.market)
+        self.assertEqual(120_000_000, quote.institution_net)
+        self.assertEqual(35_000_000, quote.program_net)
 
     def test_same_session_vwap_excludes_previous_day_bars(self):
         snapshot = KiwoomSnapshotBuilder(MixedSessionClient()).build(
