@@ -1,5 +1,73 @@
 # AGENTS.md — Korean Stock Recommendation Rules
 
+## PC-D / PC-C Git handoff rules
+
+These instructions apply to every Codex session working anywhere under this
+repository. They are mandatory after every Git pull and before every Git push.
+
+### PC identity
+
+* Treat `D:/Test` as `PC-D`: code, review, documentation, and handoff.
+* Treat `C:/Test` as `PC-C`: execution, Docker, Kiwoom simulation, DynamoDB, and
+  AWS integration verification.
+* Never hardcode either absolute path in application code.
+
+### At session start and after every pull
+
+Before changing code, read these files in order:
+
+1. `AGENTS.md`
+2. `PC-C_단독진행_전체인수인계.md`
+3. `Codex_세션간_공동_인수인계.md`
+
+Then compare the handoff claims with the actual Git status, source code, and tests.
+Do not assume that a document or a previous chat is current. Preserve uncommitted
+work and never overwrite another PC's changes to resolve a conflict.
+
+On PC-C, explicitly acknowledge this review before starting work with a concise
+status equivalent to:
+
+> PC-C 인수인계와 실제 코드를 확인했습니다. 기존 안전장치를 유지하고 실거래를
+> 활성화하지 않은 상태에서 실행·통합검증을 진행합니다.
+
+If a pull was completed during an active session, reread all three files and repeat
+the acknowledgment before continuing. If the worktree is dirty or the pull has a
+conflict, stop and report the exact files instead of discarding changes.
+
+### Safety boundary on both PCs
+
+* Never remove or weaken an existing order, account, position, or kill-switch
+  safeguard merely to make a test pass.
+* Never set `LIVE_ORDER_ENABLED=1`, turn the kill switch off, connect a real-account
+  secret, submit a real order, or activate an AWS live schedule without a separate
+  explicit user request and approval.
+* Do not commit account numbers, fingerprints, API keys, AWS credentials, tokens,
+  raw CloudWatch exports, or other secrets and personal information.
+* Keep closing-bet, medium-term, day-trade, paper, and live state separated.
+* Any strategy or safety change requires an appropriate test and a full regression
+  test run.
+
+### Before every push
+
+1. Review `git status` and stage only the files belonging to the current task. Do
+   not use `git add .` when unrelated workspace changes exist.
+2. Run the relevant focused tests and the complete `stock-automation` test suite.
+3. Run syntax or fixture validation required by the changed file types and run
+   `git diff --check` on the intended changes.
+4. Add a new record at the top of section `10. 세션 전달 기록` in
+   `Codex_세션간_공동_인수인계.md`. Never delete or rewrite older records.
+5. Record the PC alias, files changed, test count and result, failed or unverified
+   work, remaining risks, live-order state, and the next Codex action.
+6. Recheck the staged diff for secrets and confirm that live ordering remains
+   disabled.
+7. Push only when the user has requested or approved the push.
+
+After a successful push, report the branch and commit identifier without exposing
+credentials. The receiving PC must pull, repeat the three-file review, and verify the
+reported tests before continuing.
+
+---
+
 ## Objective
 
 Provide Korean stock recommendations through two clearly separated strategies:
