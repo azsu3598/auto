@@ -12,3 +12,23 @@
 !stock-automation/pyproject.toml
 !stock-automation/src/
 !stock-automation/src/**
+
+# Apply these exclusions after the source allowlist
+**/.git
+**/.git/**
+**/.venv
+**/.venv/**
+**/__pycache__
+**/__pycache__/**
+**/*.py[cod]
+**/.pytest_cache
+**/.pytest_cache/**
+**/.env
+**/.env.*
+**/.aws
+**/.aws/**
+**/*.pem
+**/*.key
+**/runtime
+**/runtime/**
+**/*.log

@@ -277,6 +277,62 @@ python -m compileall -q src tests
 
 ## 10. 세션 전달 기록
 
+### 2026-10-12 20:38 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`
+- 작업 경로: `C:/Test`
+- 요청 목표: 다른 PC에서 제작한 프로그램을 C 드라이브에서 검증하고 AWS 모의운영을 단계별로 준비. 이번 PC-C 세션의 누적 준비 결과를 기록한다.
+- 완료한 작업:
+  - 전체 Markdown 및 두 인수인계 문서를 확인하고 Git 기준 커밋 `291ffdf`와 실제 파일을 대조했다.
+  - Docker Desktop 실행, AWS CLI v2 설치, Python 3.13 추가 설치를 완료했다. Python 3.14는 유지했다.
+  - 비어 있던 키움 공식 라이브러리 폴더를 준비하고 지정 커밋 `234560d213acd8871ae344b5481aecd2f30287fa`로 고정했다.
+  - `C:/Test/.venv`에 Python 3.13 프로그램 환경과 의존성을 설치했다.
+  - 사용자 승인 후 중복 wheel 포함 설정을 제거해 로컬 설치와 Docker 빌드 오류를 해결했다.
+  - 루트 `.gitignore`를 생성하고 `.dockerignore`를 보완했다. 인증정보, 가상환경, 외부 키움 저장소, 캐시, 실행 결과를 Git 또는 Docker 입력에서 제외하고 소스·투자 기록·필수 빌드 입력은 유지했다.
+  - 등록용 공식 `kwcli` 1.0.3을 `.venv/kiwoom-cli` 별도 환경에 설치했다. 기존 엔진 환경의 키움 버전은 변경하지 않았다.
+  - 사용자가 모의투자를 신청하고 모의계좌·IP를 등록한 뒤 모의 App Key/Secret을 본인 PowerShell의 숨김 입력으로 등록했다. Codex는 비밀키 파일·키 값·클립보드를 읽지 않았다.
+  - 초기 `8001` 인증 실패 후 일반 문자열 붙여넣기 시험은 `OK`였고, 사용자가 PowerShell을 다시 사용해 등록 성공을 알렸다. 정확한 최초 실패 원인은 확정하지 않았다.
+  - 공식 CLI 읽기 전용 진단에서 별칭 `pc-c-demo`, 서버 `demo`, 인증정보 존재, 토큰 사용 가능, 호출 가능, 특이 사항 없음을 확인했다. 주문은 실행하지 않았다.
+  - 사용자가 AWS 작업용 IAM 사용자 `stock-paper-operator`를 생성하고 콘솔 암호를 변경했다. 부여한 정책은 `SignInLocalDevelopmentAccess`, `IAMUserChangePassword`다.
+  - CLI 프로필 이름만 IAM 이름이고 실제 인증은 루트였던 상태를 발견했다. 사용자가 `aws login --profile stock-paper-operator --remote`로 IAM 브라우저 세션에서 재인증했다.
+  - 최종 STS 확인에서 기대한 IAM 사용자 일치, 루트 아님, CLI 인증 성공, 서울 리전 `ap-northeast-2`를 확인했다. 계정번호·키·토큰은 출력하지 않았다.
+- 변경 파일:
+  - `.gitignore` (신규)
+  - `.dockerignore`
+  - `stock-automation/pyproject.toml`
+  - `Codex_세션간_공동_인수인계.md` (이번 기록 추가)
+- 로컬 생성 항목: Git 제외 대상 `Kiwoom-REST-API/`, `.venv/`, Docker 이미지 `stock-automation:dev`. 키·토큰은 Git에 포함하지 않는다.
+- 추가·변경 테스트: 새 테스트 코드 없음. 기존 전체 unittest, 설치 패키지 자산 검사, 네트워크 차단 컨테이너 검사, ignore 규칙 검증을 실행했다.
+- 전체 테스트 결과:
+  - 최초 실행: 138개 통과, 키움 명세 누락으로 테스트 그룹 초기화 오류 1건. 전체 통과로 보고하지 않았다.
+  - 지정 키움 명세 확보 후: `140개 전체 통과`.
+- 수동 검증 결과:
+  - Python `3.13.16`, 기존 `3.14.7`, AWS CLI `2.37.12`, Docker 클라이언트/엔진 `28.0.1` 확인.
+  - 패키징 수정 후 프로그램 설치와 `pip check` 통과, 설치된 CLI 도움말 확인.
+  - ignore 수정 후 Docker 빌드 성공. Linux/amd64, 비루트 실행 사용자 `65534:65534` 확인.
+  - `--network none` 일회성 컨테이너에서 CLI 실행, 키움·boto3 import, 대시보드 JS/HTML/CSS 포함 확인.
+  - 키움 API 명세와 대시보드 자산 유지, 빌드 입력의 Git·가상환경·캐시 제외 확인.
+  - `git check-ignore`로 환경·인증·실행 파일 제외와 소스·예제·투자 기록 보존 확인. `git diff --check` 통과.
+  - 키움 CLI 진단과 AWS STS 읽기 전용 인증 확인 완료. 이번 세션에서 compileall·JavaScript 문법검사·브라우저 UI 검증은 별도로 실행하지 않았다.
+- 실패·미확인 사항:
+  - OpenDART 인증키 준비는 아직 시작하지 않았다.
+  - 텔레그램 인증정보 준비·시험 알림, AWS 네트워크·Secret·ECR·CloudFormation 배포는 미실행이다.
+  - 현재 IAM 사용자에게는 CLI 로그인·암호 변경 권한만 설정했다. AWS 자원 배포용 권한은 아직 준비하지 않았다.
+  - 프로그램의 `stock-automation doctor --online` 종합 진단과 실제 AWS·키움 모의 통합검증, 5거래일 모의운용은 미완료다. 키움 CLI 등록 성공과 프로그램 전체 통합검증을 구분한다.
+  - AWS 발신 IP와 키움 허용 IP의 일치, 예약 태스크 재실행 시 인증 가능 여부는 배포 전 검증이 필요하다. 고정비 인프라를 임의로 추가하지 않는다.
+  - 문서 상단의 132개 테스트 및 일부 미구현 설명은 과거 요약이다. 최신 PC-D 전달 기록·현재 코드·이번 검증 결과를 우선한다.
+  - 최상위에서 참조된 `주식_자동매매_사용자_준비_가이드.md`, `실거래_개발_후속_Codex_프롬프트.md`, `집에_가져갈_주식자동매매_파일목록.md`는 해당 경로에 없다.
+- 남은 위험: 로컬 검사 통과는 AWS 운영 검증 완료가 아니다. 실제 비용 발생 배포, 모의예약 활성화 및 실거래는 각각 필요한 확인을 거친다. 실거래 안전센터의 실제 테이블 상태는 미확인이다.
+- 실거래 상태:
+  - `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`
+  - `LIVE TESTS: 전체 unittest 140개 통과 / 실제 주문·체결 통합검증 미실행`
+  - `LIVE AWS DEPLOYMENT: 이번 PC-C 세션에서 미배포 / 기존 원격 자원 유무 미확인`
+  - `LIVE ORDER SUBMISSION: 이번 세션 없음`
+  - `KILL SWITCH: 기본 ON 설계 / 실제 테이블 상태 미확인 / 해제하지 않음`
+- 다음 Codex의 첫 작업: 사용자가 요청한 2026-10-13에 OpenDART 인증키 준비부터 한 단계씩 재개한다. AWS 명령은 검증된 `--profile stock-paper-operator --region ap-northeast-2`를 사용하며 권한 부족을 루트 프로필로 우회하지 않는다.
+- 사용자에게 확인받을 사항: 다음 단계에서 OpenDART 키 보유 여부를 확인한다. 키 값은 대화로 요청하지 않는다. 사용자는 오늘 추가 준비를 멈추고 내일 이어가기로 했다.
+- 전달 파일 버전 또는 Git 커밋: 기준 `291ffdf`, 위 파일은 로컬 변경 상태. 이번 세션에서 commit/push하지 않았다. 이후 작업자는 기존 변경을 보존한다.
+
 ### 2026-10-12 15:05 KST — PC-D → PC-C
 
 - 작업 PC alias: `PC-D`
