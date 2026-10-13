@@ -1,0 +1,12 @@
+# Update the public vulnerability database separately before using this config.
+# Scan a local docker-archive, never a registry or a connected source directory.
+check-for-app-update: false
+external-sources:
+  enable: false
+db:
+  cache-dir: runtime/security-tools/grype-db
+  auto-update: false
+  require-update-check: false
+  validate-by-hash-on-start: true
+  validate-age: true
+  max-allowed-built-age: 120h

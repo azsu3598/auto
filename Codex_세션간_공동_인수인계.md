@@ -279,6 +279,378 @@ python -m compileall -q src tests
 
 ## 10. 세션 전달 기록
 
+### 2026-10-14 01:02 KST — PC-C → PC-D / 사용자 승인 Git 전달
+
+- 작업 PC alias: `PC-C`, 브랜치 `main`, 작업 기준 `bb5946e`. 사용자가 `push까지 해줘`로 이번 PC-C 준비 작업의 commit/push를 명시적으로 승인했다. 세 파일 인수인계와 실제 상태를 확인했으며 이번 작업에 속한 13개 파일만 전달 대상으로 선정했다. runtime·자격 증명·도구 바이너리·원본 로그를 포함하지 않는다.
+- 원격 비교: `git fetch origin` 성공, 검사 시점 `HEAD...origin/main`은 0/0이었다. pull이나 merge 없이 기존 PC-C 변경을 유지했다. push는 아래 검사 후 일반 방식으로 수행하며 force push를 사용하지 않는다. 성공 여부와 최종 커밋 ID는 사용자 응답에서 보고하고 PC-D가 수신 후 git log로 대조한다.
+- 전달 파일 13개:
+  - `Codex_세션간_공동_인수인계.md`
+  - `stock-automation/Dockerfile`, `stock-automation/README.md`
+  - `docs/운영 검증/2026-10-14_Docker_취약점_검증.csv`
+  - `stock-automation/infra/paper-secret-setup-policy.json`, `paper-network-inspect-policy.json`, `paper-ecr-upload-policy.json`
+  - `stock-automation/tools/setup_telegram.py`, `upload_paper_secrets.py`, `requirements.txt`, `grype-offline.yaml`
+  - `stock-automation/tests/test_telegram_setup.py`, `test_paper_secret_upload.py`
+- 변경 목적: 사용자 직접 입력과 Windows 자격 증명 저장소를 사용하는 로컬 텔레그램/모의 Secret 설정 도구, 해당 준비 권한의 범위 제한 정책, Debian/Python 보안 업데이트를 적용한 Docker 빌드, 외부 메타데이터 전송 없는 검사 설정과 CVE 대조 자료를 함께 전달한다. 모의 Secret·ECR 이미지는 앞선 승인으로 이미 AWS에 준비돼 있으므로 PC-D에서 설정 도구를 재실행하거나 자원을 중복 생성하지 않는다.
+- push 전 검증: 설정 도구 집중 테스트 12개/9개 통과, 전체 unittest `161개 통과`, compileall 통과. JSON 3개 구문·허용 작업·서울 리전 범위 검사 통과. CSV 203행/고유 94개/Critical 2개 공식 수정판 판정 로드 검증 통과. Grype offline YAML을 사용하는 로컬 archive 재검사 통과(외부 연결 조회 비활성, 로컬 미사용 프록시). 전달 파일 비밀정보 패턴 검사, staged diff 검토, `git diff --check` 통과. 직전 이미지 프로그램 테스트 140개와 ECR push 종료 코드 0/digest 다운로드/36개 파일/CLI 검증도 유지한다.
+- PC-D 수신 절차: D:/Test에서 기존 작업을 보존하고 dirty/충돌 여부를 먼저 확인한다. 정상 상태에서 main을 pull한 뒤 AGENTS.md → PC-C 단독 인수인계 → 이 공동 인수인계를 다시 읽고 전체 테스트를 실행한다. 이제 Git 전달을 사용하므로 앞선 00:58 기록의 zip은 선택적인 과거 스냅샷이다. 최신 파일은 이번 전달 커밋을 기준으로 한다.
+- 담당/다음 작업: PC-D는 남은 고위험 14개 및 기타 55개 CVE의 실제 영향과 수정·조건부 위험을 검토하고 관련 테스트/전체 테스트/근거를 반환한다. PC-C는 AWS 고정 접속 IP·짧은 모의 예약 실행 구조와 비용을 준비하고, 수정 수신 후 재빌드·재검증한다. 새 유료 자원은 기존 승인 범위를 넘으면 먼저 비용과 구체적인 변경을 확인받는다.
+- 미완료·남은 위험: 취약점 69개는 해결 완료가 아니다. 키움 AWS 허용 IP, 온라인 키움/OpenDART·텔레그램·데이터 저장 통합검증, 프로그램 스택/모의 예약 실행이 미완료다. Docker HTTP 500은 이전 정상 재시작 후 작업됐으나 장기 재발 원인은 미확정이다.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`, `LIVE TESTS: 전체 161개 통과 / 이미지 프로그램 140개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 모의 준비 자원과 검증 이미지 ECR 저장 / 프로그램 스택 미배포 / 예약 비활성`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`. 실거래 환경변수 활성화나 안전장치 해제 없이 전달한다.
+
+### 2026-10-14 00:58 KST — PC-C → PC-D 취약점 검토 담당 지정
+
+- 작업 PC alias: `PC-C`, 기준 `main` / `bb5946e`. 사용자가 다음 단계 중 `1. 남은 취약점 검토`를 PC-D에게 맡기겠다고 명시했다. PC-D에 메시지를 직접 전송하거나 별도 에이전트를 실행하지 않았으며 사용자가 자료를 전달한다.
+- 담당 구분: PC-D는 취약점의 실제 영향·공식 수정판·필요한 코드/의존성/이미지 수정과 테스트를 담당한다. PC-C는 AWS 접속 IP/실행 구조/비용 구체화, 모의환경 배포 및 통합검증을 담당한다. PC-D 검토 결과 없이 모의 운영 준비가 완료됐다고 판단하지 않는다.
+- PC-D 검토 자료:
+  - `docs/운영 검증/2026-10-14_Docker_취약점_검증.csv`: 원본 203개 package/CVE 매치, 고유 94개. Debian 수정판 대조 25개(치명적 raw 2개 포함), 미완료 69개 중 High 14개.
+  - `stock-automation/Dockerfile`, `stock-automation/README.md`, `stock-automation/tools/grype-offline.yaml`: PC-C에서 적용/검증한 보안 업데이트와 외부 메타데이터 전송 없는 검사 설정.
+  - AGENTS.md, PC-C 단독 인수인계, 이 공동 인수인계의 최신 기록. 이 7개 파일만 Git 제외 `runtime/PC-C_to_PC-D_2026-10-14_0058.zip`에 묶어 전달 준비한다. archive에 runtime 원본·레지스트리 URI·키·토큰·자격 증명·공개 DB/도구 바이너리를 넣지 않는다.
+- PC-D 첫 작업: 전달 자료는 별도 임시 폴더에서 기존 D:/Test 상태와 비교한다. Git pull이 가능해도 먼저 미커밋/충돌 상태를 확인하며 파일을 통째로 덮어쓰지 않는다. CSV에서 남은 고위험 14개를 우선 검토하고 나머지 55개도 추적한다. 공식 수정 여부/현재 코드 호출 경로/조건부 위험/불명 항목을 구분한다. 수정된 OpenSSL backport를 단순 upstream 버전 비교로 다시 취약하다고 판단하지 않는다. runtime/의존성까지의 호출 경로를 확인하지 않고 미사용으로 단정하지 않는다.
+- 유지할 사용자 제한: Scout/SBOM/이미지 패키지 메타데이터 외부 전송 금지. 공개 취약점 DB를 별도로 내려받아 로컬 분석한다. 검사 예외나 안전장치 제거로 결과를 통과시키지 않는다. 실계좌 Secret·실주문·비상정지 해제·실거래/상시 단타 예약 활성화 금지.
+- PC-D 반환 결과: 파일별 수정 diff, 관련 검증 및 전체 테스트 결과, CVE별 근거/처리/잔여 위험, 모의 배포에 필요한 제한을 새 인수인계 기록에 추가한다. Git commit/push는 사용자 승인 범위에 따른다. PC-C는 수정본 수신 후 세 파일 리뷰·재빌드·동일 방식 취약점/실행 검증·필요한 새 ECR 업로드를 수행한다.
+- 변경/검증: 이 공동 인수인계와 Git 제외 전달 zip만 추가. 프로그램 코드 변경 없음. 직전 호스트 전체 161개·이미지 프로그램 140개 통과와 AWS push/digest 다운로드/36개 파일 검증 통과 기록 유지. 전달 목록 검사와 `git diff --check` 통과. 현재 PC-C 변경은 미커밋·미push 상태이므로 PC-D에서 pull만 해서는 최신 로컬 자료를 받지 못한다.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`, `LIVE TESTS: 직전 호스트 161개 및 이미지 프로그램 140개 통과`, `LIVE AWS DEPLOYMENT: 검증 이미지 ECR 저장 / 프로그램 스택 미배포 / 예약 비활성`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+
+### 2026-10-14 00:56 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 기준 `main` / `bb5946e`. 세 파일 인수인계와 실제 Git 상태·Dockerfile·직전 검증 결과를 대조했다. 기존 미커밋 변경을 보존했다. pull/commit/push 없음.
+- 사용자 요청/승인: 사용자가 다시 시도를 요청한 후 범위를 `AWS 이미지 업로드 재시도`로 구체적으로 선택했다. 이 승인을 근거로 기존 저장소에 새 보안 업데이트 이미지를 별도 태그로 업로드했다. 새 서버/네트워크 자원 생성·예약 활성화·실주문은 이 요청에 포함하지 않았다.
+- 업로드 결과:
+  - 지정 IAM `stock-paper-operator`와 서울 리전 STS 확인. 기존 ECR 저장소 `stock-automation`의 `IMMUTABLE` 설정을 유지했다. 검증한 로컬 이미지 ID와 현재 이미지 ID 일치를 재확인했다.
+  - 새 태그 `paper-security-20261014-ef070ce8caa5`로 push했다. 이번 Docker push 종료 코드는 `0`이며 이전 manifest PUT HTTP 400 오류가 이번 업로드에서는 발생하지 않았다. 이전 오류의 정확한 원인이 확정됐다는 뜻은 아니다.
+  - 저장된 새 이미지 digest로 다시 다운로드했다. 원본/다운로드 이미지의 RootFS 레이어 일치, linux/amd64, 비관리자 사용자 `65534:65534`, 소스/정적 파일 36개 해시 일치, 키움/boto3 import 및 CLI help 검증 통과.
+  - 새 이미지 ECR 저장 크기 `110,988,464 bytes` 확인. 기존 이미지를 덮어쓰거나 삭제하지 않았다. 이미지 보관량 증가가 있으며 서버 실행 비용은 발생시키지 않았다.
+  - ECR 인증값은 메모리와 password-stdin으로 전달하고 Docker Desktop native credential helper를 사용했다. 프로젝트 config에 평문 auth가 없음을 확인하고 임시 인증 config 디렉터리를 정리했다. 원문 계정 ID·레지스트리 URI·키·토큰을 일반 출력/공유 파일에 기록하지 않았다. Scout나 다른 외부 서비스로 SBOM을 전송하지 않았다.
+- 변경 파일: 이 공동 인수인계, Git 제외 `runtime/ecr-security-upload-plan.json`, `runtime/ecr-security-upload-result.json`, `runtime/retry_ecr_security_upload.py`. Dockerfile/README/보안 검사 설정/검증 CSV는 직전 세션의 변경을 보존했다. 매매 로직·실거래 설정 변경 없음.
+- 검증 결과: 이번 AWS push 및 digest 다운로드/레이어/36개 파일/CLI 검증 통과. 직전 동일 소스와 이미지의 호스트 전체 `161개`, 이미지 프로그램 `140개` 테스트 통과 기록 유지. 코드 변경 없어 전체 테스트 반복 없음. runtime Git 제외와 `git diff --check` 통과.
+- 보안 검토 상태: 이미지 업로드는 파일 저장/검증 완료이며 운영 보안 승인 완료를 의미하지 않는다. 직전 검토의 미완료 고유 CVE 69개 중 High 14개를 유지한다. CVE 예외 추가·비상정지 해제·실거래 활성화 없음.
+- 다음 Codex의 첫 작업: 배포 준비에는 최신 `runtime/ecr-security-upload-result.json`의 검증된 digest URI를 사용한다. 이전 `runtime/ecr-upload-result.json`은 과거 이미지 검증 정보다. 남은 취약점의 실제 영향과 AWS 제한 설정을 검토하고, 키움 허용 IP를 만족하는 짧은 예약 실행 구조/비용을 구체화한 뒤 필요한 추가 승인만 받는다. AWS 프로그램 스택·온라인 API 진단은 계속 미완료다.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`, `LIVE TESTS: 직전 호스트 161개 및 이미지 프로그램 140개 통과 / 이번 업로드 이미지 재검증 통과`, `LIVE AWS DEPLOYMENT: 새 검증 이미지 ECR 저장 완료 / 프로그램 스택 미배포 / 예약 비활성`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+
+### 2026-10-14 00:52 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 기준 `main` / `bb5946e`. 사용자 요청은 삭제 후 최신 보안 업데이트를 반영한 Docker 재빌드와 외부 메타데이터 전송 없는 취약점·실행 검증이다. 세 파일 인수인계와 실제 상태를 대조하고 기존 미커밋 작업을 보존했다. pull/commit/push 없음.
+- 완료한 변경:
+  - `stock-automation/Dockerfile`: Python 3.13의 Debian trixie 이미지를 명시하고 빌드 시 Debian 업데이트, pip/런타임 패키지 업데이트와 `pip check`를 적용했다. 기본 실행 사용자 `65534:65534`와 기존 실거래 안전장치를 유지했다.
+  - `--pull --no-cache --platform linux/amd64 --provenance=false --sbom=false`로 새 이미지 `stock-automation:dev` 빌드 성공. 확인한 base digest는 `70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f`, 새 manifest digest는 `ef070ce8caa5fd9f2516b105654cdab4869c6aeade5469ef9a5fe6d3eb43b8dd`이다. 이전 태그를 덮어쓰는 AWS push는 하지 않았다.
+  - Debian `liblzma5`를 `5.8.1-1+deb13u2`로 갱신했다. 런타임 boto3/botocore는 `1.43.112`, urllib3는 `2.8.0`이다. 그 밖의 설치 버전은 Git 제외 검사 원본에서 확인한다.
+  - `stock-automation/tools/grype-offline.yaml`과 README 실행법 추가. 공개 DB 다운로드를 검사와 분리하고 검사 중 DB 자동 갱신·앱 업데이트·외부 추가 조회를 끈다. DB 해시와 최대 5일 유효기간 검사는 유지했다.
+- 외부 전송 없는 검사:
+  - 앞서 checksum을 확인한 공식 Grype `v0.120.1`로 공개 취약점 DB를 준비했다. DB schema `v6.1.10`, built `2026-10-13T06:35:20Z`, 상태 valid 확인.
+  - 로컬 Docker archive를 입력으로 분석했다. 검사 중 HTTP/HTTPS 프록시를 로컬 미사용 포트로 지정하고 자동 업데이트와 외부 추가 조회를 껐다. Scout 호출·이미지/SBOM/패키지 목록 외부 업로드를 하지 않았다. 공개 Grype/Debian DB와 보안 공지 다운로드만 수행했다.
+  - 원본 Grype 결과는 `203개 package/CVE 매치`, 고유 CVE `94개`: raw Critical 2 / High 73 / Medium 60 / Low 16 / Negligible 52. 같은 취약점이 여러 패키지에 중복 검출된다. 기존 Scout 화면의 35건과 스캐너·DB·집계 범위가 달라 수치 증감으로 해결 여부를 판단하지 않는다.
+  - Debian 공개 보안 DB, 이미지 내부 `dpkg-query` 소스/패치 버전 및 `dpkg --compare-versions`로 대조했다. 고유 CVE 25개는 설치 버전에서 Debian 수정판이 반영된 것으로 확인됐다. 여기에는 raw Critical 2개(CVE-2026-63073, CVE-2026-75803)가 포함된다. 실제 OpenSSL은 `3.5.7-1~deb13u3`이며 단순 upstream 3.5.7 비교가 Debian backport를 놓친 사례다. 공식 근거: https://security-tracker.debian.org/tracker/CVE-2026-63073 , https://security-tracker.debian.org/tracker/CVE-2026-75803 . gzip 항목도 Debian 패치 버전을 대조했다.
+  - 나머지 고유 CVE `69개`는 해결 완료로 처리하지 않았다(추가 검토 High 14 / Medium 25 / Low 5 / Negligible 25). Python 런타임/바이너리·Debian 미수정·공급자가 minor issue로 분류한 항목을 포함한다. 고위험 14개는 Perl 2, ncurses 1, glibc 2, gcc/libstdc++ 2, util-linux 4, acl 2, zlib 1에 걸쳐 있다. 로컬 권한·특정 함수 호출 조건이 있는 항목도 있으나 의존성 전체 호출 경로와 AWS 실행 설정을 아직 검증하지 않았으므로 영향을 일괄 배제하지 않는다. zlib CVE-2026-85091은 Debian tracker가 open이며 영향 버전 범위에 논의가 있어 미확인으로 유지한다.
+  - 현재 DB에서 PyPI 패키지 취약점 매치는 0개였지만 전체 코드 보안 감사 완료 또는 전체 취약점 0개를 뜻하지 않는다. 스캐너 ignore/VEX 예외를 추가해 결과를 숨기지 않았다.
+- 검증 결과: 호스트 전체 unittest `161개 통과`, compileall 통과. 새 이미지의 실제 런타임 의존성으로 프로그램 테스트 `140개 통과`(로컬 사용자 설정 도구 테스트 21개는 호스트 전체 검사에 포함). 네트워크 차단·읽기 전용·cap-drop ALL·no-new-privileges 컨테이너에서 소스/정적 파일 `36개` 해시 일치, CLI help와 키움/boto3 import 통과. pip check, offline 설정을 사용한 실제 재검사, CSV 203행 로드/치명적 항목의 공식 수정판 대조, runtime Git 제외 및 `git diff --check` 통과.
+- 전달 파일: Dockerfile, README, `tools/grype-offline.yaml`, `docs/운영 검증/2026-10-14_Docker_취약점_검증.csv`(원본 203매치의 패키지/버전/CVE/공급자 상태/판정/출처), 이 공동 인수인계. Git 제외 runtime에 이미지 archive, 공개 DB, 설치 버전, 스캐너 원본, 검사 요약과 테스트 출력 보관. 비밀값·계정 번호·ECR URI는 전달 CSV/문서에 포함하지 않았다.
+- 미완료·다음 Codex: 남은 고위험 14개와 기타 55개를 실제 호출 경로·공급자 업데이트·AWS 권한/파일시스템 설정에 맞춰 검토한다. 보안 운영 판정은 보류하며 새 이미지는 아직 AWS에 업로드하지 않았다. 기존 AWS ECR 이미지와 모의 Secret/VPC/보안그룹은 보존했다. 이후 검증 이미지 업로드와 키움 AWS 허용 IP/추가 비용/온라인 진단/예약 비활성 배포를 진행한다. 현재 Docker 재빌드 성공을 키움 접속 또는 AWS 프로그램 배포 완료로 해석하지 않는다.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`, `LIVE TESTS: 호스트 전체 161개 및 이미지 프로그램 140개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 기존 모의 준비 자원/ECR 이미지 보존 / 새 보안 이미지 로컬 검증 / 프로그램 스택 미배포 / 예약 비활성`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+
+### 2026-10-14 00:35 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 기준 `main` / `bb5946e`. AGENTS.md → PC-C 단독 인수인계 → 공동 인수인계를 검토하고 기존 미커밋 작업을 보존했다. pull/commit/push 없음.
+- 요청 흐름: Docker 취약점 검토를 시작한 뒤 사용자가 우선 로컬 Docker 컨테이너·이미지·볼륨 전체 삭제를 요청했다. 실제 삭제 대상과 예전 MySQL 데이터 포함 여부를 확인받았으며 사용자가 `MySQL 데이터 포함 전부 삭제`를 명시적으로 승인했다.
+- 삭제 완료: 로컬 `desktop-linux` 컨텍스트의 컨테이너 4개, 고유 이미지 15개(태그·표시 항목 16개), 볼륨 50개를 삭제했다. 실행 직전 목록이 검토한 스냅샷과 같은지 대조했고, 정확한 ID/볼륨 이름만 대상으로 삭제했다. 컨테이너에는 정지된 docker8 서버/PHP/MySQL/artisan이 포함됐고 볼륨 중 MySQL `/var/lib/mysql` 데이터도 사용자 승인 범위에 포함됐다. 최종 재조회 결과 컨테이너 `0`, 이미지 `0`, 볼륨 `0` 확인.
+- 보존 범위: C:/Test 프로젝트와 기존 미커밋 작업, AWS ECR 저장 이미지·Secret·VPC·보안그룹을 변경하지 않았다. Docker 네트워크/빌드 캐시 전체 정리나 WSL 초기화는 요청 범위에 추가하지 않았다. 로컬 `stock-automation:dev`와 ECR에서 내려받았던 이미지도 삭제됐으므로 로컬 실행하려면 재빌드 또는 승인된 ECR 이미지 다운로드가 필요하다. 이전 ECR 업로드 검증 기록은 과거 확인 결과로 유지한다.
+- 취약점 검토 진행 내용:
+  - Docker Scout 상세 명령은 외부 서비스로 SBOM/패키지 메타데이터가 전달될 수 있다는 자동 승인 검토 사유로 거부돼 실행되지 않았다. 사용자에게 이유를 설명했고 사용자는 `외부 전송 없이 검토`를 선택했다. Scout 재시도나 다른 스캐너를 통한 이미지 메타데이터 전송도 하지 않는다.
+  - 대안으로 공식 Grype `v0.120.1` Windows 바이너리를 runtime에 내려받아 공개 checksum SHA256 일치를 확인했다. 공개 DB 다운로드만 시도했고 자동 앱 업데이트/외부 데이터 조회를 껐으나, 사용자 삭제 요청을 우선하며 다운로드 프로세스를 중단했다. 취약점 스캔 완료 또는 DB 확보 성공으로 보고하지 않는다.
+  - 삭제 전 네트워크 차단·읽기 전용 컨테이너에서 런타임 Python 패키지를 확인했다. urllib3 `2.8.0`, boto3/botocore `1.43.111` 등이 확인됐으며 msgpack/setuptools는 런타임 배포 목록에 없었다. 사용자 Scout 화면의 urllib3 `2.7.0`/msgpack/setuptools 항목과 차이가 있으므로 개별 CVE/레이어/분석 범위를 추가 대조해야 한다. 이 사실만으로 35건이 해결됐다고 판단하지 않는다.
+- Docker 장애: 실제 컨테이너 생성과 이미지/컨테이너 조회에 HTTP 500이 재발했다. `AutoPause: false` 상태를 확인하고 정상 `docker desktop restart` 성공 후 컨테이너 패키지 조회와 삭제 작업을 완료했다. 복구 도구의 cp949 출력 표시 오류는 있었지만 restart 종료 코드는 0이다. 장기 재발 원인과 근본 해결은 미검증이다.
+- 변경 파일: 이 공동 인수인계; Git 제외 `runtime/docker-cleanup-inventory.json`, `runtime/delete_docker_inventory.py`, `runtime/docker-cleanup-result.json`, `runtime/security-tools/` 바이너리/checksum/미완료 DB 캐시. Dockerfile/의존성/매매 로직은 변경하지 않았다.
+- 검증 결과: 이번 작업에서 전체 unittest `161개 통과`. 삭제 전 컨테이너 패키지 조회 성공, 삭제 스크립트 preview 및 검토 목록 대조 성공, 삭제 후 세 자원 목록 0개 확인, runtime Git 제외 및 `git diff --check` 통과.
+- 미완료·다음 작업: 외부 메타데이터 전송 없이 공개 취약점 DB와 로컬 새 이미지로 CVE/수정 버전을 검토한다. 새 빌드 시 이미 완료한 ECR 저장소/Secret 준비를 중복 생성하지 않는다. 키움 AWS 허용 IP·추가 비용·온라인 API 진단·프로그램 배포는 계속 미완료다.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`, `LIVE TESTS: 전체 161개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 모의 준비 자원과 ECR 이미지 보존 / 프로그램 스택 미배포 / 예약 비활성`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+
+### 2026-10-14 00:26 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 기준 브랜치/커밋: `main` / `bb5946e`. 이전 미커밋 작업을 보존했다. 이번 작업 중 pull, commit, push 없음.
+- 사용자 승인: 사용자가 `ㄱㄱ`로 비공개 ECR 저장소 1개 생성과 검증 이미지 1개 업로드를 승인했다. 안내한 보관료는 약 $0.01~$0.02/월이며 기존 모의 Secret 3개 비용 승인도 유지한다. 서버·유료 고정 IP·NAT Gateway·프로그램 배포·예약 실행의 승인은 포함하지 않는다.
+- 실제 완료 범위:
+  - 지정 IAM `stock-paper-operator`, 서울 리전으로 비공개 `stock-automation` ECR 저장소를 생성했다. AES256 암호화, 태그 불변 `IMMUTABLE`, push scan 비활성 설정을 확인했다.
+  - 기존 `stock-automation:dev` 이미지를 내용 기반 태그로 업로드했다. ECR 조회에서 이미지 1개와 OCI manifest를 확인했다. ECR가 보고한 저장 크기는 `110,773,704 bytes`이다. 이전 기록의 로컬 inspect 크기와 Docker Desktop 화면의 `472.76 MB`는 측정 항목이 다르므로 이를 모두 동일한 비압축 크기로 해석하지 않는다.
+  - 업로드 후 원격 digest로 이미지를 다시 내려받았다. 원본과 다운로드 이미지의 RootFS 레이어 목록이 일치했다. linux/amd64 및 비관리자 사용자 `65534:65534` 확인. 네트워크 차단·읽기 전용·cap-drop ALL·no-new-privileges 컨테이너에서 프로그램/정적 파일 36개 해시 일치, 키움/boto3 import 및 CLI help 검증 통과.
+  - ECR 인증값은 프로세스 메모리와 password-stdin으로 전달하고 Docker Desktop native credential helper를 사용했다. 임시 Docker config에는 평문 auth가 없음을 확인하고 임시 디렉터리를 정리했다. 키·토큰·계정 ID·레지스트리 URI 원문을 공유 문서/출력에 기록하지 않았다.
+- 실패·복구·검증 한계:
+  - Docker push는 manifest PUT 단계 HTTP 400으로 종료 코드 1을 반환했고 동일 태그 재시도도 실패했다. 그 후 ECR에서 실제 저장된 이미지를 조회하고 digest 다운로드·레이어·소스·실행을 검증한 결과 업로드 산출물은 확인됐다. 명령 자체를 성공했다고 기록하지 않는다. manifest config digest와 로컬 image ID 비교도 불일치했으므로 이 비교만으로 이미지 일치를 주장하지 않는다. HTTP 400의 정확한 원인은 미확정이며 태그 불변 정책을 해제하지 않았다.
+  - 재부팅 이후에도 준비 중 Docker image inspect/컨테이너 실행에서 HTTP 500이 재발했다. Docker Desktop을 정상 종료하고 기존 settings-store.json 원본을 옆 파일에 백업한 뒤 `AutoPause: false`를 적용, 정상 시작 후 엔진 응답과 이미지 검증을 복구했다. Resource Saver가 관여했을 가능성은 추정이며 장기 재발 방지는 미검증이다. WSL 디스크 초기화·등록 해제·강제 프로세스 제거는 하지 않았다.
+  - 사용자 Docker Scout 화면에서 취약점 35건을 확인했다. urllib3, msgpack, setuptools 및 Debian 패키지 항목이 보인다. 개별 CVE, 수정 가능 버전, 실제 영향은 아직 검토하지 않았으며 운영 전 검토할 항목이다. 이미지 일치/CLI 검증을 보안 감사 완료로 해석하지 않는다.
+- 변경 파일: 이 공동 인수인계 기록, Git 제외 `runtime/ecr-upload-plan.json`, `runtime/ecr-repository.json`, `runtime/ecr-upload-result.json`; 프로젝트 외 로컬 Docker Desktop 자동 일시정지 설정과 원본 백업. 기존 정책·설정 도구·테스트는 이번 작업에서 수정하지 않았다.
+- 검증 결과: 재부팅 후 전체 unittest `161개 통과` 및 compileall 통과 기록 유지. 이번 작업은 프로그램 코드 변경 없이 ECR 저장/다운로드/레이어/36개 파일/CLI 검증을 추가했다. runtime 정보 Git 제외와 문서 `git diff --check` 통과. 계정/토큰 원문이 포함된 runtime 파일을 stage하지 않는다.
+- 남은 과제: 운영 전 취약점 세부 검토와 필요한 이미지 갱신, 키움 허용 IP를 만족하는 짧은 예약 실행 구조와 추가 비용 검토, 온라인 키움/OpenDART 진단, 텔레그램 실제 발송, 프로그램 스택 및 모의 예약 실행 배포. 현재 키움 허용 IP는 PC IP이므로 ECR 업로드만으로 AWS API 접속이 준비된 것은 아니다.
+- 다음 Codex의 첫 작업: 세 파일 인수인계와 실제 상태를 다시 대조한다. Git 제외 업로드 결과의 `UPLOADED_AND_VERIFIED` 및 digest를 활용하고 저장소를 중복 생성하지 않는다. 운영 전 취약점과 고정 접속 IP 제약을 검토하고 실행 구조·비용·정책을 구체화한 뒤 필요한 추가 승인만 받는다. 승인된 ECR/Secret 준비를 반복 확인하지 않는다.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`, `LIVE TESTS: 전체 161개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 모의용 Secret·VPC·보안그룹·ECR 이미지 준비 / 프로그램 스택 미배포 / 예약 비활성`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+
+### 2026-10-14 00:05 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 작업 경로: `C:/Test`.
+- 요청 목표: Windows 재부팅 후 Docker/WSL 복구를 확인하고 중단했던 ECR 업로드 준비를 재개.
+- 완료한 작업:
+  - AGENTS.md → PC-C 단독 인수인계 → 공동 인수인계 순서로 검토하고 실제 Git 상태와 Docker 설정을 대조했다. 기준 `bb5946e`, 이전 세션의 미커밋 9개 파일이 유지됐고 알 수 없는 새 변경이나 pull은 확인되지 않았다. 이전 작업을 보존하고 실거래 비활성 검증을 이어간다고 알렸다.
+  - WslService `Running`, Docker Engine 실제 API 버전 `28.0.1` 응답 확인. 기존 이미지 `stock-automation:dev`가 남아 있고 크기는 `110,776,565 bytes`(약 111 MB, 비압축 로컬 크기), 플랫폼 linux/amd64, 사용자 `65534:65534` 확인. 이전 WSL StopPending/이미지 조회 시간 초과는 재부팅 후 재현되지 않았다.
+  - 네트워크 차단·읽기 전용·권한 제거 일회성 컨테이너에서 CLI help 및 키움/boto3 import 검증. 이미지의 프로그램 소스·정적 자산 36개 해시를 현재 워크스페이스와 대조해 모두 일치했다.
+  - 이미지 환경변수에 지정한 앱키/AWS키/텔레그램키/실거래 활성화 변수가 없음을 확인하고 소스의 AWS access key·텔레그램 토큰 형태에 대한 제한된 패턴 검사 통과. 전체 보안 감사나 키 유효성 검증을 완료했다는 의미는 아니다.
+  - 지정 IAM 사용자/서울 리전 STS 확인 통과. ECR DescribeRepositories 결과 저장소 `stock-automation`은 아직 없다. 원문 신원·계정 ID·키 값은 출력하지 않았다.
+  - Git 제외 `runtime/ecr-upload-plan.json` 작성. 비공개 `stock-automation` 저장소 1개, 검증한 이미지 ID, 내용 기반 태그 `paper-bb5946e-<image-id-prefix>`, AES256 암호화·태그 불변·push scan 비활성 계획이다. 실제 AWS 생성/업로드는 하지 않았다. Docker 기본 native credential helper 실행 파일 존재를 확인했으며 인증값을 평문 프로젝트 파일에 저장하지 않는 업로드 방식을 사용한다.
+- 전체 테스트 결과: 재부팅 후 unittest `161개 통과`, compileall 통과. 컨테이너 CLI/import/소스 일치 검사와 `git diff --check` 통과. runtime 계획의 Git 제외 확인.
+- 변경 파일: 이 공동 인수인계와 Git 제외 업로드 계획. 프로그램 소스·기존 도구·정책·테스트는 변경하지 않았다.
+- 비용 검토: 공식 ECR 가격 예시 $0.10/GB/월 기준 현재 이미지 1개의 보관료는 비압축 크기로 계산하면 약 $0.011/월, 안내 범위 $0.01~$0.02/월. 실제 ECR 압축 보관량·무료 혜택·크레딧·세금에 따라 차이가 있다. https://aws.amazon.com/ecr/pricing/ 에서 저장 요금과 같은 리전 AWS 서비스 전송 무료 안내를 재확인했다. 다른 서버·네트워크 자원 비용을 포함한 총 운영비 추정이 아니다.
+- 사용자 승인 상태: 기존 모의 Secret 3개 생성 승인은 유지. ECR 저장소 생성과 검증 이미지 1개 업로드의 비용 승인은 이번 응답에서 별도 요청할 단계다. 승인을 받기 전 CreateRepository·ECR 로그인·push를 하지 않는다.
+- 다음 Codex의 첫 작업: 사용자가 ECR 생성/이미지 1개 업로드를 승인하면 위 계획을 사용해 전용 IAM 프로필로 수행한다. native credential helper와 password-stdin으로 인증값을 보호하고 원문 계정 ID/레지스트리 URL/토큰을 일반 출력하지 않는다. 최종 이미지 digest와 저장량을 검증하고 Git 제외 배포 정보에 기록한다. 승인된 범위를 반복 확인하지 않는다.
+- 미완료 사항: ECR 업로드, 키움 허용 IP를 만족하는 AWS 예약 실행 방식·추가 비용 검토, 온라인 키움/OpenDART 진단·메신저 실제 발송·프로그램 스택 배포.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`, `LIVE TESTS: 전체 161개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 기존 모의용 Secret·VPC·전용 보안그룹 유지 / 프로그램 스택 미배포`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+- 전달 파일 버전: 기준 `bb5946e`, 로컬 기록만 추가, commit/push하지 않음.
+
+### 2026-10-13 23:55 KST — PC-C → 재부팅 후 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 작업 경로: `C:/Test`.
+- 사용자 화면과 실제 실패: 사용자 Docker Desktop 화면은 처음 `Engine running`이었지만 실제 엔진 version/image inspect가 각각 25초 제한 시간 초과했고, Docker 내부 WSL 명령도 8초 제한 시간 초과했다. 이후 사용자가 `Docker Desktop - Unexpected WSL error` 화면을 제공했다. 메시지는 WSL 배포판 목록 조회 `context deadline exceeded`로, 애플리케이션 키 오류가 아니라 Docker/WSL 실행환경 오류로 좁혀졌다.
+- 수행한 복구:
+  - 일반 Docker Desktop CLI restart를 시도했으나 실패했다. 이 조회 도구의 Python cp949 출력 디코딩 오류도 발생했으며 이후 명령은 원시 bytes를 캡처해 그 오류를 피했다. 실제 Docker 복구 성공으로 보고하지 않는다.
+  - WSL 실행 중 목록 명령도 시간 초과돼 HKCU WSL 등록 정보에서 이름을 출력하지 않고 개수만 확인했다. Docker용 배포판 1개, 그 외 사용자 Linux 배포판 0개 확인.
+  - Docker Desktop CLI stop은 성공했다. 이어서 `wsl --shutdown`은 20초 제한 시간 초과했다.
+  - 다른 등록 Linux 환경이 없는 상태에서 WslService 정상 재시작을 시도했으나 종료 대기에서 멈췄다. 장시간 대기하는 명령은 Ctrl+C로 중단했고 최종 실제 서비스 상태는 `StopPending`이다. PC 재부팅을 사용자에게 안내한다.
+- 보존한 내용: 프로젝트 파일, WSL 배포판과 Docker 디스크 데이터를 삭제·초기화·등록 해제하지 않았다. Docker/WSL 재설치, 전체 PC 자동 재부팅, VM 강제 프로세스 제거는 하지 않았다. 새 AWS 자원 생성·이미지 업로드·실제 주문 없음.
+- 현재 AWS 준비 완료 범위: IAM operator 로그인, 모의용 Secret 3개 실제 생성, 전용 VPC/공개 서브넷 2개/인바운드 없는 전용 보안그룹, Secret/네트워크/ECR 준비 권한. ECR 조회 권한 적용 확인까지 완료됐지만 저장소 자체는 아직 없다.
+- 변경 파일: 이 공동 인수인계만 추가 변경. 기존 미커밋 정책 3개·로컬 설정 도구·테스트를 보존했다. Git 제외 runtime 정보도 보존한다.
+- 검증: 문서 `git diff --check` 통과. 프로그램 코드 변경이 없어 테스트 반복 없음(직전 전체 `161개 통과`). Docker 이미지 용량·실행 재확인은 미완료다.
+- 다음 Codex의 첫 작업:
+  1. 사용자가 열려 있는 작업을 저장한 후 Windows 재부팅을 수행하고 Docker Desktop을 다시 열었는지 확인한다.
+  2. AGENTS.md와 두 인수인계를 읽고 기존 미커밋 작업을 보존한다. `StockPaperEcrUpload`를 다시 만들거나 이미 승인된 Secret 비용 승인을 반복하지 않는다.
+  3. WslService 실행 및 Docker Engine 실제 API 응답을 읽기 전용으로 확인한다. `stock-automation:dev` 이미지가 남아 있으면 용량/플랫폼/비관리자 설정을 확인하고, 필요한 경우 승인된 기존 Docker 빌드를 재실행한다.
+  4. 업로드할 이미지를 구체적으로 검증한 뒤 ECR 보관 비용과 생성·업로드 범위를 사용자에게 승인받고 전용 IAM 프로필로 진행한다. ECR 비용은 아직 승인 대기다.
+- 남은 과제: ECR 저장소 생성·이미지 업로드, 키움 허용 IP를 만족하는 예약 실행 구조·추가 비용 검토, 온라인 키움/OpenDART 진단, 실제 메신저 발송 및 프로그램 스택 배포. 현재 범위는 분석·모의매매/종가배팅 예약 우선이며 상시 단타를 추가하지 않는다.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`, `LIVE TESTS: 직전 전체 161개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 모의용 Secret·VPC·전용 보안그룹 준비 / 프로그램 스택 미배포`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+- 전달 파일 버전: 기준 `bb5946e`, commit/push하지 않음. 공식 복구 참고: https://learn.microsoft.com/en-us/windows/wsl/basic-commands , 사용자 제공 Docker 오류 화면의 WSL 종료/PC 재부팅 안내.
+
+### 2026-10-13 23:43 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 작업 경로: `C:/Test`.
+- 사용자 작업: 고객 관리형 `StockPaperEcrUpload` 정책 생성 및 `stock-paper-operator`에 직접 연결 완료 보고. 준비한 ECR 정책 JSON과 이름을 안내했고 사용자의 정책 검토 화면에서도 이름/ECR 서비스를 확인했다.
+- 실제 AWS 확인: 해당 IAM 프로필/서울 리전으로 `stock-automation` 저장소 DescribeRepositories를 호출해 `RepositoryNotFoundException` 확인. 조회 권한이 적용됐으며 저장소는 아직 없다. 실제 생성·인증 토큰 발급·업로드 권한은 해당 작업 수행 전까지 미검증이다. 계정 ID·ARN·비밀정보를 출력하지 않았다.
+- Docker 점검: `docker desktop status`는 RUNNING. 기존 `stock-automation:dev` image inspect는 20초 제한 시간 초과. Docker 환경변수 HOST/CONTEXT override 없음, 현재 context desktop-linux, 로컬 named pipe, docker-desktop WSL 실행을 확인했다. WslService 실행 중. com.docker.service/LxssManager는 stopped였으나 이것만으로 Linux WSL 엔진 장애 원인이라고 단정하지 않는다.
+- 변경 파일: 이 공동 인수인계만 추가 변경. 기존 미커밋 작업 보존.
+- 검증: 읽기 전용 권한·Docker 연결 대상 확인 및 문서 `git diff --check` 통과. 코드 변경 없어 테스트 반복 없음(직전 전체 `161개 통과`). 실제 Docker 컨테이너/서비스 재시작·종료·제거는 하지 않았다.
+- 다음 Codex의 첫 작업: 사용자가 Docker Desktop 창의 엔진 상태 문구를 확인하게 하고 일시정지/Resource Saver/정상 실행 중 여부를 구분한다. 앱 RUNNING과 Docker Engine 정상 응답은 같은 의미가 아니다. Docker 공식 Resource Saver·CLI 상태 안내를 검토했다. 이미지 조회/실행을 정상화한 후 크기·비밀정보 미포함·재현성 검사를 마치고 ECR 업로드 비용 및 범위 승인을 받는다.
+- 승인 대기: ECR 이미지 보관/업로드는 아직 비용 승인받지 않았다. 저장소/이미지를 생성하지 않는다. 기존 Secret 비용 승인은 보존한다.
+- 미완료 사항: Docker 이미지 용량·실행 재확인, ECR 비용 승인·저장소 생성·업로드, 키움 고정 접속 IP 구조·추가 비용, 온라인 API 진단·프로그램 배포.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`, `LIVE TESTS: 직전 전체 161개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 모의용 Secret·VPC·전용 보안그룹 준비 / 프로그램 스택 미배포`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+- 전달 파일 버전: 기준 `bb5946e`, commit/push하지 않음.
+
+### 2026-10-13 23:34 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 작업 경로: `C:/Test`.
+- 완료한 작업:
+  - 사용자 전용 보안그룹 생성 보고 후 지정 IAM 사용자로 새 VPC의 `stock-automation-paper-task`를 조회했다. 정확히 1개이며 인바운드 규칙 0개, 모든 IPv4 아웃바운드 허용 확인. Git 제외 `runtime/aws-network-inventory.json`에 보안그룹 ID와 검사 결과를 추가했다. 사용자 화면의 이름·설명·VPC·규칙과도 대조했다.
+  - 다음 ECR 준비를 위해 `stock-automation/infra/paper-ecr-upload-policy.json` 작성. 서울 리전에서 인증 토큰 발급과 `stock-automation` 저장소 1개 생성·이미지 업로드/조회/다운로드만 허용한다. IAM 변경·삭제·배포·실주문 권한은 추가하지 않았다.
+  - 기존 두 인라인 정책의 로컬 compact JSON 길이는 1140+369=1509자, 새 ECR 정책까지 합치면 2190자로 사용자 인라인 정책 누적 한도 2048자를 초과한다. 따라서 ECR 권한은 사용자 인라인 추가가 아니라 별도 고객 관리형 정책 `StockPaperEcrUpload`을 만들고 연결하는 방식으로 안내한다. 실제 AWS 저장 정책의 재작성된 길이는 조회하지 않았으므로 이 수치는 준비 파일 기준이다.
+- 변경 파일: ECR 정책 JSON, 이 공동 인수인계, Git 제외 runtime 정보. 기존 미커밋 작업 보존.
+- 검증: ECR 정책 JSON·작업/저장소/리전 범위 검사 통과, 전체 unittest `161개 통과`, `git diff --check` 통과. 공식 ECR 업로드 IAM 안내 https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-push-iam.html 와 IAM 관리형 정책 생성/크기 한도 안내를 확인했다.
+- 비용 참고: ECR 공식 가격 예시에서 보관료 $0.10/GB/월과 같은 리전 AWS 서비스로의 전송료 $0.00/GB를 확인했다. 실제 이미지 크기 확인 후 비용과 생성·업로드 범위를 안내해야 한다. https://aws.amazon.com/ecr/pricing/
+- 실패·미확인 사항: Docker Desktop/backend 프로세스는 실행 중이나 `docker image inspect stock-automation:dev`가 응답하지 않아 해당 조회만 Ctrl+C로 중단했다. 이미지 용량 재확인 미완료. Docker 서비스/컨테이너를 재시작하거나 제거하지 않았다. 직전 이미지 빌드 성공 기록은 과거 검증 결과로 보존한다. ECR 정책 실제 등록·저장소 생성·업로드는 미실행이다.
+- 다음 Codex의 첫 작업: 사용자 관리자 콘솔 IAM 왼쪽 정책 → 정책 생성 → JSON 화면을 열게 하고 위 파일로 고객 관리형 `StockPaperEcrUpload` 정책을 만든 뒤 `stock-paper-operator`에 연결한다. 이어서 Docker 응답·기존 이미지 확인 문제를 해결하고 업로드할 이미지를 구체화한 후, 별도 ECR 비용 승인을 받고 전용 IAM 프로필로 진행한다. Secret 3개 비용 승인만으로 ECR/서버 생성까지 승인된 것으로 해석하지 않는다.
+- 남은 과제: 키움 허용 IP를 만족하는 AWS 예약 실행 구조·추가 비용 검토, 온라인 API 진단·실제 메신저 발송·프로그램 스택 배포. 상시 단타·항상 켜진 서버를 기본으로 추가하지 않는다.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`, `LIVE TESTS: 전체 161개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 모의용 Secret·VPC·전용 보안그룹 준비 / 프로그램 스택 미배포`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+- 전달 파일 버전: 기준 `bb5946e`, commit/push하지 않음.
+
+### 2026-10-13 23:04 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 작업 경로: `C:/Test`.
+- 사용자 작업: VPC 생성 화면에서 이름 자동 생성 `stock-automation-paper`, IPv4 `10.77.0.0/16`, IPv6 없음, 기본 테넌시, AZ 2개, 공개 서브넷 2개, 비공개 서브넷 0개, NAT 없음, VPC 엔드포인트 없음, DNS 두 옵션 체크를 안내했다. 사용자가 생성 완료를 보고했다. DNS 두 옵션 체크는 사용자 화면에서도 확인했다.
+- 실제 AWS 확인: 지정 IAM 사용자와 서울 리전으로 조회해 이름 접두사·CIDR가 일치하는 VPC 1개를 특정하고 `available` 상태를 확인했다. 서브넷 2개가 서로 다른 AZ에 있고 둘 다 활성 인터넷 게이트웨이 기본 경로를 갖는다. NAT 경로 없음, 탄력 IP 0개, 해당 VPC 보안그룹 1개 확인. 기존 가이드에서 요구하는 공개 서브넷의 기반이 마련됐다.
+- 검증 한계: 현재 조회 정책에는 DescribeVpcAttribute/DescribeNatGateways/DescribeVpcEndpoints가 없어서 DNS 실제 속성과 NAT/엔드포인트 전체 목록은 직접 조회하지 않았다. 사용자 설정 안내 및 화면 확인과 실제 원격 조회 결과를 구분한다. NAT 경로가 없다는 사실만으로 모든 NAT 자원이 없다고 단정하지 않는다.
+- 로컬 준비 정보: Git 제외 `runtime/aws-network-inventory.json`을 선택한 VPC·서브넷의 ID/AZ/라우팅 정보로 갱신했다. 키·계정 ID·공인 IP 원문은 넣지 않았다.
+- 변경 파일: 이 공동 인수인계, Git 제외 runtime 정보. 기존 정책·도구·테스트 미커밋 변경 보존.
+- 검증: AWS VPC/서브넷/라우팅 조회 및 Git 제외 확인 통과. 코드 변경 없이 문서 `git diff --check` 통과. 직전 전체 unittest `161개 통과`.
+- 다음 Codex의 첫 작업: 사용자 VPC 콘솔 → 보안 그룹 → 보안 그룹 생성 화면을 열게 한다. 새 VPC에 전용 `stock-automation-paper-task` 보안그룹을 만들고 인바운드 규칙은 비워둔다. 외부 API 통신과 SSM/ECR 등을 고려한 아웃바운드를 구체화하고 생성 후 원격 조회로 검증한다. 그다음 키움 허용 IP를 해결할 예약 실행 구조와 비용을 구체화한다.
+- 미완료 사항: 전용 보안그룹, 고정 접속 IP 구조 및 비용 승인, 배포 권한, 온라인 API 진단·메신저 실제 발송·프로그램 스택 배포. VPC 생성만으로 키움 AWS 접속이 완료된 것은 아니다.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`, `LIVE TESTS: 직전 전체 161개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 모의용 Secret 및 VPC 네트워크 준비 / 프로그램 스택 미배포`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+- 전달 파일 버전: 기준 `bb5946e`, commit/push하지 않음.
+
+### 2026-10-13 22:57 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 작업 경로: `C:/Test`.
+- 완료한 작업: 사용자 `StockPaperNetworkInspect` 생성 완료 보고 후 지정 IAM 사용자로 서울 리전 EC2 조회 작업 7개를 수행했다. 전부 통과했다. VPC `0개`(기본 VPC 없음), 인터넷 게이트웨이 `0개`, 보안그룹 `0개`, 탄력 IP `0개`, 종료되지 않은 EC2 인스턴스 `0개`를 확인했다. 이 결과는 서울 리전만 대상으로 하며 다른 리전의 자원이나 전체 AWS 청구액을 확인한 것은 아니다.
+- 로컬 준비 정보: `runtime/aws-network-inventory.json`에 정리했으며 `git check-ignore`로 Git 제외를 확인했다. 키·계정 ID·IP 주소는 포함하지 않는다. 이번 조회에서는 기본 VPC가 없어 선택한 서브넷도 없다.
+- 변경 파일: 이 공동 인수인계만 추가 변경. Git 제외 runtime 파일 생성. 기존 미커밋 정책·도구·테스트 변경 보존.
+- 검증: IAM 신원 확인 후 AWS 네트워크 읽기 통과, 저장 정보 집계 대조, Git 제외 및 `git diff --check` 통과. 코드 변경 없음으로 테스트 반복 없음(직전 전체 `161개 통과`).
+- 다음 Codex의 첫 작업: 사용자 AWS 콘솔의 서울 리전 VPC 대시보드를 열도록 안내하고 새 네트워크 구성 준비를 진행한다. 기존 VPC가 있다고 가정한 가이드 명령을 그대로 실행하지 않는다. AWS 모의 실행에 필요한 서브넷·라우팅·인바운드 없는 보안그룹을 구체화한다. 키움 허용 IP에 맞는 고정 접속 방식도 해결해야 하며 승인 없이 NAT Gateway·EC2·탄력 IP 등 유료 자원을 생성하지 않는다.
+- 미완료 사항: 새 네트워크 생성 권한/구성, 고정 접속 IP 구조·비용 검토, 프로그램 배포 권한, 온라인 API 진단 및 모의 스택 배포. 무료/유료 자원 모두 이번 조회에서는 생성하지 않았다.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`, `LIVE TESTS: 직전 전체 161개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 모의용 Secret만 생성 / 프로그램 스택 미배포`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+- 전달 파일 버전: 기준 `bb5946e`, commit/push하지 않음.
+
+### 2026-10-13 22:54 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 작업 경로: `C:/Test`.
+- 사용자 보고: 키움 모의 App Key 관리 화면의 IP 등록 상태는 마지막 정정 기준 현재 PC의 IP `1개 등록`. 앞선 `0개` 응답을 최신 상태로 취급하지 않는다. IP 원문은 받거나 저장하지 않았다.
+- 네트워크 검토: 현재 CloudFormation은 Fargate 작업별 `AssignPublicIp: ENABLED`이며 실행마다 같은 공인 IP를 보장하는 구성이 아니다. 키움 허용 IP 등록과 AWS 접속을 해결하기 전에는 예약 활성화나 배포 완료로 보고하지 않는다. AWS 공식 설명 https://docs.aws.amazon.com/AmazonECS/latest/developerguide/networking-outbound.html 확인. 고정 IP·NAT·EC2 등 새로운 유료 자원은 아직 생성하지 않았다.
+- 완료한 작업: 서울 리전에서 기존 VPC·서브넷·라우팅·보안그룹·인터넷 게이트웨이·탄력 IP·인스턴스 정보만 읽을 수 있는 `stock-automation/infra/paper-network-inspect-policy.json` 준비. Create/Modify/Delete·키 원문 읽기·실거래·배포 권한은 없다. 실제 IAM 부착은 사용자 대기 중이다.
+- 변경 파일: 위 정책 JSON과 이 공동 인수인계. 이전 미커밋 변경 보존.
+- 검증: 정책 JSON 파싱·조회 작업 7개와 서울 리전 한정 조건 검사 통과. 전체 unittest `161개 통과`, `git diff --check` 통과. 실제 AWS 네트워크 조회는 정책 부착 후 진행한다.
+- 다음 Codex의 첫 작업: 사용자가 관리자 콘솔 IAM → `stock-paper-operator` → 권한 → 인라인 정책 생성 → JSON 화면을 열도록 안내한다. 위 파일 내용으로 `StockPaperNetworkInspect` 정책을 추가한 뒤 지정 IAM 사용자로 네트워크를 읽기 전용 확인한다. 그 결과를 바탕으로 종가배팅 예약 작업의 고정 접속 방식과 비용을 구체화한다. 별도 승인 없이 고정비 인프라를 생성하거나 상시 단타를 구현하지 않는다.
+- 실패·미확인 사항: AWS 네트워크 구성, 키움 모의 API에서 IP 제한의 실제 응답, 온라인 키 검증·실제 메신저 발송·배포 권한·프로그램 배포 모두 미확인.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`, `LIVE TESTS: 전체 161개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 모의용 Secret만 생성 / 프로그램 스택 미배포`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+- 전달 파일 버전: 기준 `bb5946e`, commit/push하지 않음.
+
+### 2026-10-13 22:48 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 작업 경로: `C:/Test`.
+- 완료한 작업: 사용자 업로드 완료 보고 후 `stock-paper-operator`/서울 리전에서 모의용 세 이름의 DescribeSecret을 다시 실행했다. 키움 모의·OpenDART·텔레그램 모두 정확한 이름·삭제 대기 아님·AWSCURRENT 버전 존재를 확인했다. 세 항목 `CREATED_ACTIVE_CURRENT`. Secret 원문을 읽거나 출력하지 않았다.
+- 승인·비용 상태: 앞선 사용자 승인 범위의 모의용 Secret 3개 생성 완료를 확인했다. 다른 인프라 생성이나 예약 활성화는 하지 않았다. 보관료는 앞선 $1.20/월 + API 사용료 안내 조건이며 생성 시점 이후 실제 사용 기간·세금·크레딧 등에 따라 청구된다.
+- 변경 파일: 이 공동 인수인계만 추가 변경. 기존 미커밋 작업 보존.
+- 검증: 실제 AWS 세 항목 메타데이터 확인 통과. 코드 변경 없어 테스트 반복 없음(직전 전체 `161개 통과`), 문서 `git diff --check` 통과. 저장 확인은 내용 및 API 키 유효성 검증과 다르다.
+- 접속 IP 검토: 공식 키움 서비스 이용안내 https://openapi.kiwoom.com/intro/serviceInfo 에서 허용된 IP에서만 인증, IP 최대 10개 등록 및 실전/모의 App Key 관리 탭 구분 안내를 확인했다. 현재 사용자의 모의 App Key 관리 화면에서 실제 IP 설정 표시를 확인한 후 AWS 접속 방식과 비교해야 한다. 기존 Fargate 공인 IP 변동 문제는 미해결이며 고정 IP 인프라를 임의로 생성하지 않는다.
+- 다음 Codex의 첫 작업: 사용자가 키움 REST API 사이트의 모의투자 App Key 관리 화면을 열고 IP 등록 현황 표시 여부를 확인하게 한다. 키·계좌번호·IP 원문을 대화로 요구하지 않는다. 확인 후 짧게 실행하는 AWS 모의 작업의 접속 구조와 비용을 구체화한다. 상시 단타/항상 켜진 EC2를 기본 범위로 확대하지 않는다.
+- 실패·미확인 사항: 키움/OpenDART 키 실제 온라인 유효성, AWS에서의 모의 API 인증, 메신저 실제 발송, 배포 권한 및 모의 스택 배포 미완료.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`, `LIVE TESTS: 직전 전체 161개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 모의용 Secret만 생성 / 프로그램 스택 미배포`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+- 전달 파일 버전: 기준 `bb5946e`, commit/push하지 않음.
+
+### 2026-10-13 22:46 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 작업 경로: `C:/Test`.
+- 사용자 승인: 서울 리전에 모의용 Secret 3개를 생성하는 작업과 보관료 합계 약 월 $1.20 + API 사용료(세금·크레딧 등에 따른 차이)를 안내했고, 사용자가 `ㄱㄱㄱ`으로 진행을 승인했다. 승인 범위는 `stock-automation-paper/kiwoom-demo`, `/dart`, `/telegram` 생성이다. 이 승인으로 실거래·예약 활성화·다른 유료 배포까지 허용된 것으로 해석하지 않는다.
+- 현재 상태: 업로드 도구 존재 확인. 사용자가 자신의 CMD에서 `upload_paper_secrets.py --create`를 실행하고 모의 App Key·모의 Secret·OpenDART 키를 숨김 입력할 단계다. 텔레그램 토큰·chat_id는 사용자 로컬 vault에서 자동으로 읽는다. 실제 생성 성공은 아직 확인하지 않았다.
+- 변경 파일: 이 공동 인수인계만 추가 변경. 이전 미커밋 작업 보존.
+- 검증: 코드 변경 없이 문서 `git diff --check` 통과. 직전 전체 테스트 `161개 통과`.
+- 다음 Codex의 첫 작업: 사용자의 저장 완료 출력 또는 비밀정보 없는 오류 문구를 확인한다. 비용 승인을 다시 요구하지 않는다. 성공 시 DescribeSecret으로 세 항목 존재만 확인하고 비밀값을 읽거나 출력하지 않는다. 일부 생성 실패 시 기존 Secret을 덮어쓰거나 삭제하지 않고 원인과 남은 항목을 확인한다.
+- 미완료 사항: 실제 AWS Secret 생성 확인, OpenDART 온라인 조회, 키움 온라인 doctor, 메신저 실제 발송, 키움 허용 IP 검토 및 모의 배포.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`, `LIVE TESTS: 직전 전체 161개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 이번 세션 미배포`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+- 전달 파일 버전: 기준 `bb5946e`, commit/push하지 않음.
+
+### 2026-10-13 22:44 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 작업 경로: `C:/Test`.
+- 완료한 작업:
+  - 사용자 보고로 IAM 인라인 정책 `StockPaperSecretSetup` 생성 완료. `stock-paper-operator`로 모의용 세 이름의 DescribeSecret을 실제 호출해 모두 `ResourceNotFoundException`을 확인했다. 조회 권한 적용 및 미생성 상태 확인이며 생성 권한의 실제 검증은 아직 아니다. 비밀값·ARN·계정 ID는 읽거나 출력하지 않았다.
+  - `tools/upload_paper_secrets.py` 작성. 사용자 직접 실행 시 지정 IAM 사용자/서울 리전을 확인하고 세 이름이 모두 없는지 먼저 검사한다. 키움 모의 키 2개와 OpenDART 키를 숨김 입력받고, 텔레그램은 사용자 로컬 Windows vault에서만 읽어 세 Secret을 생성한다. 기존 Secret 덮어쓰기와 자동 삭제는 하지 않는다.
+  - CLI의 기본 실행은 안내만 출력하며, 실제 생성에는 `--create`가 필요하다. SDK 호출에는 비밀값을 메모리로 전달하고 명령 인수·평문 임시 파일·일반 로그에 기록하지 않는다. AWS 기본 관리형 암호화키를 사용하며 복제·회전·새 KMS 키를 추가하지 않는다.
+  - AWS 브라우저 로그인 지원에 필요한 `botocore[crt]`와 boto3 버전 조건을 도구 전용 requirements에 추가·설치했다. Python SDK에서 해당 IAM 사용자 STS 확인도 통과했다. 에이전트는 업로드 도구의 실제 생성 경로를 실행하지 않았다.
+- 변경 파일: `stock-automation/tools/upload_paper_secrets.py`, `stock-automation/tools/requirements.txt`, `stock-automation/tests/test_paper_secret_upload.py`, 이 공동 인수인계. 이전 도구·정책·테스트 로컬 변경 보존.
+- 검증 결과: 신규 도구 집중 테스트 `9개 통과`, 전체 unittest `161개 통과`, Python compileall, CLI help 및 생성 없는 기본 실행 확인, `git diff --check` 통과. 가짜 응답으로 root 차단·기존 항목/권한 오류 중단·계약 필드·오류 비노출·부분 실패 보존·비대화형 실행 차단을 확인했다.
+- 비용 검토: AWS 공식 Secrets Manager 가격 페이지의 일반 가격 예시 기준 저장료 $0.40/개/월, 3개 유지 시 $1.20/월, API $0.05/10,000회 추가. 세금·사용 기간·크레딧 등에 따른 실제 청구 차이가 있다. 근거: https://aws.amazon.com/secrets-manager/pricing/
+- 실패·미확인 사항: 유료 Secret 3개 생성에 대한 사용자 승인 대기. 실키 입력·생성·저장 완료 확인·OpenDART 온라인 조회·메신저 실제 발송·배포 모두 미실행. SDK의 CRT 의존성 누락은 설치 후 해결했다.
+- 남은 위험: 생성 도중 일부만 성공하면 완료 항목은 유지되며 이후 호출을 중단한다. 재실행은 기존 항목을 발견해 중단하므로, 일부 성공 시 원인을 확인하고 별도로 나머지 항목을 처리해야 한다. Secret 입력이 실제 키움 모의 키인지 사용자 확인이 필요하다. 키움 허용 IP/변동 IP 문제와 배포 권한도 미완료다.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`, `LIVE TESTS: 전체 161개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 이번 세션 미배포`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+- 다음 Codex의 첫 작업: 서울 리전 모의용 Secret 3개 생성 비용 승인을 받는다. 승인 후 사용자 CMD에서 `.venv/Scripts/python.exe stock-automation/tools/upload_paper_secrets.py --create`를 실행하도록 안내한다. 키 값은 사용자 터미널에만 입력하고 대화로 받지 않는다. 승인 없이 생성하지 않는다.
+- 전달 파일 버전: 기준 `bb5946e`, 로컬 준비만 수행, commit/push하지 않음.
+
+### 2026-10-13 22:37 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 작업 경로: `C:/Test`.
+- 요청 목표: 사용자 IAM 권한 화면에서 모의용 비밀정보 저장 권한 준비.
+- 완료한 작업: 로컬 `stock-automation/infra/paper-secret-setup-policy.json` 작성. 서울 리전의 `stock-automation-paper/kiwoom-demo`, `/dart`, `/telegram` 세 이름에 한해 CreateSecret/DescribeSecret/PutSecretValue를 허용하도록 제한했다. 조회·갱신은 자기 계정 조건을 적용하고 이름 뒤 ARN 6자리 무작위 접미사는 `??????`로 한정했다. 키 원문 읽기·목록 조회·삭제·IAM 변경·배포 권한은 추가하지 않았다.
+- 변경 파일: 정책 JSON과 이 공동 인수인계. 기존 도구·테스트 미커밋 변경 보존.
+- 검증: AWS 공식 Secrets Manager 서비스 권한 및 IAM 인라인 정책 문서 확인. JSON 파싱, 허용 작업 3개·이름 3개·리전·다른 실거래/유사 이름 불일치 등 로컬 범위 검사 통과. 전체 unittest `152개 통과`, `git diff --check` 통과.
+- 실패·미확인 사항: 실제 IAM에 정책을 부착하지 않았다. AWS 콘솔 정책 검증과 실제 권한 동작은 미확인이다. Secrets Manager 자원 생성·키 업로드·배포·과금 자원 생성은 하지 않았다.
+- 다음 Codex의 첫 작업: 사용자 권한 탭에서 권한 추가 → 인라인 정책 생성 → JSON 화면을 열게 한 뒤 준비한 정책을 안내한다. 정책 이름은 `StockPaperSecretSetup`. 기존 로그인·비밀번호 변경 정책을 보존한다. 실제 Secret 생성 전에 비용·생성 범위를 안내하고 사용자 승인을 확인한다.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 통합검증 미완료`, `LIVE TESTS: 전체 152개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 이번 세션 미배포`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+- 전달 파일 버전: 기준 `bb5946e`, 로컬 준비만 수행, commit/push하지 않음.
+
+### 2026-10-13 22:33 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 작업 경로: `C:/Test`.
+- 완료한 작업: 사용자 AWS 재로그인 성공 보고 이후, `stock-paper-operator`/`ap-northeast-2`로 읽기 전용 STS 호출을 수행하고 ARN의 지정 IAM 사용자 일치 여부만 확인했다. 결과 `EXPECTED_IAM_USER`. 계정 번호·ARN 원문·인증값은 출력하거나 문서에 기록하지 않았다.
+- 실제 코드·문서 검토: 기존 AWS 실행 가이드와 템플릿에서 모의용 키움·OpenDART·텔레그램 Secret 계약을 확인했다. 기존 사용자 정책 기록은 로그인·암호변경용 2개뿐이며, Secret 등록 및 배포 권한을 추가로 준비해야 한다. 현재 정책을 IAM API로 재조회한 것은 아니다.
+- 변경 파일: 이 공동 인수인계만 추가 변경. 기존 미커밋 도구·테스트 변경 보존.
+- 검증 결과: AWS IAM 로그인 확인 통과, 문서 `git diff --check` 통과. 코드 변경 없음으로 테스트 반복 없음(직전 전체 `152개 통과`).
+- 실패·미확인 사항: Secret 등록 권한과 AWS 배포 권한 미준비. 실제 Secret 등록·알림 발송·온라인 doctor·AWS 모의 배포는 미실행. 키움 허용 IP 문제도 미해결이다.
+- 다음 Codex의 첫 작업: 사용자가 기존 관리자 콘솔에서 IAM → 사용자 → `stock-paper-operator` → 권한 화면을 열도록 안내하고, 프로젝트 모의용 Secret에 한정한 정책을 준비한다. 관리자 프로필로 배포하거나 광범위한 AdministratorAccess를 부여하지 않는다. Secret 생성 비용과 유료 인프라는 실제 생성 전 사용자 확인이 필요하다.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 통합검증 미완료`, `LIVE TESTS: 직전 전체 152개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 이번 세션 미배포`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+- 전달 파일 버전: 기준 `bb5946e`, commit/push하지 않음.
+
+### 2026-10-13 22:28 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 작업 경로: `C:/Test`.
+- 완료한 작업: 사용자 CMD 출력에서 텔레그램 등록 도구의 `등록 완료`를 확인했다. 도구가 봇·개인 대화방을 조회한 후 토큰과 chat_id를 Windows 자격 증명 저장소(service `stock-automation-setup`, account `telegram`)에 저장한 상태다. 에이전트는 실제 저장 값이나 비밀 파일을 읽지 않았다. 실제 메시지 발송 및 AWS 연결은 아직 하지 않았다.
+- AWS 확인 결과: `stock-paper-operator` 프로필로 읽기 전용 STS 인증 확인을 수행했으나 재로그인이 필요했다. 계정 ID·ARN 원문·오류 원문을 출력하지 않았고 다른 프로필로 우회하지 않았다.
+- 변경 파일: 이 공동 인수인계만 추가 변경. 기존 도구·테스트 로컬 변경 보존.
+- 검증: 사용자 실제 등록 성공 출력 확인. 코드 변경이 없어 테스트를 반복하지 않았다. 직전 전체 테스트는 `152개 통과`이며 문서 `git diff --check` 통과.
+- 실패·미확인 사항: AWS operator 로그인 만료. 배포 권한·Secrets Manager 연결·OpenDART 온라인 조회·키움 온라인 doctor·모의 AWS 통합검증은 미완료. 유료 인프라 생성 없음.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 통합검증 미완료`, `LIVE TESTS: 직전 전체 152개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 이번 세션 미배포`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+- 다음 Codex의 첫 작업: 사용자 터미널에서 `aws login --profile stock-paper-operator --remote` 실행을 안내한다. IAM 사용자로 인증 후 STS에서 지정 사용자임을 비밀정보 없이 재확인하고 최소권한·모의용 Secret 연결 준비를 진행한다. 토큰이나 인증 코드는 대화로 요청하지 않는다.
+- 전달 파일 버전: 기준 `bb5946e`, commit/push하지 않음.
+
+### 2026-10-13 22:26 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`, 작업 경로: `C:/Test`.
+- 요청 목표: 사용자 CMD에서 텔레그램 등록 도구 실행 시 발생한 연결·응답 오류 해결.
+- 확인한 실패: 사용자 실행은 숨김 토큰 입력 이후 연결 실패했다. 에이전트가 토큰 없이 공개 `api.telegram.org/` 경로를 조회했을 때 Python 기본 TLS에서 `SSLCertVerificationError`, 검증 코드 19가 재현됐다. 인증서 신뢰 문제를 확인했으며 토큰 유효성은 아직 미확인이다.
+- 완료한 작업:
+  - Windows 네이티브 신뢰 저장소를 사용하는 `truststore.SSLContext(PROTOCOL_TLS_CLIENT)`를 등록 도구에 적용했다. 인증서·호스트명 검증을 유지하며 전역 SSL 설정이나 시스템 인증서 저장소를 변경하지 않는다.
+  - 도구 전용 의존성 `tools/requirements.txt`를 추가하고 PC-C `.venv`에 설치했다. AWS 런타임 의존성과 배포 코드는 변경하지 않았다.
+  - 인증서·DNS·시간초과·HTTP 401/409 오류를 비밀정보 없는 문구로 구분했다. CMD 직접 실행 안내도 반영했다.
+  - 수정된 도구와 동일한 TLS context로 공개 경로 HTTPS 연결 성공(302 응답)을 확인했다. 응답 리다이렉트는 따라가지 않았으며 토큰·대화 내용·chat_id를 읽거나 출력하지 않았다.
+- 변경 파일: `stock-automation/tools/setup_telegram.py`, `stock-automation/tools/requirements.txt`, `stock-automation/tests/test_telegram_setup.py`, 이 공동 인수인계. 기존 로컬 변경과 이전 기록을 보존했다.
+- 테스트 결과: 도구 집중 테스트 `12개 통과`, 전체 unittest `152개 통과`, Python compileall 및 `git diff --check` 통과. 인증서·호스트명 검증 유지와 오류 정보 비노출을 검사했다.
+- 실패·미확인 사항: 실제 토큰으로 사용자 재실행 필요. 텔레그램 등록 완료, 실제 메시지 발송, AWS Secret 연결 및 OpenDART 온라인 검증은 아직 확인하지 않았다. AWS operator 재로그인·배포 권한·키움 허용 IP 문제도 미해결이다.
+- 남은 위험: 공개 경로 연결 성공만으로 실제 봇 토큰이 유효하다고 판단하지 않는다. PC-D에서 도구를 쓰려면 도구 전용 requirements 설치가 필요하다.
+- 실거래 상태: `LIVE CODE SAFETY: 미완성 / 통합검증 미완료`, `LIVE TESTS: 전체 152개 통과 / 실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 이번 세션 미배포`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미확인 / 해제하지 않음`.
+- 다음 Codex의 첫 작업: 사용자가 CMD에서 같은 등록 명령을 재실행한 결과를 확인한다. 실패하면 개선된 오류 문구만 요청하고 자격 증명 값은 요구하지 않는다.
+- 전달 파일 버전: 기준 `bb5946e`, 로컬 변경만 존재. commit/push하지 않았다.
+
+### 2026-10-13 21:22 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`
+- 작업 경로: `C:/Test`
+- 요청 목표: OpenDART 인증키 준비 및 텔레그램 개인 알림 대화방 등록 준비를 한 단계씩 진행.
+- 완료한 작업:
+  - 사용자 보고 기준으로 OpenDART 승인과 인증키 파일의 프로젝트 외부 보관을 완료했다. 키 원문을 읽거나 API 유효성을 검증하지 않았다.
+  - 사용자 보고 기준으로 Telegram 가입, BotFather에서 개인 알림 봇 생성, 토큰 외부 보관, 해당 봇에 `/start` 전송을 완료했다.
+  - `stock-automation/tools/setup_telegram.py`를 추가했다. 사용자가 직접 실행하고 숨김 입력으로 토큰을 제공하면 공식 `getMe`/`getUpdates` 조회만 수행한다. 지정한 봇과 개인 `/start` 대화방이 하나인지 확인하고 `bot_token`/`chat_id` JSON을 Windows 자격 증명 저장소에 함께 저장한다.
+  - 저장 위치의 service는 `stock-automation-setup`, account는 `telegram`이다. 실제 자격 증명 값을 대화·Git·프로젝트 파일·출력에 기록하지 않는다. AWS Secret 등록은 아직 하지 않았다.
+  - 그룹·여러 개인 대화방·다른 봇 토큰을 거절한다. 기존 로컬 등록 교체는 사용자 터미널에서 `yes` 확인이 필요하다. 평문 keyring 대체 백엔드를 허용하지 않는다.
+  - 메시지 발송, webhook 수정, getUpdates offset 변경을 하지 않는다. 리다이렉트와 원시 오류 출력도 금지한다.
+- 변경 파일: `stock-automation/tools/setup_telegram.py`, `stock-automation/tests/test_telegram_setup.py`, 이 공동 인수인계. 앞선 20:58 로컬 기록을 보존했다.
+- 추가·변경 테스트: 가짜 자격 증명으로 조회 전용 메서드, 개인 대화방 선택, 잘못된 토큰·봇 차단, 오류 비밀정보 노출 방지, 비대화형 실행 차단 등 10개 통과.
+- 전체 테스트 결과: `150개 통과`(기존 140개 + 신규 10개). Python compileall, 도구 `--help`, Windows vault 백엔드 사용 가능 여부 확인 통과.
+- 실패·미확인 사항: 사용자 실제 토큰으로 등록 도구 실행은 대기 중이다. OpenDART 실제 조회·텔레그램 실제 알림 발송·AWS Secrets Manager 연결·온라인 doctor·AWS 모의 통합검증은 미실행이다. AWS operator 프로필은 앞선 확인에서 재로그인이 필요했다.
+- 남은 위험: getUpdates에 `/start`가 없으면 다시 전송 후 재실행해야 한다. 개인 대화방이 여러 개면 자동 선택하지 않는다. AWS 배포 권한과 키움 허용 IP/변동 공인 IP 문제는 해결되지 않았다. 신규 유료 인프라는 생성하지 않았다.
+- 실거래 상태:
+  - `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`
+  - `LIVE TESTS: 전체 unittest 150개 통과 / 실제 주문·체결 통합검증 미실행`
+  - `LIVE AWS DEPLOYMENT: 이번 PC-C 세션에서 미배포 / 기존 원격 자원 유무 미확인`
+  - `LIVE ORDER SUBMISSION: 이번 세션 없음`
+  - `KILL SWITCH: 기본 ON 설계 / 실제 테이블 상태 미확인 / 해제하지 않음`
+- 다음 Codex의 첫 작업: 사용자 PowerShell의 등록 완료 또는 비밀정보 없는 오류 문구를 확인한다. 토큰과 chat_id를 대화로 요구하지 않는다. 완료 후 AWS operator 재로그인과 최소권한·모의용 Secret 연결 준비를 순서대로 진행한다.
+- 사용자에게 확인받을 사항: 본인 PowerShell에서 등록 도구 실행 결과만 확인. 실제 토큰 입력은 사용자가 수행한다.
+- 전달 파일 버전 또는 Git 커밋: 기준 `bb5946e`, 위 파일은 로컬 변경 상태. 이번 세션에서 commit/push하지 않았다.
+
+### 2026-10-13 20:58 KST — PC-C → 다음 PC-C / PC-D
+
+- 작업 PC alias: `PC-C`
+- 작업 경로: `C:/Test`
+- 요청 목표: 사용자가 완료한 pull에서 PC-D 추가 작업을 확인하고 전날 중단한 AWS 모의운영 준비를 재개.
+- 완료한 작업:
+  - `main`의 기준 `bb5946e`(병합 충돌 해결 커밋), 앞선 PC-D 커밋과 공동 인수인계를 대조했다. 시작 시 작업 폴더는 깨끗했고 기준 문서에서 미해결 충돌 표시는 발견되지 않았다.
+  - `AGENTS.md`의 추가 Git 인수인계 규칙, PC-C 7.8 우선 검증 절차, 공동 전달 기록을 확인하고 작업 전 안전 경계 확인 문구를 알렸다.
+  - 대표 README, Codex 환경 가이드, 연속 단타 설계·비용 문서, 주식 분석 보고서와 이벤트 CSV의 추가를 확인했다. 주식 보고서는 과거 기록으로만 확인했으며 이번 세션의 신규 추천이나 체결을 생성하지 않았다.
+  - 전날 PC-C의 `.gitignore`, `.dockerignore`, 패키징 수정 및 작업 기록이 병합 후 보존되어 있음을 확인했다.
+  - `stock-automation/src`, `tests`, `infra`에는 전날 기준 `291ffdf` 대비 추가 변경이 없었다. 연속 단타 EC2 기능은 설계만 존재하며 미구현·미배포 상태다.
+  - Python 전체 테스트와 구문 검사를 재실행했다. 꺼져 있던 Docker Desktop을 실행하고 이미지를 다시 빌드했다.
+  - 키움 CLI 읽기 전용 진단에서 `pc-c-demo`, 서버 `demo`, 인증정보·토큰 존재, 호출 가능, 특이 사항 없음을 확인했다. 새 온라인 시세 요청이나 주문은 실행하지 않았다.
+  - AWS IAM 프로필의 STS 확인은 임시 로그인 재인증 필요로 실패했다. 계정번호·키·토큰 및 원본 인증 출력은 노출하지 않았고 루트 프로필로 우회하지 않았다.
+  - OpenDART 공식 사이트에서 인증키 신청/관리 메뉴를 확인했다. 사용자의 키 신청·등록은 다음 단계로 안내한다.
+- 변경 파일: `Codex_세션간_공동_인수인계.md` (이번 기록 추가만). 엔진·전략·안전장치 코드 변경 없음.
+- 추가·변경 테스트: 새 테스트 없음. pull 후 필수 회귀검증을 재실행.
+- 전체 테스트 결과: `140개 통과`, `compileall` 통과.
+- 수동 검증 결과: Docker 이미지 `stock-automation:dev` 빌드 성공, 키움 CLI 진단 통과, 시작 시 Git clean 및 문서 충돌 표식 검사. 작업 변경의 `git diff --check`도 확인한다.
+- 실패·미확인 사항:
+  - `stock-paper-operator` AWS 로그인 재인증 필요. 재로그인 완료 후 기대한 IAM 사용자·서울 리전을 다시 확인해야 한다.
+  - OpenDART 키, 프로그램의 종합 `doctor --online`, 텔레그램 및 AWS 자원 배포·통합검증은 아직 미완료.
+  - 연속 단타의 문서상 비용은 추정값이며 구현 승인이나 실제 과금 확인을 뜻하지 않는다. EC2·고정 IP를 생성하지 않았다.
+  - 기존 아키텍처 문서의 실주문 코드 미존재 등 일부 설명은 현재 코드·최신 전달 기록과 다르므로 과거 요약으로 취급한다.
+- 남은 위험: Fargate 발신 IP와 키움 허용 IP를 배포 전 해결·검증해야 한다. 모의운영 완료를 로컬 테스트 통과만으로 판단하지 않는다.
+- 실거래 상태:
+  - `LIVE CODE SAFETY: 미완성 / 실제 통합검증 미완료`
+  - `LIVE TESTS: 전체 unittest 140개 통과 / 실제 주문·체결 통합검증 미실행`
+  - `LIVE AWS DEPLOYMENT: 이번 세션 미배포 / 기존 원격 자원 유무 미확인`
+  - `LIVE ORDER SUBMISSION: 이번 세션 없음`
+  - `KILL SWITCH: 기본 ON 설계 / 실제 테이블 상태 미확인 / 해제하지 않음`
+- 다음 Codex의 첫 작업: OpenDART 인증키 준비를 사용자에게 한 단계씩 안내하고, AWS 작업 전 `aws login --profile stock-paper-operator --remote` 재인증을 완료해 IAM 신원을 재확인한다. 비밀값을 대화로 요청하지 않는다.
+- 사용자에게 확인받을 사항: OpenDART 인증키를 이미 보유했는지 또는 신청 화면을 열었는지 확인. 별도 연속 단타·유료 인프라·실거래 승인 없음.
+- 전달 파일 버전 또는 Git 커밋: `main`, 기준 `bb5946e`; 이번 기록만 로컬 변경. commit/push 미실행. 이전 기록 순서는 병합 결과 그대로 보존했다.
+
 ### 2026-10-12 20:38 KST — PC-C → 다음 PC-C / PC-D
 
 - 작업 PC alias: `PC-C`

@@ -1,0 +1,5 @@
+# Local credential setup only; not part of the AWS runtime dependencies.
+keyring>=25,<26
+truststore>=0.10.5,<1
+boto3>=1.42,<2
+botocore[crt]>=1.42,<2

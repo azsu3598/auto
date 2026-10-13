@@ -275,8 +275,26 @@ python -m stock_automation.cli live-supervise \
 저장소 루트 `D:/Test`를 빌드 컨텍스트로 사용한다.
 
 ```bash
-docker build -f stock-automation/Dockerfile -t stock-automation:dev .
+docker build --pull --no-cache --platform linux/amd64 --provenance=false --sbom=false -f stock-automation/Dockerfile -t stock-automation:dev .
 ```
+
+빌드 시 최신 Python 3.13 Debian trixie 기본 이미지를 확인하고 Debian 보안
+업데이트와 Python 패키지 업데이트를 적용한다. 의존성 충돌은 `pip check`로
+검사하며 실행 사용자는 `65534:65534`로 유지한다.
+
+이미지 패키지 정보를 외부에 전송하지 않는 취약점 검사는 Grype로 수행한다.
+공식 배포 파일의 checksum을 확인한 Grype와 최신 공개 취약점 DB를 별도로
+준비한 뒤, 저장소 루트에서 로컬 이미지 archive를 분석한다.
+
+```powershell
+docker image save --output runtime/stock-automation-security.tar stock-automation:dev
+.\runtime\security-tools\grype.exe --config stock-automation/tools/grype-offline.yaml docker-archive:runtime/stock-automation-security.tar --output json --file runtime/grype-security-image.json
+```
+
+이 설정은 DB 자동 갱신·앱 업데이트 조회·외부 추가 조회를 끄고 DB 해시와
+최대 5일 유효기간 검사를 유지한다. archive·DB·원본 결과는 Git 제외 runtime에
+보관한다. 스캐너 결과는 Debian 패치 버전과 공식 보안 공지를 대조해야 하며,
+서로 다른 스캐너의 건수를 직접 비교하거나 남은 취약점을 0건으로 간주하지 않는다.
 
 초기 AWS 운영 형태는 EventBridge Scheduler가 필요한 시각에만 ECS Fargate 작업을
 실행하고 완료 즉시 종료하는 방식이다. 24시간 컨테이너와 실계좌 주문은 범위 밖이다.
