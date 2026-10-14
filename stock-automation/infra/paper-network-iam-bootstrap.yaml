@@ -1,0 +1,226 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Admin-created IAM bootstrap for one paper NAT network stack; no broker secret access
+
+Parameters:
+  OperatorUserName:
+    Type: String
+    Default: stock-paper-operator
+    AllowedValues: [stock-paper-operator]
+
+Resources:
+  NatHostRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: stock-paper-nat-host
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+  NatInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: stock-paper-nat-profile
+      Roles: [!Ref NatHostRole]
+  NatSchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: stock-paper-nat-scheduler
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: scheduler.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: {aws:SourceAccount: !Ref AWS::AccountId}
+              ArnLike:
+                aws:SourceArn: !Sub arn:${AWS::Partition}:scheduler:ap-northeast-2:${AWS::AccountId}:schedule-group/default
+      Policies:
+        - PolicyName: only-start-stop-paper-nat
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [ec2:StartInstances, ec2:StopInstances]
+                Resource: !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:instance/*
+                Condition:
+                  StringEquals:
+                    ec2:ResourceTag/Project: paper-fixed-egress
+                    ec2:ResourceTag/Name: stock-automation-paper-nat
+  NetworkDeploymentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: stock-paper-network-deployer
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: cloudformation.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: paper-network-resources-only
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: InspectSeoulNetwork
+                Effect: Allow
+                Action: [ec2:DescribeVpcs, ec2:DescribeVpcAttribute, ec2:DescribeSubnets, ec2:DescribeRouteTables, ec2:DescribeSecurityGroups, ec2:DescribeInstances, ec2:DescribeInstanceStatus, ec2:DescribeInstanceAttribute, ec2:DescribeImages, ec2:DescribeAddresses, ec2:DescribeNetworkInterfaces, ec2:DescribeVolumes, ec2:DescribeTags]
+                Resource: "*"
+                Condition:
+                  StringEquals: {aws:RequestedRegion: ap-northeast-2}
+              - Sid: CreateTaggedNetworkResources
+                Effect: Allow
+                Action: [ec2:CreateSubnet, ec2:CreateRouteTable, ec2:CreateSecurityGroup, ec2:AllocateAddress, ec2:CreateNetworkInterface]
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:subnet/*
+                  - !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:route-table/*
+                  - !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:security-group/*
+                  - !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:elastic-ip/*
+                  - !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:network-interface/*
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: ap-northeast-2
+                    aws:RequestTag/Project: paper-fixed-egress
+              - Sid: CreateResourcesInsideExistingPaperVpc
+                Effect: Allow
+                Action: [ec2:CreateSubnet, ec2:CreateRouteTable, ec2:CreateSecurityGroup]
+                Resource: !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:vpc/*
+                Condition:
+                  StringEquals: {ec2:ResourceTag/Name: stock-automation-paper-vpc}
+              - Sid: UseExistingPaperPublicSubnet
+                Effect: Allow
+                Action: [ec2:RunInstances, ec2:CreateNetworkInterface]
+                Resource: !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:subnet/*
+                Condition:
+                  StringLike: {ec2:ResourceTag/Name: stock-automation-paper-subnet-public*}
+              - Sid: UseTaggedNatInterfaceAndSecurityGroup
+                Effect: Allow
+                Action: [ec2:RunInstances, ec2:CreateNetworkInterface]
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:network-interface/*
+                  - !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:security-group/*
+                Condition:
+                  StringEquals: {ec2:ResourceTag/Project: paper-fixed-egress}
+              - Sid: UsePublicAmiInSeoul
+                Effect: Allow
+                Action: ec2:RunInstances
+                Resource: !Sub arn:${AWS::Partition}:ec2:ap-northeast-2::image/*
+              - Sid: LaunchApprovedSmallInstance
+                Effect: Allow
+                Action: ec2:RunInstances
+                Resource: !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:instance/*
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: ap-northeast-2
+                    ec2:InstanceType: t3.micro
+                    ec2:MetadataHttpTokens: required
+                    aws:RequestTag/Project: paper-fixed-egress
+              - Sid: CreateApprovedEncryptedRootDisk
+                Effect: Allow
+                Action: ec2:RunInstances
+                Resource: !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:volume/*
+                Condition:
+                  StringEquals: {ec2:VolumeType: gp3, aws:RequestTag/Project: paper-fixed-egress}
+                  Bool: {ec2:Encrypted: "true"}
+                  NumericLessThanEquals: {ec2:VolumeSize: 8}
+              - Sid: TagCreatedResources
+                Effect: Allow
+                Action: ec2:CreateTags
+                Resource: !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:*/*
+                Condition:
+                  StringEquals:
+                    aws:RequestTag/Project: paper-fixed-egress
+              - Sid: ManageOwnTaggedResources
+                Effect: Allow
+                Action: [ec2:DeleteSubnet, ec2:ModifySubnetAttribute, ec2:DeleteRouteTable, ec2:CreateRoute, ec2:ReplaceRoute, ec2:DeleteRoute, ec2:AssociateRouteTable, ec2:DisassociateRouteTable, ec2:DeleteSecurityGroup, ec2:AuthorizeSecurityGroupIngress, ec2:RevokeSecurityGroupIngress, ec2:AuthorizeSecurityGroupEgress, ec2:RevokeSecurityGroupEgress, ec2:ModifyInstanceAttribute, ec2:ModifyInstanceCreditSpecification, ec2:TerminateInstances, ec2:StopInstances, ec2:ReleaseAddress, ec2:AssociateAddress, ec2:DisassociateAddress, ec2:ModifyNetworkInterfaceAttribute, ec2:DeleteNetworkInterface]
+                Resource: !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:*/*
+                Condition:
+                  StringEquals: {ec2:ResourceTag/Project: paper-fixed-egress}
+              - Sid: ManageNamedNatSchedules
+                Effect: Allow
+                Action: [scheduler:CreateSchedule, scheduler:UpdateSchedule, scheduler:DeleteSchedule, scheduler:GetSchedule, scheduler:TagResource, scheduler:UntagResource, scheduler:ListTagsForResource]
+                Resource: !Sub arn:${AWS::Partition}:scheduler:ap-northeast-2:${AWS::AccountId}:schedule/default/stock-paper-nat-*
+              - Sid: PassHostRoleOnlyToEc2
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt NatHostRole.Arn
+                Condition:
+                  StringEquals: {iam:PassedToService: ec2.amazonaws.com}
+              - Sid: PassNatScheduleRoleOnlyToScheduler
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt NatSchedulerRole.Arn
+                Condition:
+                  StringEquals: {iam:PassedToService: scheduler.amazonaws.com}
+              - Effect: Allow
+                Action: iam:GetInstanceProfile
+                Resource: !GetAtt NatInstanceProfile.Arn
+  OperatorNetworkPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: StockPaperFixedEgressDeployment
+      Users: [!Ref OperatorUserName]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DeployOnlyPaperNetworkStackWithApprovedRole
+            Effect: Allow
+            Action: [cloudformation:CreateStack, cloudformation:UpdateStack, cloudformation:CreateChangeSet]
+            Resource:
+              - !Sub arn:${AWS::Partition}:cloudformation:ap-northeast-2:${AWS::AccountId}:stack/stock-automation-paper-network/*
+              - !Sub arn:${AWS::Partition}:cloudformation:ap-northeast-2:${AWS::AccountId}:changeSet/paper-network-*/*
+            Condition:
+              StringEquals: {cloudformation:RoleArn: !GetAtt NetworkDeploymentRole.Arn}
+          - Sid: ReadAndExecuteOnlyPaperNetworkChanges
+            Effect: Allow
+            Action: [cloudformation:DescribeStacks, cloudformation:DescribeStackEvents, cloudformation:DescribeStackResources, cloudformation:GetTemplate, cloudformation:DescribeChangeSet, cloudformation:ExecuteChangeSet, cloudformation:DeleteChangeSet]
+            Resource:
+              - !Sub arn:${AWS::Partition}:cloudformation:ap-northeast-2:${AWS::AccountId}:stack/stock-automation-paper-network/*
+              - !Sub arn:${AWS::Partition}:cloudformation:ap-northeast-2:${AWS::AccountId}:changeSet/paper-network-*/*
+          - Effect: Allow
+            Action: cloudformation:ValidateTemplate
+            Resource: "*"
+            Condition:
+              StringEquals: {aws:RequestedRegion: ap-northeast-2}
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: !GetAtt NetworkDeploymentRole.Arn
+            Condition:
+              StringEquals: {iam:PassedToService: cloudformation.amazonaws.com}
+          - Sid: ReadPublicAmazonLinuxImageParameter
+            Effect: Allow
+            Action: ssm:GetParameter
+            Resource: !Sub arn:${AWS::Partition}:ssm:ap-northeast-2::parameter/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+          - Sid: InspectNatBeforeUsingItsRoute
+            Effect: Allow
+            Action: [ec2:DescribeImages, ec2:DescribeVpcAttribute, ec2:DescribeInstanceStatus, ec2:DescribeInstanceAttribute, ssm:DescribeInstanceInformation, ssm:GetCommandInvocation]
+            Resource: "*"
+            Condition:
+              StringEquals: {aws:RequestedRegion: ap-northeast-2}
+          - Sid: StartStopOnlyPaperNat
+            Effect: Allow
+            Action: [ec2:StartInstances, ec2:StopInstances]
+            Resource: !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:instance/*
+            Condition:
+              StringEquals:
+                ec2:ResourceTag/Project: paper-fixed-egress
+                ec2:ResourceTag/Name: stock-automation-paper-nat
+          - Sid: DiagnoseOnlyPaperNatHost
+            Effect: Allow
+            Action: ssm:SendCommand
+            Resource: !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:instance/*
+            Condition:
+              StringEquals:
+                ssm:resourceTag/Project: paper-fixed-egress
+                ssm:resourceTag/Name: stock-automation-paper-nat
+          - Effect: Allow
+            Action: ssm:SendCommand
+            Resource: !Sub arn:${AWS::Partition}:ssm:ap-northeast-2::document/AWS-RunShellScript
+
+Outputs:
+  NetworkDeploymentRoleArn: {Value: !GetAtt NetworkDeploymentRole.Arn}
+  OperatorPolicyName: {Value: StockPaperFixedEgressDeployment}

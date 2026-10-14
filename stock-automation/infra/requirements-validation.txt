@@ -1,0 +1,2 @@
+# Validation tooling only; excluded from the application Docker image.
+cfn-lint==1.57.2

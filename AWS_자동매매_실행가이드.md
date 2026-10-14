@@ -10,10 +10,14 @@
 ## 1. 사전 준비
 
 - Windows에 Docker Desktop과 AWS CLI v2 설치
-- AWS CLI 로그인 확인: `aws sts get-caller-identity`
+- AWS CLI 작업용 로그인 확인: `aws sts get-caller-identity --profile stock-paper-operator`
 - 키움 모의투자 App Key/Secret, OpenDART API 키 준비
 - 텔레그램 봇 토큰과 본인 `chat_id` 준비
-- 외부 HTTPS 통신이 가능한 공개 서브넷 2개와 인바운드 규칙이 없는 보안 그룹 준비
+- 고정 egress IP를 거치는 사설 서브넷과 인바운드 규칙이 없는 작업 보안 그룹 준비
+
+PC-C에서는 [네트워크 권한·고정 IP 준비](stock-automation/infra/고정IP_모의배포_진행.md)를
+먼저 따릅니다. 기존 공개 서브넷을 앱에 넘기지 않습니다. NAT와 앱 시작 예약은
+온라인 검증 전까지 비활성으로 유지합니다.
 
 Secrets Manager에 다음 JSON을 각각 저장합니다. 값은 코드, 명령 기록, 로그에 남기지 않습니다.
 
@@ -31,19 +35,21 @@ PowerShell에서 실행합니다.
 
 ```powershell
 cd C:\Test
+$env:AWS_PROFILE = "stock-paper-operator"
 $env:PYTHONPATH = "stock-automation/src"
 python -m unittest discover -s stock-automation/tests -v
 
 $Region = "ap-northeast-2"
 $AccountId = aws sts get-caller-identity --query Account --output text
 $Repo = "stock-automation"
-$ImageUri = "$AccountId.dkr.ecr.$Region.amazonaws.com/${Repo}:latest"
+$ImageTag = "paper-$(git rev-parse --short HEAD)-$(Get-Date -Format yyyyMMddHHmmss)"
+$ImageUri = "$AccountId.dkr.ecr.$Region.amazonaws.com/${Repo}:$ImageTag"
 
 aws ecr describe-repositories --repository-names $Repo --region $Region 2>$null
 if ($LASTEXITCODE -ne 0) { aws ecr create-repository --repository-name $Repo --region $Region }
 aws ecr get-login-password --region $Region | docker login --username AWS --password-stdin "$AccountId.dkr.ecr.$Region.amazonaws.com"
-docker build -f stock-automation/Dockerfile -t "${Repo}:latest" .
-docker tag "${Repo}:latest" $ImageUri
+docker build -f stock-automation/Dockerfile -t "${Repo}:$ImageTag" .
+docker tag "${Repo}:$ImageTag" $ImageUri
 docker push $ImageUri
 ```
 
@@ -53,7 +59,7 @@ docker push $ImageUri
 
 ```powershell
 $Stack = "stock-automation-paper"
-$Subnets = "subnet-AAAA,subnet-BBBB"
+$Subnets = aws cloudformation describe-stacks --region $Region --stack-name stock-automation-paper-network --query "Stacks[0].Outputs[?OutputKey=='PrivateSubnetId'].OutputValue" --output text
 $SecurityGroups = "sg-AAAA"
 $KiwoomSecretArn = "arn:aws:secretsmanager:..."
 $DartSecretArn = "arn:aws:secretsmanager:..."
@@ -70,6 +76,7 @@ aws cloudformation deploy `
   --parameter-overrides `
     ImageUri=$ImageUri `
     SubnetIds=$Subnets `
+    AssignPublicIp=DISABLED `
     SecurityGroupIds=$SecurityGroups `
     KiwoomDemoSecretArn=$KiwoomSecretArn `
     DartSecretArn=$DartSecretArn `
@@ -114,7 +121,7 @@ aws ecs run-task `
   --cluster $Cluster `
   --task-definition $Task `
   --launch-type FARGATE `
-  --network-configuration "awsvpcConfiguration={subnets=[$Subnets],securityGroups=[$SecurityGroups],assignPublicIp=ENABLED}" `
+  --network-configuration "awsvpcConfiguration={subnets=[$Subnets],securityGroups=[$SecurityGroups],assignPublicIp=DISABLED}" `
   --overrides file://doctor-overrides.json
 
 aws logs tail $LogGroup --region $Region --since 15m --follow
@@ -125,6 +132,7 @@ aws logs tail $LogGroup --region $Region --since 15m --follow
 ## 6. 예약 작업 활성화
 
 점검 통과 후 3절의 배포 명령을 다시 실행하되 `CoreScheduleState=ENABLED`로 바꿉니다.
+검증된 NAT 시작·정지 예약도 함께 활성화해야 사설 앱이 외부 API에 연결됩니다.
 `NxtScheduleState=DISABLED`는 유지합니다.
 
 주요 시간은 KST 기준 14:50 스캔, 15:10 재검증, 15:20 종가배팅 모의진입,

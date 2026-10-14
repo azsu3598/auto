@@ -321,6 +321,13 @@ docker image save --output runtime/stock-automation-security.tar stock-automatio
 
 `infra/cloudformation.yaml`은 다음 모의매매 작업을 만든다.
 
+고정 접속 IP를 사용하는 PC-C 배포는 [고정 IP 모의배포 진행](infra/고정IP_모의배포_진행.md)을
+먼저 따른다. 앱은 사설 서브넷과 `AssignPublicIp=DISABLED`를 사용한다.
+`paper-network-iam-bootstrap.yaml`은 관리자 콘솔에서 네트워크 전용 권한을 준비하고,
+`paper-fixed-egress.yaml`은 NAT `t3.micro` 1대와 EIP 1개를 만든다. 최초 시작·정지
+예약은 모두 꺼져 있고 호스트에는 별도 2시간 정지 타이머가 있다. 실제 egress와
+온라인 모의 통합검증을 마치기 전에는 앱/NAT 예약을 활성화하지 않는다.
+
 안전한 최초 배포를 위해 모든 핵심 예약은 `CoreScheduleState=DISABLED`가 기본값이다.
 거래일 파일 업로드와 `doctor --aws --online` 읽기 전용 점검을 통과한 뒤에만
 `ENABLED`로 스택을 갱신한다. NXT는 별도 `NxtScheduleState`를 명시적으로 켜야 한다.

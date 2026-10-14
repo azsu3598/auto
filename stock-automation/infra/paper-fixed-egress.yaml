@@ -1,0 +1,239 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: One scheduled HTTPS NAT instance and one fixed IPv4 for paper Fargate tasks
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+  AvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+  PrivateSubnetCidr:
+    Type: String
+    Default: 10.77.32.0/24
+    AllowedPattern: '^10[.]77[.][0-9]{1,3}[.]0/24$'
+  AmiId:
+    Type: AWS::EC2::Image::Id
+    Description: Verified current Amazon-owned AL2023 x86_64 AMI, minimum root disk at most 8 GiB
+  StartScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [DISABLED, ENABLED]
+    Description: Enable only after private task egress and paper integration pass
+
+Resources:
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VpcId
+      AvailabilityZone: !Ref AvailabilityZone
+      CidrBlock: !Ref PrivateSubnetCidr
+      MapPublicIpOnLaunch: false
+      Tags:
+        - {Key: Name, Value: stock-automation-paper-private}
+        - {Key: Project, Value: paper-fixed-egress}
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      Tags:
+        - {Key: Name, Value: stock-automation-paper-private}
+        - {Key: Project, Value: paper-fixed-egress}
+  PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+  NatSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Forward private HTTPS only; no inbound SSH
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: !Ref PrivateSubnetCidr}
+      SecurityGroupEgress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0}
+      Tags:
+        - {Key: Name, Value: stock-automation-paper-nat}
+        - {Key: Project, Value: paper-fixed-egress}
+  NatInstance:
+    Type: AWS::EC2::Instance
+    DependsOn: ElasticIpAssociation
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: t3.micro
+      CreditSpecification: {CPUCredits: standard}
+      IamInstanceProfile: stock-paper-nat-profile
+      InstanceInitiatedShutdownBehavior: stop
+      PropagateTagsToVolumeOnCreation: true
+      SourceDestCheck: false
+      MetadataOptions:
+        HttpTokens: required
+        HttpPutResponseHopLimit: 1
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: {VolumeType: gp3, VolumeSize: 8, Encrypted: true, DeleteOnTermination: true}
+      NetworkInterfaces:
+        - DeviceIndex: "0"
+          NetworkInterfaceId: !Ref NatNetworkInterface
+      Tags:
+        - {Key: Name, Value: stock-automation-paper-nat}
+        - {Key: Project, Value: paper-fixed-egress}
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -eu
+          # Arm the independent stop timer BEFORE installing any packages.
+          cat > /etc/systemd/system/paper-nat-stop.service <<'EOF'
+          [Unit]
+          Description=Stop paper NAT to bound each boot's running time
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/sbin/shutdown -h now
+          EOF
+          cat > /etc/systemd/system/paper-nat-stop.timer <<'EOF'
+          [Unit]
+          Description=Stop paper NAT after two hours on every boot
+          [Timer]
+          OnBootSec=120min
+          AccuracySec=1min
+          Unit=paper-nat-stop.service
+          [Install]
+          WantedBy=timers.target
+          EOF
+          systemctl daemon-reload
+          systemctl enable --now paper-nat-stop.timer
+          # EIP attachment follows instance creation. Retry briefly until it is attached.
+          installed=0
+          for attempt in 1 2 3 4 5 6; do
+            if timeout 60 dnf install -y iptables-services; then installed=1; break; fi
+            sleep 10
+          done
+          test "$installed" = 1
+          printf 'net.ipv4.ip_forward=1\n' > /etc/sysctl.d/90-paper-nat.conf
+          sysctl -p /etc/sysctl.d/90-paper-nat.conf
+          iface=$(ip -4 route show default | awk '{print $5; exit}')
+          test -n "$iface"
+          systemctl enable --now iptables
+          iptables -F FORWARD
+          iptables -P FORWARD DROP
+          iptables -A FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+          iptables -A FORWARD -s '${PrivateSubnetCidr}' -o "$iface" -p tcp --dport 443 -m conntrack --ctstate NEW -j ACCEPT
+          iptables -t nat -A POSTROUTING -s '${PrivateSubnetCidr}' -o "$iface" -p tcp --dport 443 -j MASQUERADE
+          service iptables save
+          systemctl enable --now amazon-ssm-agent
+          touch /var/lib/paper-nat-ready
+  NatNetworkInterface:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref PublicSubnetId
+      GroupSet: [!Ref NatSecurityGroup]
+      SourceDestCheck: false
+      Tags:
+        - {Key: Name, Value: stock-automation-paper-nat}
+        - {Key: Project, Value: paper-fixed-egress}
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - {Key: Name, Value: stock-automation-paper-egress}
+        - {Key: Project, Value: paper-fixed-egress}
+  ElasticIpAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt ElasticIp.AllocationId
+      NetworkInterfaceId: !Ref NatNetworkInterface
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: ElasticIpAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      InstanceId: !Ref NatInstance
+
+  MorningStart:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: stock-paper-nat-morning-start
+      State: !Ref StartScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(55 8 ? * MON-FRI *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !Sub arn:${AWS::Partition}:scheduler:::aws-sdk:ec2:startInstances
+        RoleArn: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/stock-paper-nat-scheduler
+        Input: !Sub '{"InstanceIds":["${NatInstance}"]}'
+        RetryPolicy: {MaximumEventAgeInSeconds: 300, MaximumRetryAttempts: 2}
+  AfternoonStart:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: stock-paper-nat-afternoon-start
+      State: !Ref StartScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(40 14 ? * MON-FRI *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !Sub arn:${AWS::Partition}:scheduler:::aws-sdk:ec2:startInstances
+        RoleArn: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/stock-paper-nat-scheduler
+        Input: !Sub '{"InstanceIds":["${NatInstance}"]}'
+        RetryPolicy: {MaximumEventAgeInSeconds: 300, MaximumRetryAttempts: 2}
+  SaturdayStart:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: stock-paper-nat-saturday-start
+      State: !Ref StartScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(50 7 ? * SAT *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !Sub arn:${AWS::Partition}:scheduler:::aws-sdk:ec2:startInstances
+        RoleArn: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/stock-paper-nat-scheduler
+        Input: !Sub '{"InstanceIds":["${NatInstance}"]}'
+        RetryPolicy: {MaximumEventAgeInSeconds: 300, MaximumRetryAttempts: 2}
+  MorningStop:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: stock-paper-nat-morning-stop
+      State: !Ref StartScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(25 9 ? * MON-FRI *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !Sub arn:${AWS::Partition}:scheduler:::aws-sdk:ec2:stopInstances
+        RoleArn: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/stock-paper-nat-scheduler
+        Input: !Sub '{"InstanceIds":["${NatInstance}"]}'
+        RetryPolicy: {MaximumEventAgeInSeconds: 900, MaximumRetryAttempts: 3}
+  AfternoonStop:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: stock-paper-nat-afternoon-stop
+      State: !Ref StartScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(10 16 ? * MON-FRI *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !Sub arn:${AWS::Partition}:scheduler:::aws-sdk:ec2:stopInstances
+        RoleArn: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/stock-paper-nat-scheduler
+        Input: !Sub '{"InstanceIds":["${NatInstance}"]}'
+        RetryPolicy: {MaximumEventAgeInSeconds: 900, MaximumRetryAttempts: 3}
+  SaturdayStop:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: stock-paper-nat-saturday-stop
+      State: !Ref StartScheduleState
+      FlexibleTimeWindow: {Mode: "OFF"}
+      ScheduleExpression: cron(40 8 ? * SAT *)
+      ScheduleExpressionTimezone: Asia/Seoul
+      Target:
+        Arn: !Sub arn:${AWS::Partition}:scheduler:::aws-sdk:ec2:stopInstances
+        RoleArn: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/stock-paper-nat-scheduler
+        Input: !Sub '{"InstanceIds":["${NatInstance}"]}'
+        RetryPolicy: {MaximumEventAgeInSeconds: 900, MaximumRetryAttempts: 3}
+
+Outputs:
+  PrivateSubnetId: {Value: !Ref PrivateSubnet}
+  NatInstanceId: {Value: !Ref NatInstance}
+  FixedEgressIp: {Value: !Ref ElasticIp}
+  AvailabilityZone: {Value: !Ref AvailabilityZone}
+  StartScheduleState: {Value: !Ref StartScheduleState}

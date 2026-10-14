@@ -9,6 +9,11 @@ Parameters:
     Type: List<AWS::EC2::Subnet::Id>
   SecurityGroupIds:
     Type: List<AWS::EC2::SecurityGroup::Id>
+  AssignPublicIp:
+    Type: String
+    Default: DISABLED
+    AllowedValues: [DISABLED]
+    Description: Use the verified private subnet and fixed NAT egress; public task IPs are disabled
   KiwoomDemoSecretArn:
     Type: String
     Description: Secrets Manager JSON with app_key_mock and app_secret_mock
@@ -58,6 +63,7 @@ Parameters:
   NotificationSecretArn:
     Type: String
     Default: ""
+    AllowedPattern: "^$|^arn:aws[a-z-]*:secretsmanager:ap-northeast-2:[0-9]{12}:secret:.+$"
     Description: Secrets Manager JSON; Telegram requires bot_token and chat_id
   NotificationEmail:
     Type: String
@@ -67,7 +73,7 @@ Parameters:
 Conditions:
   HasNotificationSecret: !Not [!Equals [!Ref NotificationSecretArn, ""]]
   HasNotificationEmail: !Not [!Equals [!Ref NotificationEmail, ""]]
-  IsKakaoNotification: !Equals [!Ref NotificationChannel, kakao]
+  IsKakaoNotification: !And [!Equals [!Ref NotificationChannel, kakao], !Condition HasNotificationSecret]
 
 Resources:
   ArtifactBucket:
@@ -170,7 +176,7 @@ Resources:
                 Action: s3:ListBucket
                 Resource: !GetAtt ArtifactBucket.Arn
               - Effect: Allow
-                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:TransactWriteItems, dynamodb:Scan]
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:ConditionCheckItem, dynamodb:Scan]
                 Resource: !GetAtt PaperTable.Arn
               - !If
                 - HasNotificationSecret
@@ -292,8 +298,8 @@ Resources:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
           NetworkConfiguration:
-            AwsVpcConfiguration:
-              AssignPublicIp: ENABLED
+            AwsvpcConfiguration:
+              AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
         Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"SCAN_1450"}]}]}'
@@ -313,8 +319,8 @@ Resources:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
           NetworkConfiguration:
-            AwsVpcConfiguration:
-              AssignPublicIp: ENABLED
+            AwsvpcConfiguration:
+              AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
         Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"SHORTLIST_1510"}]}]}'
@@ -334,8 +340,8 @@ Resources:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
           NetworkConfiguration:
-            AwsVpcConfiguration:
-              AssignPublicIp: ENABLED
+            AwsvpcConfiguration:
+              AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
         Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"ENTRY_1520"}]}]}'
@@ -355,8 +361,8 @@ Resources:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
           NetworkConfiguration:
-            AwsVpcConfiguration:
-              AssignPublicIp: ENABLED
+            AwsvpcConfiguration:
+              AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
         Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"ENTRY_NXT_1955"}]}]}'
@@ -376,8 +382,8 @@ Resources:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
           NetworkConfiguration:
-            AwsVpcConfiguration:
-              AssignPublicIp: ENABLED
+            AwsvpcConfiguration:
+              AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
         Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"EXIT_0905"}]}]}'
@@ -397,8 +403,8 @@ Resources:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
           NetworkConfiguration:
-            AwsVpcConfiguration:
-              AssignPublicIp: ENABLED
+            AwsvpcConfiguration:
+              AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
         Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"EXIT_0910"}]}]}'
@@ -418,8 +424,8 @@ Resources:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
           NetworkConfiguration:
-            AwsVpcConfiguration:
-              AssignPublicIp: ENABLED
+            AwsvpcConfiguration:
+              AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
         Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"TUNE_WEEKLY"}]}]}'
@@ -439,8 +445,8 @@ Resources:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
           NetworkConfiguration:
-            AwsVpcConfiguration:
-              AssignPublicIp: ENABLED
+            AwsvpcConfiguration:
+              AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
         Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"MEDIUM_ENTRY_0915"}]}]}'
@@ -460,8 +466,8 @@ Resources:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
           NetworkConfiguration:
-            AwsVpcConfiguration:
-              AssignPublicIp: ENABLED
+            AwsvpcConfiguration:
+              AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
         Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"MEDIUM_SIGNAL_1540"}]}]}'
@@ -481,8 +487,8 @@ Resources:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
           NetworkConfiguration:
-            AwsVpcConfiguration:
-              AssignPublicIp: ENABLED
+            AwsvpcConfiguration:
+              AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
         Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"MEDIUM_REVIEW_1535"}]}]}'
@@ -502,8 +508,8 @@ Resources:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
           NetworkConfiguration:
-            AwsVpcConfiguration:
-              AssignPublicIp: ENABLED
+            AwsvpcConfiguration:
+              AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
         Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"EQUITY_SNAPSHOT_1550"}]}]}'
