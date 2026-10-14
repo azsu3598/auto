@@ -68,6 +68,7 @@ def validate() -> None:
     userdata = instance["UserData"]["Fn::Base64"]["Fn::Sub"]
     assert userdata.index("systemctl enable --now paper-nat-stop.timer") < userdata.index("dnf install")
     assert "OnBootSec=120min" in userdata
+    assert "timeout 600 dnf install" in userdata and "for attempt in 1 2; do" in userdata
     assert "iptables -P FORWARD DROP" in userdata
     assert nat["Parameters"]["StartScheduleState"]["Default"] == "DISABLED"
     for resource in nat["Resources"].values():

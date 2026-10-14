@@ -279,6 +279,21 @@ python -m compileall -q src tests
 
 ## 10. 세션 전달 기록
 
+### 2026-10-14 23:57 KST — PC-C / 고정 egress 인프라 생성·재기동 검증·정지 대기
+
+- 작업 PC alias: `PC-C`, 기준 `main` / `c1b646b`. 사용자가 관리자 IAM 스택 업데이트 완료를 보고했다. AGENTS.md → PC-C 전체 인수인계 → 공동 인수인계를 읽고 실제 clean Git 상태/코드를 대조했다. 월 $7~10 승인과 실거래 비활성 경계를 유지했다. 새로운 비용/실주문/상시 감시 승인을 추정하지 않았다.
+- 원격 권한·재배포: 새 정리 권한 적용을 확인하고 실제 StackResources 0개/ROLLBACK_COMPLETE인 실패 네트워크 스택만 삭제했다. 관리자 IAM 스택·기존 VPC/Secret/ECR/다른 기존 스택은 유지했다. 첫 실패 runtime 기록/매개변수를 별도로 보존했다. 최신 DNS/공개 IGW 경로/같은 AZ/겹치지 않는 사설망/Amazon AL2023 x86_64 8GiB 이미지 조회 후 CREATE 변경 세트를 만들고 Add 15개/기존 자원 변경 없음/VM 1대/EIP 1개/시작·정지 예약 모두 DISABLED를 검토해 실행했다. 원격 네트워크 스택 `stock-automation-paper-network`는 실제 `CREATE_COMPLETE`다.
+- 실제 생성/검증: `t3.micro` 1대와 EIP 1개, 사설 `10.77.32.0/24`, 전용 경로/보안 그룹/ENI 및 비활성 예약 6개가 생성됐다. EC2 유형/IMDSv2 required/hop limit 1/source-destination check false/지정 host profile/EIP 연결을 확인했다. 사설 subnet의 공인 IP 자동 할당 false, 같은 AZ, 기본 경로가 NAT instance이며 active, NAT SG 사설 CIDR의 TCP 443 인바운드만 허용되는 것을 조회했다. SSM Online과 실행도 확인했다. 식별자·공인 IP·ARN은 Git 제외 runtime에만 보관하고 공유 문서/대화에 출력하지 않았다.
+- 최초 부팅 설치 실패/복구: 초기 dnf 60초 제한의 bootstrap은 설치 완료 전 cloud-init error가 됐다. 짧은 SSM cloud-init 대기 검사도 TimedOut/137이었다. 당시 패키지 미설치·dnf 실행 프로세스 존재·메모리 여유와 OOM 로그 없음·HTTPS repo 메타데이터 수신을 확인했다. 원인을 CPU/메모리/네트워크 하나로 확정하지 않는다. 로컬 템플릿의 dnf 제한을 600초/최대 2회로 조정하고 SSM으로 같은 새 bootstrap을 해당 호스트에 적용해 Success/0으로 복구했다. standard CPU credit/t3.micro/8GiB/SSH 제한/독립 120분 정지 타이머를 유지했으며 추가 VM/EIP나 unlimited 크레딧을 도입하지 않았다.
+- 호스트 실제 검증: IP forwarding=1, iptables 실행/부팅 활성화, FORWARD DROP 및 private HTTPS 전달/MASQUERADE 규칙, 저장된 iptables 설정, 실제 루트 8GiB, 활성/부팅 활성화된 OnBootSec=120min 정지 타이머 검사를 SSM에서 통과했다. 정지→기동을 실제로 수행해 cloud-init 성공, 동일 EIP, forwarding/서비스/타이머/디스크 유지 검사를 다시 통과한 뒤 정지했다. 최종 EC2 실제 상태는 **stopped**, EIP는 유지, instanceInitiatedShutdownBehavior=stop을 조회했다. 타이머의 실제 2시간 만료를 기다려 테스트한 것은 아니다.
+- 소스/원격 차이: 실행 중 호스트는 SSM으로 복구돼 재기동 검증을 통과했지만, CloudFormation에 저장된 UserData 속성은 최초 60초 버전이다. 로컬 소스의 600초 개선은 향후 생성/템플릿 갱신용이며 원격 템플릿까지 갱신했다고 주장하지 않는다. 기존 호스트의 package/config 상태는 설치·저장·재부팅으로 검증됐다. UserData 템플릿 갱신은 EC2 재시작과 서비스 역할 권한을 검토한 뒤 수행해야 한다. 예약만 갱신할 때는 원격 기존 템플릿을 유지하는 방식으로 해당 변경을 함께 섞지 않는다.
+- 변경 파일: `infra/paper-fixed-egress.yaml`의 설치 제한, `tools/validate_paper_infrastructure.py`의 제한 검사, `infra/고정IP_모의배포_진행.md`의 실제 검증/원격 차이 기록, 이 공동 인수인계. 앱/전략/Docker 이미지/실주문 안전장치 변경 없음. runtime의 배포 ID/매개변수/SSM 결과/로그/공인 IP는 Git 제외다.
+- 검증: 템플릿 3개 cfn-lint 1.57.2 warning/error 0개 및 안전/IAM 크기/설치 제한 검사 통과, 수정 NAT 파일의 AWS ValidateTemplate 통과, Git Bash `--noprofile --norc -n`으로 bootstrap 실제 구문 검사 통과, compileall·git diff --check 통과. Docker 포함 전체 unittest 최종 `177개 통과`, skip 없음. 첫 전체 재검사는 Docker Engine HTTP 500으로 컨테이너 setUpClass error 1/175개 실행이었으며 정상 Docker Desktop restart 후 전체 재실행을 통과했다. WSL 초기화/전역 데이터 삭제/격리 약화 없음.
+- 미완료/비용: EIP/8GiB EBS 유지 비용은 서버 stopped 상태에도 발생하며 승인된 전체 예상 월 $7~10의 일부다. 현재 앱 스택/Fargate/S3/DynamoDB는 미배포, 키움 AWS EIP 등록·사설 Fargate 실제 egress·키움/OpenDART·저장/알림 통합검증·확인된 수수료/세금·전체 휴장일은 미완료다. 서버 호스트 검증을 앱/모의 운용 성공으로 설명하지 않는다. 취약점 잔여 고유 69개/High 14개 판정은 기존 앱 이미지에 대해 유지한다(이번 스캐너 재실행 없음).
+- 다음 Codex: 사용자에게 CloudFormation 네트워크 스택의 출력 FixedEgressIp를 복사해 키움 **모의투자 App Key 관리** 허용 IP에 추가하도록 한 단계씩 안내한다. 키/Secret 값은 채팅으로 받지 않는다. 앱 전용 배포/IAM 범위와 실거래 차단/역할 경계를 준비·검증하고 관리자 콘솔로 적용한다. 수수료/세금/휴장일을 실제 확인하고 최신 ECR digest+사설 subnet으로 예약 DISABLED 앱을 배포한다. 진단 창에만 NAT를 기동하고 실제 Fargate egress/임시 볼륨/API/S3/DynamoDB/텔레그램을 검증한 뒤 다시 정지한다. 모든 조건 통과 후 핵심/NAT 모의 예약 활성화를 판단한다. NXT/실거래/상시 단타는 켜지 않는다.
+- Git 전달: 같은 AWS 준비 작업의 기존 push 승인 범위에서 위 4개 파일만 전달한다. PC-D는 pull 후 세 파일과 실제 소스/원격 UserData 차이 및 테스트를 확인한다. 인프라 구성 완료와 앱 배포/모의 운용 시작을 구분한다.
+- 실거래 상태: `LIVE CODE SAFETY: 기존 강화 유지`, `LIVE TESTS: 전체 177개·CFN 로컬/원격 구문·실제 NAT/SSM/재기동 검증 통과 / Fargate·모의 통합 미검증`, `LIVE AWS DEPLOYMENT: NAT 네트워크 CREATE_COMPLETE / EC2 stopped / EIP 유지 / 모든 예약 DISABLED / 앱 미배포`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미조회 / 해제하지 않음`.
+
 ### 2026-10-14 23:15 KST — PC-C / 네트워크 최초 배포 검증·누락 조회 권한 보완
 
 - 작업 PC alias: `PC-C`, 기준 브랜치 `main` / `7ac8fc6`. 사용자가 관리자 콘솔에서 IAM bootstrap 생성 완료를 보고했다. 세 인수인계를 순서대로 재검토했고 worktree clean이었다. 작업 계정의 실제 새 권한으로 준비 도구가 성공했다. 기존 미커밋/다른 PC 변경을 덮어쓰거나 pull하지 않았다.
