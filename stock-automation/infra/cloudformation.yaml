@@ -198,14 +198,27 @@ Resources:
       RequiresCompatibilities: [FARGATE]
       ExecutionRoleArn: !GetAtt ExecutionRole.Arn
       TaskRoleArn: !GetAtt TaskRole.Arn
+      Volumes:
+        - Name: runtime-tmp
       ContainerDefinitions:
         - Name: stock-automation
           Image: !Ref ImageUri
           Essential: true
+          User: "65534:65534"
+          ReadonlyRootFilesystem: true
+          LinuxParameters:
+            Capabilities:
+              Drop: [ALL]
+            InitProcessEnabled: true
+          MountPoints:
+            - SourceVolume: runtime-tmp
+              ContainerPath: /tmp
+              ReadOnly: false
           Command: [aws-run]
           Environment:
             - {Name: KIWOOM_MODE, Value: demo}
             - {Name: KIWOOM_TOKEN_STORE, Value: memory}
+            - {Name: LIVE_ORDER_ENABLED, Value: "0"}
             - Name: PAPER_BUCKET
               Value: !Ref ArtifactBucket
             - Name: PAPER_TABLE
