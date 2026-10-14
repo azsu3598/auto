@@ -279,6 +279,18 @@ python -m compileall -q src tests
 
 ## 10. 세션 전달 기록
 
+### 2026-10-14 23:15 KST — PC-C / 네트워크 최초 배포 검증·누락 조회 권한 보완
+
+- 작업 PC alias: `PC-C`, 기준 브랜치 `main` / `7ac8fc6`. 사용자가 관리자 콘솔에서 IAM bootstrap 생성 완료를 보고했다. 세 인수인계를 순서대로 재검토했고 worktree clean이었다. 작업 계정의 실제 새 권한으로 준비 도구가 성공했다. 기존 미커밋/다른 PC 변경을 덮어쓰거나 pull하지 않았다.
+- 실제 조회 성공: 지정 작업 사용자 STS 확인, VPC DNS 지원/호스트 이름 설정 모두 true, 기존 공개 서브넷의 실제 IGW 경로와 같은 AZ, 겹치지 않는 사설 `10.77.32.0/24`, Amazon 소유 최신 AL2023 x86_64 EBS 이미지와 8GiB 루트 요구량 검사를 통과했다. 매개변수는 Git 제외 runtime에만 보관하고 식별자/계정/ARN은 대화·문서에 출력하지 않았다.
+- 승인 범위의 실제 배포 시도: 전체 예상 월 $7~10 승인을 유지하고 지정 CloudFormation 서비스 역할로 네트워크 CREATE 변경 세트를 만들었다. AWS ValidateTemplate 성공, 신규 Add 15개만 포함/기존 자원 변경 없음/EC2 t3.micro 1대/EIP 1개/모든 예약 DISABLED를 확인한 뒤 실행했다. 실제 리소스 생성 전 AWS의 가용영역 매개변수 조회에서 `ec2:DescribeAvailabilityZones`가 배포 역할 정책에 없어 자동 `ROLLBACK_COMPLETE`가 됐다. 전용 권한 파일의 누락이며 IAM 관리자 권한이나 실거래 잠금을 완화해서 우회하지 않았다.
+- 생성·비용 상태 확인: 실패 스택의 StackResources 0개, EIP 0개, 종료되지 않은 EC2 0개를 실제 조회했다. 이 실패 시도로 NAT/EIP는 생성되지 않았다. 기존 VPC/Secret/ECR은 유지한다. CloudFormation raw 사건/식별자는 Git 제외 runtime에만 보관하며 CloudWatch를 내보내지 않았다.
+- 변경 파일: `infra/paper-network-iam-bootstrap.yaml`에 서울의 `ec2:DescribeAvailabilityZones` 조회를 추가하고 작업 계정에 지정 네트워크 스택/변경 세트만 정리 가능한 `cloudformation:DeleteStack`을 추가했다. `tools/validate_paper_infrastructure.py`는 이 매개변수 조회 권한과 정리 ARN 범위를 검사한다. `infra/고정IP_모의배포_진행.md`는 기존 관리자 IAM 스택의 템플릿 교체/업데이트와 자원 없는 실패 네트워크 스택 정리 순서를 추가했다. `infra/paper-fixed-egress.yaml`은 EIP 연결 후 부팅 순서에 맞춰 패키지 재시도 주석만 바로잡았다. 이 공동 인수인계를 추가했다. 앱/매매 전략/이미지 내용 변경 없음.
+- 검증: 수정본 2개의 실제 AWS ValidateTemplate 통과, 로컬 cfn-lint 1.57.2의 템플릿 3개 warning/error 0개 및 안전/IAM 크기·누락 권한 검사 통과, compileall·git diff --check 통과. Docker 포함 전체 unittest 재시도 `177개 통과`, skip 없음. 최초 검사에서는 기존 Docker Engine HTTP 500으로 컨테이너 검사 setUpClass가 실패해 175개 실행/error 1이었으며 해당 실패를 숨기지 않는다. 정상 Docker Desktop restart 성공 후 엔진/기존 검증 이미지 조회를 확인하고 전체 검사를 재실행해 통과했다. WSL 초기화/데이터 삭제/격리 약화 없음.
+- 현재 미완료: 원격 IAM 정책은 사용자가 처음 등록한 버전이며 수정본은 아직 관리자 콘솔에 적용하지 않았다. 실패한 자원 없는 네트워크 스택은 ROLLBACK_COMPLETE로 남겼고, 정리 권한 적용 전 자동 삭제를 시도하지 않았다. NAT/고정 egress/SSM/OS 정지 타이머의 실제 검증, 키움 IP 등록, 앱 스택 배포 권한·수수료/세금·휴장일·Fargate/저장/알림 통합검증은 미완료다. 오늘/내일 자동 운용 가능을 확정하지 않는다.
+- 다음 Codex: 사용자에게 관리자 CloudFormation의 **stock-automation-paper-network-iam** 기존 스택을 선택하고 업데이트/현재 템플릿 교체/최신 `paper-network-iam-bootstrap.yaml` 업로드를 한 단계씩 안내한다. UPDATE_COMPLETE 뒤 새 권한을 확인하고 StackResources 0개인 실패 네트워크 스택만 정리한다. 첫 실패의 runtime 기록·매개변수를 별도 보존한 다음 최신 조회/원격 검증/신규 변경 세트 검토 후 예약 DISABLED로 네트워크 재시도한다. 최초 부팅 검증 뒤 EC2 정지 확인, 실제 사설 Fargate egress 및 키움 모의 허용 IP/앱 통합검증을 이어간다. 동일 AWS 준비 작업의 기존 push 승인으로 수정 파일만 전달한다.
+- 실거래 상태: `LIVE CODE SAFETY: 기존 강화 유지`, `LIVE TESTS: 전체 177개·CFN 로컬/원격 구문 통과 / 실제 통합 미검증`, `LIVE AWS DEPLOYMENT: 관리자 IAM 초기 등록 / 네트워크 최초 시도는 생성 전 롤백 / NAT·앱 미배포 / 예약 활성화 없음`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미조회 / 해제하지 않음`.
+
 ### 2026-10-14 22:49 KST — PC-C / 승인된 고정 egress 구성 준비·최신 이미지 ECR 반영
 
 - 작업 PC alias: `PC-C`, 브랜치 `main`, 기준 `eada5b5`. 사용자가 월 `$7~10` 전체 예상 예산을 승인한 뒤 잠시 중단했고 `이어서 ㄱㄱ`로 재개했다. 예산 승인은 유지한다. AGENTS.md → PC-C 전체 인수인계 → 공동 인수인계를 읽고 실제 Git/코드 상태를 대조했다. 기존 미커밋 19:39 계획 기록은 PC-C 자체 작성분이라 보존했고 과거 기록을 수정하지 않았다.

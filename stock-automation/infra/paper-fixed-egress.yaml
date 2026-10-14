@@ -103,7 +103,7 @@ Resources:
           EOF
           systemctl daemon-reload
           systemctl enable --now paper-nat-stop.timer
-          # EIP attachment follows instance creation. Retry briefly until it is attached.
+          # Retry briefly on transient repository/network errors during package installation.
           installed=0
           for attempt in 1 2 3 4 5 6; do
             if timeout 60 dnf install -y iptables-services; then installed=1; break; fi

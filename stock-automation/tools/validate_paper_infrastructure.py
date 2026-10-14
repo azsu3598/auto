@@ -79,6 +79,13 @@ def validate() -> None:
     assert "secretsmanager:" not in serialized and "AdministratorAccess" not in serialized
     operator = iam["Resources"]["OperatorNetworkPolicy"]["Properties"]["PolicyDocument"]
     assert len(json.dumps(operator, separators=(",", ":"))) < 6144
+    deployment_statements = iam["Resources"]["NetworkDeploymentRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
+    inspection = next(s for s in deployment_statements if s.get("Sid") == "InspectSeoulNetwork")
+    # Typed CloudFormation AZ parameters require this read before resource creation.
+    assert "ec2:DescribeAvailabilityZones" in inspection["Action"]
+    cleanup = next(s for s in operator["Statement"] if "cloudformation:DeleteStack" in s.get("Action", []))
+    assert all("/stock-automation-paper-network/" in r["Fn::Sub"]
+               or ":changeSet/paper-network-" in r["Fn::Sub"] for r in cleanup["Resource"])
     for resource in iam["Resources"].values():
         if resource["Type"] == "AWS::IAM::Role":
             size = sum(len(json.dumps(p["PolicyDocument"], separators=(",", ":")))

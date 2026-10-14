@@ -68,7 +68,7 @@ Resources:
             Statement:
               - Sid: InspectSeoulNetwork
                 Effect: Allow
-                Action: [ec2:DescribeVpcs, ec2:DescribeVpcAttribute, ec2:DescribeSubnets, ec2:DescribeRouteTables, ec2:DescribeSecurityGroups, ec2:DescribeInstances, ec2:DescribeInstanceStatus, ec2:DescribeInstanceAttribute, ec2:DescribeImages, ec2:DescribeAddresses, ec2:DescribeNetworkInterfaces, ec2:DescribeVolumes, ec2:DescribeTags]
+                Action: [ec2:DescribeVpcs, ec2:DescribeVpcAttribute, ec2:DescribeAvailabilityZones, ec2:DescribeSubnets, ec2:DescribeRouteTables, ec2:DescribeSecurityGroups, ec2:DescribeInstances, ec2:DescribeInstanceStatus, ec2:DescribeInstanceAttribute, ec2:DescribeImages, ec2:DescribeAddresses, ec2:DescribeNetworkInterfaces, ec2:DescribeVolumes, ec2:DescribeTags]
                 Resource: "*"
                 Condition:
                   StringEquals: {aws:RequestedRegion: ap-northeast-2}
@@ -175,9 +175,9 @@ Resources:
               - !Sub arn:${AWS::Partition}:cloudformation:ap-northeast-2:${AWS::AccountId}:changeSet/paper-network-*/*
             Condition:
               StringEquals: {cloudformation:RoleArn: !GetAtt NetworkDeploymentRole.Arn}
-          - Sid: ReadAndExecuteOnlyPaperNetworkChanges
+          - Sid: ReadExecuteAndCleanUpOnlyPaperNetworkChanges
             Effect: Allow
-            Action: [cloudformation:DescribeStacks, cloudformation:DescribeStackEvents, cloudformation:DescribeStackResources, cloudformation:GetTemplate, cloudformation:DescribeChangeSet, cloudformation:ExecuteChangeSet, cloudformation:DeleteChangeSet]
+            Action: [cloudformation:DescribeStacks, cloudformation:DescribeStackEvents, cloudformation:DescribeStackResources, cloudformation:GetTemplate, cloudformation:DescribeChangeSet, cloudformation:ExecuteChangeSet, cloudformation:DeleteChangeSet, cloudformation:DeleteStack]
             Resource:
               - !Sub arn:${AWS::Partition}:cloudformation:ap-northeast-2:${AWS::AccountId}:stack/stock-automation-paper-network/*
               - !Sub arn:${AWS::Partition}:cloudformation:ap-northeast-2:${AWS::AccountId}:changeSet/paper-network-*/*
