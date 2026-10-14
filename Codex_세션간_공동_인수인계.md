@@ -279,6 +279,36 @@ python -m compileall -q src tests
 
 ## 10. 세션 전달 기록
 
+### 2026-10-14 19:27 KST — PC-C → PC-D / 임시 볼륨 권한 보완·실행 검증
+
+- 작업 PC alias: `PC-C`, 브랜치 `main`, 작업 기준 `1ba698f`. 사용자가 앞선 `/tmp` 권한 발견 결과에 `ㄱㄱㄱ`로 보완 진행을 요청했다. 세 파일 인수인계와 실제 상태를 다시 대조하고 기존 19:14 검토 기록을 보존했다. 동일 AWS 준비 작업에 대한 앞선 commit/push 요청을 유지해 이번 수정 4개 파일만 Git 전달한다. runtime·키·토큰·원본 로그는 제외한다.
+- 변경 파일: `stock-automation/Dockerfile`, `stock-automation/tests/test_container_tmp_runtime.py`, `stock-automation/README.md`, 이 공동 인수인계. 매매 로직·계좌·Secret·배포 템플릿의 비루트/read-only/capability drop/예약 비활성 설정은 변경하지 않았다.
+- 보완 내용: 이미지의 `/tmp`를 UID/GID `65534:65534`, mode `0700`으로 초기화하고 `VOLUME ["/tmp"]`를 선언했다. 기존 ECS ContainerPath와 일치해 이미지 디렉터리 초기 정보를 볼륨에 복사할 수 있도록 했다. Python `TMPDIR=/tmp`도 명시했다. Fargate에 지원되지 않는 tmpfs 옵션을 템플릿에 넣거나 루트 사용자/파일시스템 쓰기를 활성화하는 방식으로 우회하지 않았다. 실제 Fargate 초기화 검증은 별도다.
+- 새 회귀검사: `STOCK_AUTOMATION_TEST_IMAGE`를 지정했을 때만 로컬 Docker 통합검사 2개를 실행한다. 로컬 named pipe/unix 소켓을 확인하고 registry pull을 금지한다. 새 빈 named volume에 이미지 디렉터리가 초기화됐을 때 UID 65534의 임시 보고서 생성·내용 확인·정리, 기본 tempfile 경로, root 쓰기 차단, capability 0/no-new-privileges를 검사한다. `volume-nocopy`의 root/0755 기본 빈 볼륨은 PermissionError가 발생해야 통과하는 대조 검사다. 각 검사 컨테이너·볼륨을 정리한다. Docker가 없는 PC-D에서는 두 검사가 skip되므로 실제 이미지 검사 통과로 보고하지 않는다.
+- 이미지 재빌드: 최신 base를 확인하고 cache 없이 linux/amd64 단일 이미지로 재빌드했다. base digest `70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f`, 새 이미지 manifest `4ae8632e82bccc6b74227507693754515d5e9128fda95e73eb9d43933cdd0910`. pip check 통과, boto3/botocore `1.43.113`, more-itertools `11.2.0` 설치. 새 이미지는 로컬 `stock-automation:dev`이며 기존 AWS ECR 이미지를 갱신하지 않았다.
+- 검증 결과: 신규 Docker 통합 `2개 통과`, 이를 포함한 호스트 전체 unittest `167개 통과`(skip 없음), compileall 통과. 새 이미지와 초기화된 실제 named volume, network none/read-only/cap-drop ALL/no-new-privileges/init 조건에서 프로그램 테스트 `144개 통과`(Windows 설정 도구 21개 및 호스트 Docker 통합 2개는 호스트 전체 검사에서 확인). CLI help, 키움/boto3 import 및 소스/정적 파일 `36개` 해시 일치 통과. 검사 볼륨 정리, runtime Git 제외, 비밀정보 및 staged diff 검토와 `git diff --check` 통과.
+- 취약점 재검사: 공개 DB built `2026-10-13T06:35:20Z`의 동일 Grype offline 설정으로 새 로컬 archive를 검사했다. 외부 연결 조회를 끄고 로컬 미사용 프록시로 차단했다. 결과 203개 package/CVE 매치/고유 94개이며 이전 검사와 패키지·버전·유형·CVE·심각도 매치가 모두 동일하다. 기존 Debian 패치 확인 25개, 미해결 69개/High 14개 판정을 유지한다. 임시 폴더 권한 수정은 CVE 패치가 아니며 ignore/VEX 예외를 추가하지 않았다.
+- 실패·복구: 첫 빌드는 Docker Engine HTTP 500으로 실패했다. 정상 Docker Desktop restart 성공 후 builder/engine 상태를 확인했다. 서로 다른 context의 default builder를 지정한 명령은 context 불일치로 종료했고, `desktop-linux` 컨텍스트/동일 native builder를 명시한 재시도는 성공했다. WSL 초기화·등록 해제·데이터 삭제·강제 프로세스 제거 없이 복구했다. HTTP 500의 장기 재발 원인은 미확정이다.
+- Git 전달/다음 작업: fetch 시점 원격 main과 HEAD는 0/0으로 일치했고 다른 PC의 새 변경이나 충돌은 없었다. push 결과와 커밋 ID는 최종 응답으로 보고한다. PC-D는 수신 후 세 인수인계 파일과 diff를 대조하고 일반 테스트 및 Docker opt-in 검사 여부를 구분한다. PC-C는 이 새 이미지의 ECR 반영, 키움 허용 IP·추가 비용 구조, 예약 DISABLED 배포 후 실제 Fargate 임시 파일·키움 demo 읽기·S3/DynamoDB/텔레그램 통합검증을 순서대로 진행한다. 유료 자원 추가는 구체화/비용 확인 후 승인 범위에 따른다.
+- 미완료: 실제 Fargate 볼륨 초기화/온라인 진단/프로그램 스택 배포/모의 예약 활성화, 새 이미지 ECR 업로드, 미해결 취약점 공급자 업데이트. AWS 기존 준비 자원은 그대로이며 이번 작업으로 실제 모의 자동운용을 시작하지 않았다.
+- 실거래 상태: `LIVE CODE SAFETY: 기존 강화 유지 / 실제 통합검증 미완료`, `LIVE TESTS: 호스트 전체 167개 및 새 이미지 프로그램 144개 통과 / Fargate·실제 체결 미검증`, `LIVE AWS DEPLOYMENT: 기존 모의 자원/ECR 유지 / 권한 수정 이미지 로컬 검증 / 프로그램 스택 미배포 / 예약 비활성`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미조회 / 해제하지 않음`.
+
+### 2026-10-14 19:14 KST — PC-C / PC-D pull 수신 검토
+
+- 작업 PC alias: `PC-C`, 브랜치 `main`, 수신 HEAD `1ba698f`(교재), 이전 PC-C 전달 `394330f`. 사용자 pull 완료 보고 후 AGENTS.md → PC-C 단독 인수인계 → 공동 인수인계를 읽고 실제 상태를 대조했다. 검토 시작 worktree clean, 충돌 없음. 이 응답에서 추가 pull/commit/push하지 않았다.
+- 수신 내용: `456397d`의 컨테이너 격리 템플릿·보안 테스트·CVE 검토 문서·루트 README 현황·당일 NO_TRADE 기록과 `1ba698f`의 차트 교재를 확인했다. 합계 39개 파일 변경이며 GorapaduckPet 빌드 생성물 2개도 수신됐지만 주식/AWS 애플리케이션 변경은 아니다. 기존 파일을 되돌리거나 덮어쓰지 않았다.
+- 코드·보안 검토: TaskDefinition의 비루트 `65534:65534`, read-only root, capability Drop ALL, init process, 전용 `/tmp`, `LIVE_ORDER_ENABLED=0`과 demo/memory 설정을 확인했다. 공식 PyPI PyYAML 6.0.3 wheel의 SHA256을 검증하고 runtime에만 풀어 CloudFormation YAML과 실제 TaskDefinition 구조·Core/NXT 기본 DISABLED를 검증했다. 시스템/프로젝트 의존성 파일은 변경하지 않았다. PC-D 문서는 미해결 고유 69개/High 14개를 유지하며 격리 완화와 패치 완료를 구분한다. 이번 검토에서는 최신 base 재빌드·Grype 재스캔을 수행하지 않았으므로 그 건수는 이전 검사 기록이다.
+- 배포 전 발견 사항: 현재 Dockerfile에는 `/tmp`를 대상으로 하는 VOLUME 및 빈 ECS 볼륨의 소유권 초기화가 없다. AWS 공식 bind mount 안내는 기본 볼륨 root 소유/0755 및 Dockerfile VOLUME을 통한 초기 데이터/권한 설정을 설명한다(https://docs.aws.amazon.com/AmazonECS/latest/developerguide/bind-mounts.html). 동일 기본 상태를 로컬의 새 빈 volume-nocopy 볼륨으로 재현했을 때 UID 65534의 `/tmp` TemporaryDirectory 생성은 `PermissionError`; mode 1777 양성 대조에서는 성공했다. 실제 Fargate 결과는 아니지만 기본 권한에서의 실패를 확인했으며 AWS 배포 전 보완/실행 검증이 필요하다. 임시 파일은 aws_runtime.py의 종가 결정 보고서와 승격된 튜닝 결과 작성에도 사용된다. 문자열 기반 보안 테스트 4개 통과만으로 볼륨 쓰기 권한을 보장할 수 없다.
+- 다음 보완 방향: 비루트·read-only·capability 제거는 유지하고 Dockerfile에서 ECS 전용 임시 디렉터리의 사용자/권한과 VOLUME 경로를 명시하는 등 초기화 방식을 마련한다. 대응 테스트는 root/0755 실패와 UID 65534 실제 쓰기를 확인하는 방식으로 구성한다. 이미지 재빌드/재스캔 및 예약 DISABLED Fargate 검증 전에 이 항목을 먼저 처리한다. 이번 사용자 요청은 수신 확인이므로 Dockerfile/배포 템플릿/테스트를 임의 수정하지 않았다.
+- 작성 문서 확인:
+  - 교재 통합본과 00~23 장별 24개 본문을 제목 수준과 내비게이션을 제외하고 대조해 일치 확인. Markdown 28개의 UTF-8·코드 블록·로컬 문서 링크 정상. ZIP CRC 정상, 27개 파일의 본문 일치 확인(현재 Git checkout의 CRLF 때문에 원본 ZIP과 바이트는 다르지만 줄바꿈 외 차이 없음). 교재의 수급 가점 설명은 실제 종가 코드 +1.5/+1.5, 단타 +3/+3과 일치한다.
+  - Notion 공식 가져오기 안내의 ZIP/Markdown/데스크톱·웹 지원을 대조했다. 실제 Notion 업로드/모바일 배치는 수행하지 않았다. https://www.notion.com/help/import-data-into-notion
+  - 15:10 분석 보고서·실시간 모의 현재본·추천 이벤트의 NO_TRADE/신규 체결 없음 기록을 확인했다. CSV 28열과 ID 단일성 정상. 이는 파일 기록 검토이며 현재 시세를 다시 검증하거나 새로운 추천/체결을 생성한 것은 아니다.
+  - 15:40 인수인계에는 교재가 외부 D:/Dev 문서 폴더에 있어 Git 대상이 아니라고 적혀 있지만 이후 실제 `1ba698f` 커밋에서 저장소 루트 `사부의_차트교재_2026-10-14/`에 29개 파일이 추가됐다. 현재 PC-C에서도 모두 존재하므로 별도 복사 없이 읽을 수 있다. 과거 기록은 유지하고 이 기록으로 현재 상태를 정정한다.
+- 검증 결과: 새 보안 집중 테스트 `4개 통과`, 전체 unittest `165개 통과`, compileall 통과. CloudFormation 구문/안전 구조, 교재 본문/링크/ZIP, 이벤트 CSV 검사와 수신 diff `git diff --check` 통과. Docker Desktop이 꺼져 있어 정상 시작 후 로컬 임시 폴더 검사만 수행했다. 검사 컨테이너와 신규 전용 볼륨은 정리했다. AWS 자원 생성·배포·예약·Secret 읽기/변경은 수행하지 않았다.
+- 변경 파일: 이 공동 인수인계만 추가, Git 제외 runtime에 YAML 파서와 `/tmp` 검사 결과 보관. 다음 PC-D/PC-C는 위 임시 폴더 권한 문제를 먼저 보완한 뒤 키움 허용 IP·비용·온라인 API·저장소·알림 통합검증을 진행한다.
+- 실거래 상태: `LIVE CODE SAFETY: 기존 강화 유지 / 실제 통합검증 미완료`, `LIVE TESTS: PC-C 전체 165개 통과 / 실제 Fargate·체결 미검증`, `LIVE AWS DEPLOYMENT: 기존 모의 준비 자원/ECR 유지 / 강화 템플릿 수신 / 프로그램 스택 미배포 / 예약 비활성`, `LIVE ORDER SUBMISSION: 없음`, `KILL SWITCH: 기본 ON 설계 / 원격 상태 미조회 / 해제하지 않음`.
+
 ### 2026-10-14 15:40 KST — PC-D / Notion 학습용 차트 교재 초판
 
 - 요청·완료: 사용자가 기초부터 책처럼 읽을 차트 교재를 요청했고, Notion에 직접 가져올 수 있도록 Markdown으로 작성해 달라고 확정했다. 기본 문서 저장 규칙에 따라 `D:/Dev/2026/SKR/docs/사부의_차트교재_2026-10-14/`에 완성본을 저장했다. 기존 Sabu 문서와 프로그램 코드는 변경하지 않았다.

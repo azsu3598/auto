@@ -272,7 +272,7 @@ python -m stock_automation.cli live-supervise \
 
 ## 컨테이너
 
-저장소 루트 `D:/Test`를 빌드 컨텍스트로 사용한다.
+현재 PC의 저장소 루트를 빌드 컨텍스트로 사용한다.
 
 ```bash
 docker build --pull --no-cache --platform linux/amd64 --provenance=false --sbom=false -f stock-automation/Dockerfile -t stock-automation:dev .
@@ -281,6 +281,24 @@ docker build --pull --no-cache --platform linux/amd64 --provenance=false --sbom=
 빌드 시 최신 Python 3.13 Debian trixie 기본 이미지를 확인하고 Debian 보안
 업데이트와 Python 패키지 업데이트를 적용한다. 의존성 충돌은 `pip check`로
 검사하며 실행 사용자는 `65534:65534`로 유지한다.
+
+ECS의 `runtime-tmp` 볼륨과 같은 `/tmp`를 이미지의 `VOLUME`으로 선언한다.
+디렉터리 소유자는 `65534:65534`, 권한은 `0700`, Python의 `TMPDIR`는 `/tmp`로
+지정한다. ECS가 초기 디렉터리 정보를 복사하도록 하며 나머지 루트 파일시스템의
+읽기 전용 설정은 유지한다. 기본 root/0755 빈 볼륨은 이 사용자에게 쓰기를 허용하지 않는다.
+
+빌드 후 실제 로컬 볼륨의 초기화·임시 보고서 생성/정리·루트 쓰기 차단을 확인한다.
+다음 검사는 외부 연결 없이 실행하고 자체 검사 컨테이너·볼륨을 정리한다.
+
+```powershell
+$env:STOCK_AUTOMATION_TEST_IMAGE = "stock-automation:dev"
+$env:PYTHONPATH = "stock-automation/src"
+python -m unittest discover -s stock-automation/tests -p test_container_tmp_runtime.py -v
+```
+
+위 환경변수를 지정하면 전체 테스트에도 Docker 검사가 포함된다. Docker가 없는
+PC에서는 두 통합 검사가 건너뛰어지므로 PC-C에서 별도 실행해야 한다. 로컬 검사를
+실제 Fargate 볼륨 권한과 S3·DynamoDB 연결 검증의 대체로 간주하지 않는다.
 
 이미지 패키지 정보를 외부에 전송하지 않는 취약점 검사는 Grype로 수행한다.
 공식 배포 파일의 checksum을 확인한 Grype와 최신 공개 취약점 DB를 별도로
