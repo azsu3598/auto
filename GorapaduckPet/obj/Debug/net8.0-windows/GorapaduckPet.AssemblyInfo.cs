@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("DigiDesktopPet")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+394330feb63ce8d401c1e0c4656bce243587b409")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+456397d60980ffe1c3550b60daec25a2cfc4e0ca")]
 [assembly: System.Reflection.AssemblyProductAttribute("DigiDesktopPet")]
 [assembly: System.Reflection.AssemblyTitleAttribute("DigiDesktopPet")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
