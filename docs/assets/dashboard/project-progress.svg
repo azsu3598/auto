@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="484" viewBox="0 0 900 484" role="img" aria-labelledby="title description">
+  <title id="title">SABU 프로젝트 진행 현황 — 2026-10-15</title>
+  <desc id="description">5개 안전 관문 중 핵심 구현과 로컬 검증 완료, PC-C 통합검증 진행, 5거래일 모의운용 대기, 실거래 잠금. 운영 준비율이나 수익률을 나타내지 않는 정적 요약이다. AWS 상태는 2026-10-14 23:57 PC-C 기록 기준이다.</desc>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1">
+      <stop stop-color="#101e35"/>
+      <stop offset="1" stop-color="#0b1220"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="484" rx="20" fill="url(#background)"/>
+  <g font-family="Malgun Gothic, Apple SD Gothic Neo, Noto Sans KR, sans-serif">
+    <text x="32" y="40" fill="#8fa9cc" font-size="13" font-weight="700" letter-spacing="2">SABU / PROJECT STATUS</text>
+    <text x="32" y="76" fill="#f1f5f9" font-size="27" font-weight="700">지금은 통합검증 단계</text>
+    <text x="868" y="40" text-anchor="end" fill="#a8bad1" font-size="13">2026.10.15 KST</text>
+    <text x="32" y="103" fill="#b4c4d9" font-size="15">완료 2 · 진행 1 · 대기 1 · 잠금 1</text>
+    <g transform="translate(32 120)">
+      <rect width="160" height="6" rx="3" fill="#2dd4bf"/>
+      <rect x="169" width="160" height="6" rx="3" fill="#2dd4bf"/>
+      <rect x="338" width="160" height="6" rx="3" fill="#60a5fa"/>
+      <rect x="507" width="160" height="6" rx="3" fill="#64748b"/>
+      <rect x="676" width="160" height="6" rx="3" fill="#fbbf24"/>
+    </g>
+    <g transform="translate(32 144)">
+      <rect width="836" height="49" rx="9" fill="#122e35"/>
+      <text x="17" y="31" fill="#5eead4" font-size="18" font-weight="700">01</text>
+      <text x="64" y="31" fill="#e2e8f0" font-size="18" font-weight="700">핵심 구현</text>
+      <text x="264" y="31" fill="#b4c4d9" font-size="14">전략 분리 · 원장 · 안전 골격 · UI</text>
+      <text x="812" y="31" text-anchor="end" fill="#5eead4" font-size="16" font-weight="700">완료</text>
+    </g>
+    <g transform="translate(32 202)">
+      <rect width="836" height="49" rx="9" fill="#122e35"/>
+      <text x="17" y="31" fill="#5eead4" font-size="18" font-weight="700">02</text>
+      <text x="64" y="31" fill="#e2e8f0" font-size="18" font-weight="700">로컬 검증</text>
+      <text x="264" y="31" fill="#b4c4d9" font-size="14">PC-D 175 통과 / Docker 2 skip</text>
+      <text x="812" y="31" text-anchor="end" fill="#5eead4" font-size="16" font-weight="700">완료</text>
+    </g>
+    <g transform="translate(32 260)">
+      <rect width="836" height="49" rx="9" fill="#152b4b" stroke="#60a5fa"/>
+      <text x="17" y="31" fill="#93c5fd" font-size="18" font-weight="700">03</text>
+      <text x="64" y="31" fill="#f1f5f9" font-size="18" font-weight="700">PC-C 통합검증</text>
+      <text x="264" y="31" fill="#c2d5ec" font-size="14">NAT 검증 기록 있음 / 앱 연결 미완료</text>
+      <text x="812" y="31" text-anchor="end" fill="#93c5fd" font-size="16" font-weight="700">진행</text>
+    </g>
+    <g transform="translate(32 318)">
+      <rect width="836" height="49" rx="9" fill="#1b2639"/>
+      <text x="17" y="31" fill="#94a3b8" font-size="18" font-weight="700">04</text>
+      <text x="64" y="31" fill="#e2e8f0" font-size="18" font-weight="700">5거래일 모의운용</text>
+      <text x="264" y="31" fill="#b4c4d9" font-size="14">예약 활성화 전 보완 · 통합검증 필요</text>
+      <text x="812" y="31" text-anchor="end" fill="#a8bad1" font-size="16" font-weight="700">대기</text>
+    </g>
+    <g transform="translate(32 376)">
+      <rect width="836" height="49" rx="9" fill="#342b20"/>
+      <text x="17" y="31" fill="#fcd34d" font-size="18" font-weight="700">05</text>
+      <text x="64" y="31" fill="#fef3c7" font-size="18" font-weight="700">실거래 전환</text>
+      <text x="264" y="31" fill="#d4c3a7" font-size="14">안전 검증 + 사용자 별도 승인 필수</text>
+      <text x="812" y="31" text-anchor="end" fill="#fcd34d" font-size="16" font-weight="700">잠금</text>
+    </g>
+    <text x="32" y="450" fill="#a8bad1" font-size="12">단계별 정적 요약이며 운영 준비율·수익률이 아닙니다. AWS: 10/14 23:57 PC-C 기록 기준, 현재 원격 미조회.</text>
+    <text x="32" y="469" fill="#a8bad1" font-size="12">실주문 없음 · 예약 비활성 기록 · 실제 Fargate/API/저장/알림 통합검증 미완료</text>
+  </g>
+</svg>

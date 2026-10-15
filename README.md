@@ -7,14 +7,14 @@
 종가배팅·중기·장중 단타를 서로 분리해 분석하고 기록하는 **모의운용 우선** 프로젝트입니다.  
 수익 극대화보다 잘못된 주문과 큰 손실을 막는 것을 먼저 설계합니다.
 
-[![Tests](https://img.shields.io/badge/tests-165%20passing-16c79a?style=for-the-badge)](stock-automation/tests)
+[![Tests](https://img.shields.io/badge/PC--D_tests-175_pass_%7C_2_skip-16c79a?style=for-the-badge)](stock-automation/tests)
 ![Mode](https://img.shields.io/badge/mode-paper%20trading-2563eb?style=for-the-badge)
 ![Live](https://img.shields.io/badge/live%20trading-locked-f59e0b?style=for-the-badge)
 ![Kill Switch](https://img.shields.io/badge/kill%20switch-default%20ON-ef4444?style=for-the-badge)
 
 </div>
 
-![SABU Trading Console 데스크톱 화면](stock-dashboard-desktop.png)
+![SABU Trading Console 데스크톱 화면](docs/assets/dashboard/stock-dashboard-desktop.png)
 
 > [!IMPORTANT]
 > 현재 운영 기준은 키움 **모의투자**입니다. 실거래는 비활성화되어 있고 비상정지는
@@ -23,8 +23,9 @@
 
 ## 한눈에 보는 현재 상태
 
-확인 기준: **2026-10-14 KST**. 아래 배포 상태는 공동 인수인계에 기록된 PC-C 결과를
-기준으로 하며, 현재 PC-D에서 AWS 상태를 실시간 조회한 결과는 아닙니다.
+확인 기준: **2026-10-15 KST**, 소스 기준 `6ea16b0`. AWS 배포 상태는 **10월 14일
+23:57 PC-C 인수인계** 기준이며 현재 AWS를 실시간 조회한 결과가 아닙니다.
+현재 단계는 **고정 IP 네트워크 준비 완료 → 앱 배포·온라인 통합검증 대기**입니다.
 
 | 전략과 기능 | 현재 상태 | 다음 확인 |
 |---|---|---|
@@ -33,8 +34,9 @@
 | 장중 단타 | 요청 시 단발 모의 스캔 | S3·DynamoDB·대시보드 연결검증 |
 | 연속 단타 | 운영설계와 비용산정 완료 | 사용자 승인 후 별도 구현 |
 | PC·모바일 대시보드 | 읽기 전용 UI 구현 완료 | Cognito·HTTPS 외부 배포 |
-| AWS 모의 준비 | Secret·네트워크·ECR 이미지 준비 기록 있음 | 키움 허용 IP 구조 확정·프로그램 스택 배포 |
-| 컨테이너 보안 | 격리 설정과 회귀 테스트 추가 | PC-C 재빌드·재스캔·Fargate 실행검증 |
+| 고정 IP 네트워크 | PC-C 기록상 생성·재기동 검증 완료, 서버 정지 | 실제 사설 Fargate 접속 경로·키움 허용 IP 확인 |
+| AWS 앱 배포 | 최신 ECR 이미지 준비, 앱 스택 미배포 | 예약 비활성 배포·S3/DynamoDB/API/알림 검증 |
+| 컨테이너 보안 | 격리·임시 폴더 권한 보완, PC-C Docker 검사 통과 기록 | 실제 Fargate 실행·최신 취약점 재검사 |
 | 실거래 | 안전 잠금 | 모든 안전 관문 완료 후 별도 승인 |
 
 > [!WARNING]
@@ -44,38 +46,36 @@
 
 ## 프로젝트 진행도
 
-진행률은 단순 코드량이 아니라 **실거래 전 반드시 통과해야 하는 5개 안전 관문**으로
-표시합니다. 현재는 핵심 구현·로컬 검증 2개 관문 완료, PC-C 통합검증 단계입니다.
-이는 개발 관문의 진행 상태이며 운영 준비율이나 실거래 안전성의 백분율이 아닙니다.
+![진행 현황: 5개 관문 중 핵심 구현·로컬 검증 완료, PC-C 통합검증 진행, 5거래일 모의운용 대기, 실거래 잠금](docs/assets/dashboard/project-progress.svg)
 
-```mermaid
-flowchart LR
-    A[1 핵심 전략과 안전 골격<br/>완료] --> B[2 로컬 회귀검증<br/>165개 통과]
-    B --> C[3 PC-C 통합검증<br/>준비 자원과 ECR 완료 · 실행검증 진행]
-    C --> D[4 AWS 5거래일<br/>모의운용 대기]
-    D --> E[5 실거래 전환<br/>잠금]
-
-    classDef done fill:#0f766e,color:#ffffff,stroke:#2dd4bf,stroke-width:2px;
-    classDef active fill:#1d4ed8,color:#ffffff,stroke:#60a5fa,stroke-width:3px;
-    classDef pending fill:#1f2937,color:#d1d5db,stroke:#6b7280,stroke-width:1px;
-    classDef locked fill:#451a03,color:#fef3c7,stroke:#f59e0b,stroke-width:2px;
-    class A,B done;
-    class C active;
-    class D pending;
-    class E locked;
-```
+**완료 2 · 진행 1 · 대기 1 · 잠금 1** — 코드량이 아닌 5개 관문의 상태입니다.
+운영 준비율이나 수익률·실거래 안전성의 백분율이 아닙니다. 그래프는 자동 연동된
+모니터링 화면이 아니라 아래 검증 기록을 반영한 정적 요약입니다.
 
 | 안전 관문 | 상태 | 완료 기준 |
 |---|---|---|
 | 핵심 구현 | **완료** | 전략 분리, 위험관리, 원장, 대시보드와 주문 안전 골격 |
-| 로컬 검증 | **완료** | PC-D 단위 테스트 165개와 `compileall` 통과 |
-| PC-C 통합검증 | **진행 단계** | 165개 재현, 보안 설정 반영, 이미지 재스캔, 키움 모의 읽기·AWS 저장 확인 |
+| 로컬 검증 | **완료** | PC-D 전체 177개 중 175개 통과·Docker 2개 skip, `compileall` 통과 |
+| PC-C 통합검증 | **진행 단계** | Docker 포함 177개 통과 기록, 실제 Fargate·API·저장·알림 검증은 미완료 |
 | AWS 모의운용 | **대기** | 예약 실행과 5거래일 이상 무사고 모의운용 |
 | 실거래 | **잠금** | 계좌 보호·체결 대사·장애 복구 검증과 사용자 별도 승인 |
 
-Docker 이미지 빌드와 ECR 업로드는 PC-C에서 이전 이미지로 검증했습니다. 이번 격리
-설정은 아직 Fargate에 적용·실행하지 않았고, 프로그램 스택과 모의예약도 미배포·비활성
-상태로 인수인계되어 있습니다. 전체 테스트 통과와 AWS 통합검증 완료를 구분합니다.
+PC-C에서는 `/tmp` 권한을 보완한 이미지를 빌드·검사하고 ECR에 반영한 기록이 있습니다.
+고정 IP 중계 서버도 생성·재기동 검증 후 정지했습니다. 하지만 **실제 Fargate 앱 스택은
+미배포, 모든 예약은 비활성** 상태로 인수인계됐습니다. 테스트 성공과 운영 성공은 다릅니다.
+
+현재 앱은 **AI 모의체결을 자체 원장에 기록**합니다. 키움 증권사에 모의 주문을 제출하거나
+실제 주문을 실행하는 기능이 운영 중이라는 뜻이 아닙니다.
+
+### 예약을 켜기 전 확인할 4가지
+
+1. 앱 재전송·실행 제한과 NAT 종료 시각 정합성: 09:10 작업의 1시간 재전송 허용과 09:25 정지 충돌.
+2. 네트워크 준비·작업 종료 확인: 준비 지연이나 실행 중 작업을 정해진 시간만으로 처리하지 않기.
+3. 로컬·원격 UserData 차이 관리: 설치 제한 로컬 600초와 원격 60초를 다음 갱신 전 검토.
+4. 실제 앱 통합검증과 보안: Fargate·키움·저장·알림 및 최신 이미지 취약점 검사.
+
+구체적인 테스트와 완료 기준은 [PC-C 최신 보완 체크리스트](PC-C_단독진행_전체인수인계.md)를
+따릅니다. 확인 전에는 모의 예약도 켜지 않으며 실거래는 계속 잠금 상태를 유지합니다.
 
 ## 세 가지 독립 전략
 
@@ -90,8 +90,8 @@ Docker 이미지 빌드와 ECR 업로드는 PC-C에서 이전 이미지로 검�
 
 ## 시스템 구조
 
-아래는 목표 연결 구조입니다. ECR 이미지 준비 이후 프로그램 스택 배포와 실제 API·저장소
-연결검증이 남아 있습니다.
+아래는 목표 연결 구조입니다. 고정 IP용 NAT 네트워크까지 준비됐다는 기록이 있으며,
+앱의 실제 사설망 접속·API·저장소 연결은 아직 통합검증 전입니다.
 
 ```mermaid
 flowchart LR
@@ -112,9 +112,9 @@ flowchart LR
     L[실주문 경로] -. 안전 잠금 .-> S
 ```
 
-현재 AWS 구조는 정해진 시간에 짧게 실행되는 작업을 기본으로 합니다. 장중 연속 단타는
-작업을 반복 호출하는 방식이 아니라 별도의 장중 세션과 고정 IP가 필요하므로 아직
-실행 코드와 인프라를 배포하지 않았습니다.
+현재 AWS 구조는 정해진 시간에 짧게 실행되는 Fargate 작업과 예약형 고정 IP 중계 서버를
+기본으로 합니다. 현재 중계 서버는 연속 단타 실행용이 아닙니다. 장중 연속 단타는 별도
+승인·구현 범위이며 상시 감시 코드나 인프라를 배포하지 않았습니다.
 
 ## 핵심 안전장치
 
@@ -138,7 +138,7 @@ flowchart LR
 <summary><strong>모바일 화면 보기</strong></summary>
 
 <p align="center">
-  <img src="stock-dashboard-mobile-500.png" width="360" alt="SABU Trading Console 모바일 화면">
+  <img src="docs/assets/dashboard/stock-dashboard-mobile-500.png" width="360" alt="SABU Trading Console 모바일 화면">
 </p>
 
 </details>
@@ -185,18 +185,39 @@ PC-C는 pull 후 `AGENTS.md`, PC-C 전체 인수인계, 공동 인수인계와 �
 전체 테스트부터 다시 수행합니다. 비밀키, 토큰, 계좌번호와 AWS 자격증명은 코드,
 Markdown, Git과 일반 로그에 기록하지 않습니다.
 
+## 폴더 안내
+
+```text
+<WORKSPACE>/
+├─ stock-automation/        자동매매 코드·테스트·AWS 템플릿
+├─ Kiwoom-REST-API/         키움 연동 라이브러리
+├─ docs/                   분석·설계·운영 검증 문서
+│  └─ assets/dashboard/    대시보드 화면 이미지
+├─ Sabu/                   차트 학습 자료
+│  └─ 교재/                정규 교재와 Notion 가져오기 파일
+├─ reference/              기존 기준 자료와 거래기록
+└─ archives/               로컬 복구 백업·옛 전달물, Git 제외
+```
+
+이 프로젝트에서 새로 작성하는 Markdown은 모두 현재 저장소 안에 둡니다. 일반 문서는
+`docs/`, 차트 공부 자료는 `Sabu/`에 저장하며, 필수 인수인계와 기존 실행 가이드는
+루트 경로를 유지합니다. 실행 코드가 참조하는 두 프로젝트의 형제 폴더 관계도 유지합니다.
+
+`GorapaduckPet`은 이 워크스페이스에서 제거했습니다. 복구용 압축본과 관련 솔루션,
+예전 전달 ZIP·보조 스크립트는 로컬 `archives/`에 보관하며 새 Git 전달에 포함하지 않습니다.
+
 ## 다음 작업
 
-- [x] PC-C 모의용 Secret·네트워크와 ECR 이미지 준비 기록 확인
-- [x] PC-D 취약점 영향 검토와 컨테이너 격리 설정 추가
-- [x] PC-D 전체 테스트 165개와 Python 구문검사 통과
-- [ ] PC-C에서 pull 후 세 인수인계 파일 확인과 전체 테스트 165개 재현
-- [ ] 최신 기반 이미지 재빌드·동일 Grype 방식 재스캔
-- [ ] 키움 허용 접속 IP 구조와 추가 비용 확정
-- [ ] AWS 예약 비활성 상태로 최초 배포
-- [ ] 모든 예약을 비활성화한 상태에서 보안 설정의 Fargate 실행검증
-- [ ] 키움 모의투자 읽기 전용 온라인 진단
-- [ ] CloudWatch·S3·DynamoDB·텔레그램 통합검증
+- [x] PC-C 모의용 Secret과 권한 보완 이미지의 ECR 반영 기록 확인
+- [x] 고정 IP NAT 네트워크 생성·재기동 검증 후 정지 기록 확인
+- [x] 비루트·read-only·권한 제거·임시 폴더 권한 보완과 회귀 테스트
+- [x] PC-D 175개 통과·Docker 2개 skip, PC-C Docker 포함 177개 통과 기록 구분
+- [ ] PC-C pull 후 세 인수인계·실제 Git/코드·전체 테스트 재확인
+- [ ] 재전송/종료 시각, 준비/종료 연동, UserData 차이 검토와 회귀검사
+- [ ] 키움 모의 허용 IP·앱 배포 IAM·수수료/세금·전체 휴장일 확인
+- [ ] 앱 스택을 예약 비활성 상태로 배포
+- [ ] 실제 사설 Fargate egress/EIP·임시 폴더·키움/OpenDART 읽기 진단
+- [ ] CloudWatch·S3·DynamoDB·텔레그램 통합검증 및 이미지 취약점 재검사
 - [ ] 핵심 모의예약 활성화 후 5거래일 이상 관찰
 - [ ] Cognito·HTTPS 기반 모바일 외부 접속
 - [ ] 실거래 안전 기능의 실제 계좌 환경 검증
@@ -205,9 +226,11 @@ Markdown, Git과 일반 로그에 기록하지 않습니다.
 ## 문서
 
 - [자동매매 엔진 상세 설명](stock-automation/README.md)
+- [사부의 차트 공부방과 정규 교재](Sabu/README.md)
 - [PC-C 단독 진행 전체 인수인계](PC-C_%EB%8B%A8%EB%8F%85%EC%A7%84%ED%96%89_%EC%A0%84%EC%B2%B4%EC%9D%B8%EC%88%98%EC%9D%B8%EA%B3%84.md)
 - [AWS 자동매매 실행 가이드](AWS_%EC%9E%90%EB%8F%99%EB%A7%A4%EB%A7%A4_%EC%8B%A4%ED%96%89%EA%B0%80%EC%9D%B4%EB%93%9C.md)
 - [세션 간 공동 인수인계](Codex_%EC%84%B8%EC%85%98%EA%B0%84_%EA%B3%B5%EB%8F%99_%EC%9D%B8%EC%88%98%EC%9D%B8%EA%B3%84.md)
+- [고정 IP 모의배포와 실제 검증 상태](stock-automation/infra/고정IP_모의배포_진행.md)
 - [Docker 취약점 검토와 PC-C 재검증 조건](docs/%EC%9A%B4%EC%98%81%20%EA%B2%80%EC%A6%9D/2026-10-14_Docker_%EC%B7%A8%EC%95%BD%EC%A0%90_PC-D_%EA%B2%80%ED%86%A0.md)
 - [AWS 프로그램 아키텍처](docs/%ED%94%84%EB%A1%9C%EA%B7%B8%EB%9E%A8%20%EC%84%A4%EA%B3%84/AWS_%ED%94%84%EB%A1%9C%EA%B7%B8%EB%9E%A8_%EC%95%84%ED%82%A4%ED%85%8D%EC%B2%98.md)
 - [연속 단타 AWS 운영설계와 예상비용](docs/%ED%94%84%EB%A1%9C%EA%B7%B8%EB%9E%A8%20%EC%84%A4%EA%B3%84/%EC%97%B0%EC%86%8D_%EB%8B%A8%ED%83%80_AWS_%EC%9A%B4%EC%98%81%EC%84%A4%EA%B3%84_%EB%B0%8F_%EC%98%88%EC%83%81%EB%B9%84%EC%9A%A9.md)

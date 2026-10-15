@@ -1,5 +1,22 @@
 # AGENTS.md — Korean Stock Recommendation Rules
 
+## Repository-local Markdown and folder organization
+
+* For work in this repository, create all new Markdown files inside the current
+  repository. This project-specific user instruction overrides the global default
+  of writing documents under `D:/Dev/2026/SKR/docs`.
+* Keep `AGENTS.md`, `README.md`, `PC-C_단독진행_전체인수인계.md`, and
+  `Codex_세션간_공동_인수인계.md` at the repository root. Keep existing execution
+  guides there unless their references are migrated together.
+* Use `docs/` and its strategy/operations subdirectories for project documents,
+  `Sabu/` for chart education, and `Sabu/교재/` for textbook editions.
+* Store dashboard screenshots in `docs/assets/dashboard/` and update current
+  references when moving them. Do not rewrite historical handoff records.
+* `archives/` contains local recovery backups and retired artifacts and is ignored
+  by Git. Do not stage archives, credentials, runtime data, or raw logs.
+* The user removed `GorapaduckPet` from this workspace. Do not recreate its project
+  or build artifacts as part of stock-automation work.
+
 ## PC-D / PC-C Git handoff rules
 
 These instructions apply to every Codex session working anywhere under this
