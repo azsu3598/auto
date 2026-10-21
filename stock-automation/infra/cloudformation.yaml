@@ -2,6 +2,10 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: Scheduled Korean closing-bet paper trader (no live order permissions)
 
 Parameters:
+  NatInstanceId:
+    Type: String
+    AllowedPattern: '^i-[a-f0-9]{8,17}$'
+    Description: Existing stopped or running paper NAT; no new instance is created
   ImageUri:
     Type: String
     Description: ECR image URI built from stock-automation/Dockerfile
@@ -14,11 +18,17 @@ Parameters:
     Default: DISABLED
     AllowedValues: [DISABLED]
     Description: Use the verified private subnet and fixed NAT egress; public task IPs are disabled
+  ExpectedEgressIp:
+    Type: String
+    AllowedPattern: "^[0-9]{1,3}([.][0-9]{1,3}){3}$"
+    Description: Verified fixed egress IP from the existing NAT network stack; do not commit parameter values
   KiwoomDemoSecretArn:
     Type: String
+    AllowedPattern: "^arn:aws:secretsmanager:ap-northeast-2:[0-9]{12}:secret:stock-automation-paper/kiwoom-demo-[A-Za-z0-9]{6}$"
     Description: Secrets Manager JSON with app_key_mock and app_secret_mock
   DartSecretArn:
     Type: String
+    AllowedPattern: "^arn:aws:secretsmanager:ap-northeast-2:[0-9]{12}:secret:stock-automation-paper/dart-[A-Za-z0-9]{6}$"
     Description: Secrets Manager JSON with dart_api_key (free OpenDART key)
   StartingCash:
     Type: Number
@@ -33,28 +43,28 @@ Parameters:
     Description: Separate paper capital for explicitly invoked day-trade scans
   BuyFeeBps:
     Type: Number
-    Description: Verified broker buy commission in basis points, used only by replay/tuning
+    Description: Verified broker buy commission in basis points, used by the paper ledger and replay/tuning
     MinValue: 0
     MaxValue: 100
   SellFeeBps:
     Type: Number
-    Description: Verified broker sell commission in basis points, used only by replay/tuning
+    Description: Verified broker sell commission in basis points, used by the paper ledger and replay/tuning
     MinValue: 0
     MaxValue: 100
   SellTaxBps:
     Type: Number
-    Description: Verified applicable sell tax in basis points, used only by replay/tuning
+    Description: Verified applicable sell tax in basis points, used by the paper ledger and replay/tuning
     MinValue: 0
     MaxValue: 100
   CoreScheduleState:
     Type: String
     Default: DISABLED
-    AllowedValues: [ENABLED, DISABLED]
-    Description: Keep disabled through smoke testing, then explicitly enable paper schedules
+    AllowedValues: [DISABLED]
+    Description: Integration preparation only; enablement requires a reviewed template update after all operational checks
   NxtScheduleState:
     Type: String
     Default: DISABLED
-    AllowedValues: [ENABLED, DISABLED]
+    AllowedValues: [DISABLED]
   NotificationChannel:
     Type: String
     Default: telegram
@@ -81,6 +91,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
+      BucketName: !Sub "stock-automation-paper-${AWS::AccountId}-${AWS::Region}"
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -100,6 +111,7 @@ Resources:
   TradeNotificationTopic:
     Type: AWS::SNS::Topic
     Properties:
+      TopicName: stock-automation-paper
       DisplayName: stock-automation-paper
 
   TradeNotificationEmailSubscription:
@@ -115,6 +127,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
+      TableName: stock-automation-paper
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: pk
@@ -129,15 +142,21 @@ Resources:
 
   Cluster:
     Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: stock-automation-paper
 
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
+      LogGroupName: /stock-automation/paper
       RetentionInDays: 30
 
   ExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: stock-paper-app-execution
+      Path: /stock-paper/
+      PermissionsBoundary: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/StockPaperAppExecutionBoundary"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -158,6 +177,9 @@ Resources:
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: stock-paper-app-task
+      Path: /stock-paper/
+      PermissionsBoundary: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/StockPaperAppTaskBoundary"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -169,6 +191,11 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
+              - Effect: Allow
+                Action: ec2:DescribeInstances
+                Resource: "*"
+                Condition:
+                  StringEquals: {aws:RequestedRegion: ap-northeast-2}
               - Effect: Allow
                 Action: [s3:GetObject, s3:PutObject]
                 Resource: !Sub "${ArtifactBucket.Arn}/*"
@@ -196,7 +223,10 @@ Resources:
 
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
+      Tags: [{Key: Project, Value: stock-automation-paper}]
       Family: stock-automation-paper
       Cpu: "512"
       Memory: "1024"
@@ -225,6 +255,8 @@ Resources:
             - {Name: KIWOOM_MODE, Value: demo}
             - {Name: KIWOOM_TOKEN_STORE, Value: memory}
             - {Name: LIVE_ORDER_ENABLED, Value: "0"}
+            - {Name: NAT_INSTANCE_ID, Value: !Ref NatInstanceId}
+            - {Name: EXPECTED_EGRESS_IP, Value: !Ref ExpectedEgressIp}
             - Name: PAPER_BUCKET
               Value: !Ref ArtifactBucket
             - Name: PAPER_TABLE
@@ -265,6 +297,9 @@ Resources:
   SchedulerRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: stock-paper-app-scheduler
+      Path: /stock-paper/
+      PermissionsBoundary: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/StockPaperAppSchedulerBoundary"
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -293,7 +328,7 @@ Resources:
       Target:
         Arn: !GetAtt Cluster.Arn
         RoleArn: !GetAtt SchedulerRole.Arn
-        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        RetryPolicy: {MaximumEventAgeInSeconds: 240, MaximumRetryAttempts: 1}
         EcsParameters:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
@@ -302,7 +337,7 @@ Resources:
               AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
-        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"SCAN_1450"}]}]}'
+        Input: '{"containerOverrides":[{"name":"stock-automation","environment":[{"name":"RUN_PHASE","value":"SCAN_1450"},{"name":"SCHEDULED_AT","value":"<aws.scheduler.scheduled-time>"}]}]}'
 
   ShortlistSchedule:
     Type: AWS::Scheduler::Schedule
@@ -314,7 +349,7 @@ Resources:
       Target:
         Arn: !GetAtt Cluster.Arn
         RoleArn: !GetAtt SchedulerRole.Arn
-        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        RetryPolicy: {MaximumEventAgeInSeconds: 180, MaximumRetryAttempts: 1}
         EcsParameters:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
@@ -323,7 +358,7 @@ Resources:
               AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
-        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"SHORTLIST_1510"}]}]}'
+        Input: '{"containerOverrides":[{"name":"stock-automation","environment":[{"name":"RUN_PHASE","value":"SHORTLIST_1510"},{"name":"SCHEDULED_AT","value":"<aws.scheduler.scheduled-time>"}]}]}'
 
   EntrySchedule:
     Type: AWS::Scheduler::Schedule
@@ -335,7 +370,7 @@ Resources:
       Target:
         Arn: !GetAtt Cluster.Arn
         RoleArn: !GetAtt SchedulerRole.Arn
-        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        RetryPolicy: {MaximumEventAgeInSeconds: 60, MaximumRetryAttempts: 1}
         EcsParameters:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
@@ -344,7 +379,7 @@ Resources:
               AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
-        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"ENTRY_1520"}]}]}'
+        Input: '{"containerOverrides":[{"name":"stock-automation","environment":[{"name":"RUN_PHASE","value":"ENTRY_1520"},{"name":"SCHEDULED_AT","value":"<aws.scheduler.scheduled-time>"}]}]}'
 
   NxtEntrySchedule:
     Type: AWS::Scheduler::Schedule
@@ -356,7 +391,7 @@ Resources:
       Target:
         Arn: !GetAtt Cluster.Arn
         RoleArn: !GetAtt SchedulerRole.Arn
-        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        RetryPolicy: {MaximumEventAgeInSeconds: 60, MaximumRetryAttempts: 1}
         EcsParameters:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
@@ -365,7 +400,7 @@ Resources:
               AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
-        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"ENTRY_NXT_1955"}]}]}'
+        Input: '{"containerOverrides":[{"name":"stock-automation","environment":[{"name":"RUN_PHASE","value":"ENTRY_NXT_1955"},{"name":"SCHEDULED_AT","value":"<aws.scheduler.scheduled-time>"}]}]}'
 
   EarlyExitReviewSchedule:
     Type: AWS::Scheduler::Schedule
@@ -377,7 +412,7 @@ Resources:
       Target:
         Arn: !GetAtt Cluster.Arn
         RoleArn: !GetAtt SchedulerRole.Arn
-        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        RetryPolicy: {MaximumEventAgeInSeconds: 120, MaximumRetryAttempts: 1}
         EcsParameters:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
@@ -386,7 +421,7 @@ Resources:
               AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
-        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"EXIT_0905"}]}]}'
+        Input: '{"containerOverrides":[{"name":"stock-automation","environment":[{"name":"RUN_PHASE","value":"EXIT_0905"},{"name":"SCHEDULED_AT","value":"<aws.scheduler.scheduled-time>"}]}]}'
 
   ScheduledExitSchedule:
     Type: AWS::Scheduler::Schedule
@@ -398,7 +433,7 @@ Resources:
       Target:
         Arn: !GetAtt Cluster.Arn
         RoleArn: !GetAtt SchedulerRole.Arn
-        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        RetryPolicy: {MaximumEventAgeInSeconds: 120, MaximumRetryAttempts: 1}
         EcsParameters:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
@@ -407,7 +442,7 @@ Resources:
               AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
-        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"EXIT_0910"}]}]}'
+        Input: '{"containerOverrides":[{"name":"stock-automation","environment":[{"name":"RUN_PHASE","value":"EXIT_0910"},{"name":"SCHEDULED_AT","value":"<aws.scheduler.scheduled-time>"}]}]}'
 
   WeeklyTuningSchedule:
     Type: AWS::Scheduler::Schedule
@@ -419,7 +454,7 @@ Resources:
       Target:
         Arn: !GetAtt Cluster.Arn
         RoleArn: !GetAtt SchedulerRole.Arn
-        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        RetryPolicy: {MaximumEventAgeInSeconds: 300, MaximumRetryAttempts: 1}
         EcsParameters:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
@@ -428,7 +463,7 @@ Resources:
               AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
-        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"TUNE_WEEKLY"}]}]}'
+        Input: '{"containerOverrides":[{"name":"stock-automation","environment":[{"name":"RUN_PHASE","value":"TUNE_WEEKLY"},{"name":"SCHEDULED_AT","value":"<aws.scheduler.scheduled-time>"}]}]}'
 
   MediumEntrySchedule:
     Type: AWS::Scheduler::Schedule
@@ -440,7 +475,7 @@ Resources:
       Target:
         Arn: !GetAtt Cluster.Arn
         RoleArn: !GetAtt SchedulerRole.Arn
-        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        RetryPolicy: {MaximumEventAgeInSeconds: 120, MaximumRetryAttempts: 1}
         EcsParameters:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
@@ -449,7 +484,7 @@ Resources:
               AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
-        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"MEDIUM_ENTRY_0915"}]}]}'
+        Input: '{"containerOverrides":[{"name":"stock-automation","environment":[{"name":"RUN_PHASE","value":"MEDIUM_ENTRY_0915"},{"name":"SCHEDULED_AT","value":"<aws.scheduler.scheduled-time>"}]}]}'
 
   MediumSignalSchedule:
     Type: AWS::Scheduler::Schedule
@@ -461,7 +496,7 @@ Resources:
       Target:
         Arn: !GetAtt Cluster.Arn
         RoleArn: !GetAtt SchedulerRole.Arn
-        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        RetryPolicy: {MaximumEventAgeInSeconds: 120, MaximumRetryAttempts: 1}
         EcsParameters:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
@@ -470,7 +505,7 @@ Resources:
               AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
-        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"MEDIUM_SIGNAL_1540"}]}]}'
+        Input: '{"containerOverrides":[{"name":"stock-automation","environment":[{"name":"RUN_PHASE","value":"MEDIUM_SIGNAL_1540"},{"name":"SCHEDULED_AT","value":"<aws.scheduler.scheduled-time>"}]}]}'
 
   MediumReviewSchedule:
     Type: AWS::Scheduler::Schedule
@@ -482,7 +517,7 @@ Resources:
       Target:
         Arn: !GetAtt Cluster.Arn
         RoleArn: !GetAtt SchedulerRole.Arn
-        RetryPolicy: {MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3}
+        RetryPolicy: {MaximumEventAgeInSeconds: 120, MaximumRetryAttempts: 1}
         EcsParameters:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
@@ -491,7 +526,7 @@ Resources:
               AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
-        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"MEDIUM_REVIEW_1535"}]}]}'
+        Input: '{"containerOverrides":[{"name":"stock-automation","environment":[{"name":"RUN_PHASE","value":"MEDIUM_REVIEW_1535"},{"name":"SCHEDULED_AT","value":"<aws.scheduler.scheduled-time>"}]}]}'
 
   EquitySnapshotSchedule:
     Type: AWS::Scheduler::Schedule
@@ -503,7 +538,7 @@ Resources:
       Target:
         Arn: !GetAtt Cluster.Arn
         RoleArn: !GetAtt SchedulerRole.Arn
-        RetryPolicy: {MaximumEventAgeInSeconds: 1800, MaximumRetryAttempts: 2}
+        RetryPolicy: {MaximumEventAgeInSeconds: 180, MaximumRetryAttempts: 1}
         EcsParameters:
           TaskDefinitionArn: !Ref TaskDefinition
           LaunchType: FARGATE
@@ -512,7 +547,7 @@ Resources:
               AssignPublicIp: !Ref AssignPublicIp
               Subnets: !Ref SubnetIds
               SecurityGroups: !Ref SecurityGroupIds
-        Input: '{"ContainerOverrides":[{"Name":"stock-automation","Environment":[{"Name":"RUN_PHASE","Value":"EQUITY_SNAPSHOT_1550"}]}]}'
+        Input: '{"containerOverrides":[{"name":"stock-automation","environment":[{"name":"RUN_PHASE","value":"EQUITY_SNAPSHOT_1550"},{"name":"SCHEDULED_AT","value":"<aws.scheduler.scheduled-time>"}]}]}'
 
 Outputs:
   ArtifactBucketName: {Value: !Ref ArtifactBucket}

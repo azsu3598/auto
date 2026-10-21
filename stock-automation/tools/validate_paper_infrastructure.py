@@ -11,13 +11,17 @@ import sys
 
 from cfnlint.decode import decode
 from cfnlint.runner import main as lint_main
+from botocore.session import Session
+from botocore.validate import validate_parameters
 
 
 INFRA = Path(__file__).resolve().parents[1] / "infra"
 
 
 def validate() -> None:
-    names = ["cloudformation.yaml", "paper-fixed-egress.yaml", "paper-network-iam-bootstrap.yaml"]
+    names = ["cloudformation.yaml", "paper-fixed-egress.yaml", "paper-network-iam-bootstrap.yaml",
+             "paper-app-iam-bootstrap.yaml", "paper-control.yaml", "paper-timer-verification.yaml",
+             "paper-web-dashboard.yaml", "paper-worker-verification.yaml", "paper-one-session-pilot.yaml"]
     saved_args = sys.argv
     try:
         sys.argv = ["cfn-lint", "-r", "ap-northeast-2", "-t", *(str(INFRA / n) for n in names)]
@@ -36,9 +40,45 @@ def validate() -> None:
     app = templates[names[0]]
     nat = templates[names[1]]
     iam = templates[names[2]]
+    app_iam = templates[names[3]]
+    control = templates[names[4]]
+    assert control["Parameters"]["ScheduleState"]["AllowedValues"] == ["DISABLED"]
+    function = control["Resources"]["ControlFunction"]["Properties"]
+    assert function["MemorySize"] == 128 and function["Timeout"] == 600
+    assert function["ReservedConcurrentExecutions"] == 2 and "VpcConfig" not in function
+    control_actions = {a for s in control["Resources"]["ControlBoundary"]["Properties"]["PolicyDocument"]["Statement"] for a in s["Action"]}
+    assert "ecs:RunTask" not in control_actions and "iam:PassRole" not in control_actions
+    assert "s3:DeleteObject" not in control_actions and "dynamodb:DeleteTable" not in control_actions
+    assert "kiwoom" not in json.dumps(control).lower()
+    control_schedules = [r["Properties"] for r in control["Resources"].values() if r["Type"] == "AWS::Scheduler::Schedule"]
+    assert len(control_schedules) == 6
+    for schedule in control_schedules:
+        assert schedule["State"] == {"Ref": "ScheduleState"}
+        assert schedule["Target"]["RetryPolicy"]["MaximumRetryAttempts"] == 0
+    assert "OnBootSec=120min" in json.dumps(nat)
+    assert len(app_iam["Resources"]) == 5
+    for logical, kind in (("ExecutionRole", "Execution"), ("TaskRole", "Task"), ("SchedulerRole", "Scheduler")):
+        role = app["Resources"][logical]["Properties"]
+        assert role["Path"] == "/stock-paper/"
+        assert role["PermissionsBoundary"]["Fn::Sub"].endswith(f":policy/StockPaperApp{kind}Boundary")
+    app_operator = app_iam["Resources"]["OperatorAppPolicy"]["Properties"]["PolicyDocument"]
+    operator_text = json.dumps(app_operator)
+    assert "secretsmanager:GetSecretValue" not in operator_text
+    assert "iam:CreateRole" not in operator_text and "iam:PutRolePolicy" not in operator_text
+    assert len(json.dumps(app_operator, separators=(",", ":"))) < 6144
+    deployment = app_iam["Resources"]["AppDeploymentRole"]["Properties"]["Policies"][0]["PolicyDocument"]
+    assert len(json.dumps(deployment, separators=(",", ":"))) < 10240
+    assert "iam:DeleteRolePermissionsBoundary" not in json.dumps(deployment)
+    for name in ("ExecutionBoundary", "TaskBoundary", "SchedulerBoundary"):
+        boundary = app_iam["Resources"][name]["Properties"]["PolicyDocument"]
+        assert len(json.dumps(boundary, separators=(",", ":"))) < 6144
     assert app["Parameters"]["AssignPublicIp"]["AllowedValues"] == ["DISABLED"]
+    for logical in ("ArtifactBucket", "PaperTable", "TaskDefinition"):
+        assert app["Resources"][logical]["DeletionPolicy"] == "Retain"
+        assert app["Resources"][logical]["UpdateReplacePolicy"] == "Retain"
     for parameter in ("CoreScheduleState", "NxtScheduleState"):
         assert app["Parameters"][parameter]["Default"] == "DISABLED"
+        assert app["Parameters"][parameter]["AllowedValues"] == ["DISABLED"]
     container = app["Resources"]["TaskDefinition"]["Properties"]["ContainerDefinitions"][0]
     assert container["User"] == "65534:65534" and container["ReadonlyRootFilesystem"] is True
     assert container["LinuxParameters"]["Capabilities"]["Drop"] == ["ALL"]
@@ -52,7 +92,13 @@ def validate() -> None:
     assert "dynamodb:TransactWriteItems" not in transaction_policy["Action"]
     for resource in app["Resources"].values():
         if resource["Type"] == "AWS::Scheduler::Schedule":
-            config = resource["Properties"]["Target"]["EcsParameters"]["NetworkConfiguration"]["AwsvpcConfiguration"]
+            target = resource["Properties"]["Target"]
+            payload = json.loads(target["Input"])
+            validate_parameters(payload, Session().get_service_model("ecs").shape_for("TaskOverride"))
+            env = payload["containerOverrides"][0]["environment"]
+            assert {e["name"]: e["value"] for e in env}["SCHEDULED_AT"] == "<aws.scheduler.scheduled-time>"
+            assert target["RetryPolicy"]["MaximumEventAgeInSeconds"] <= 300
+            config = target["EcsParameters"]["NetworkConfiguration"]["AwsvpcConfiguration"]
             assert config["AssignPublicIp"] == {"Ref": "AssignPublicIp"}
     types = [r["Type"] for r in nat["Resources"].values()]
     assert types.count("AWS::EC2::Instance") == types.count("AWS::EC2::EIP") == 1
@@ -80,7 +126,15 @@ def validate() -> None:
     assert "secretsmanager:" not in serialized and "AdministratorAccess" not in serialized
     operator = iam["Resources"]["OperatorNetworkPolicy"]["Properties"]["PolicyDocument"]
     assert len(json.dumps(operator, separators=(",", ":"))) < 6144
+    bootstrap_read = next(s for s in operator["Statement"] if s.get("Sid") == "InspectNetworkBootstrap")
+    assert set(bootstrap_read["Action"]) == {"cloudformation:DescribeStacks", "cloudformation:GetTemplate"}
+    assert bootstrap_read["Resource"]["Fn::Sub"].endswith(":stack/stock-automation-paper-network-iam/*")
     deployment_statements = iam["Resources"]["NetworkDeploymentRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
+    restart = next(s for s in deployment_statements if s.get("Sid") == "RestartOnlyApprovedNat")
+    assert restart["Action"] == "ec2:StartInstances"
+    assert restart["Resource"]["Fn::Sub"].endswith(":instance/*")
+    assert restart["Condition"]["StringEquals"] == {"aws:RequestedRegion": "ap-northeast-2",
+        "ec2:ResourceTag/Project": "paper-fixed-egress", "ec2:ResourceTag/Name": "stock-automation-paper-nat"}
     inspection = next(s for s in deployment_statements if s.get("Sid") == "InspectSeoulNetwork")
     # Typed CloudFormation AZ parameters require this read before resource creation.
     assert "ec2:DescribeAvailabilityZones" in inspection["Action"]

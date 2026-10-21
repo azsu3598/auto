@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import platform
 import sys
+import ipaddress
+import urllib.request
 from dataclasses import dataclass
 from typing import Callable, Mapping
 
@@ -41,6 +43,9 @@ def diagnose(
     environment: Mapping[str, str] | None = None,
     kiwoom_factory: Callable[[], object] | None = None,
     dart_factory: Callable[[str], object] | None = None,
+    egress_probe: Callable[[], str] | None = None,
+    write_probes: bool = False,
+    test_notification: bool = False,
 ) -> DiagnosticReport:
     """Validate paper-only runtime configuration without exposing secret values."""
     env = environment if environment is not None else os.environ
@@ -59,7 +64,7 @@ def diagnose(
     order_gate = env.get("KIWOOM_MCP_ALLOW_ORDERS", "").strip().lower()
     checks.append(DiagnosticCheck(
         "order_gate_disabled",
-        order_gate not in {"1", "true", "yes", "on"},
+        order_gate not in {"1", "true", "yes", "on"} and env.get("LIVE_ORDER_ENABLED", "0") == "0",
         "live-order gate must remain disabled",
     ))
     app_key = env.get("APP_KEY_MOCK", "")
@@ -103,6 +108,12 @@ def diagnose(
             "configured or not required" if notification_ok else "messenger secret ARN missing",
         ))
 
+    if online and aws:
+        egress = _check_egress(env.get("EXPECTED_EGRESS_IP", ""), egress_probe)
+        checks.append(egress)
+        if not egress.ok:
+            return DiagnosticReport(tuple(checks))
+
     if online and app_key and app_secret and mode == "demo":
         checks.append(_check_kiwoom(kiwoom_factory))
     elif online:
@@ -115,7 +126,30 @@ def diagnose(
         checks.append(DiagnosticCheck(
             "dart_read_probe", False, "skipped because OpenDART key is invalid"
         ))
+    if write_probes or test_notification:
+        if not (online and aws and all(check.ok for check in checks)):
+            checks.append(DiagnosticCheck("explicit_integration_probes", False, "healthy online AWS demo environment required"))
+        else:
+            from .integration_checks import notification_probe, storage_probes
+            if write_probes:
+                checks.extend(storage_probes(env))
+            if test_notification and all(check.ok for check in checks):
+                checks.append(notification_probe(env))
     return DiagnosticReport(tuple(checks))
+
+
+def _check_egress(expected: str, probe: Callable[[], str] | None) -> DiagnosticCheck:
+    try:
+        expected_ip = ipaddress.IPv4Address(expected)
+        if probe is None:
+            with urllib.request.urlopen("https://checkip.amazonaws.com", timeout=5) as response:
+                observed = response.read(65).decode("ascii").strip()
+        else:
+            observed = probe().strip()
+        matched = expected_ip == ipaddress.IPv4Address(observed)
+        return DiagnosticCheck("fixed_egress", matched, "matches expected IP" if matched else "egress mismatch")
+    except Exception as error:
+        return DiagnosticCheck("fixed_egress", False, f"probe failed ({type(error).__name__})")
 
 
 def _presence(name: str, value: object) -> DiagnosticCheck:

@@ -1,0 +1,59 @@
+{
+  "year": 2026,
+  "holidays": [
+    "2026-01-01",
+    "2026-02-16",
+    "2026-02-17",
+    "2026-02-18",
+    "2026-03-02",
+    "2026-05-01",
+    "2026-05-05",
+    "2026-05-25",
+    "2026-06-03",
+    "2026-07-17",
+    "2026-08-17",
+    "2026-09-24",
+    "2026-09-25",
+    "2026-10-05",
+    "2026-10-09",
+    "2026-12-25",
+    "2026-12-31"
+  ],
+  "holiday_reasons": {
+    "2026-01-01": "신정",
+    "2026-02-16": "설 연휴",
+    "2026-02-17": "설날",
+    "2026-02-18": "설 연휴",
+    "2026-03-02": "삼일절 대체공휴일",
+    "2026-05-01": "노동절",
+    "2026-05-05": "어린이날",
+    "2026-05-25": "부처님오신날 대체공휴일",
+    "2026-06-03": "전국동시지방선거",
+    "2026-07-17": "제헌절 재지정",
+    "2026-08-17": "광복절 대체공휴일",
+    "2026-09-24": "추석 연휴",
+    "2026-09-25": "추석",
+    "2026-10-05": "개천절 대체공휴일",
+    "2026-10-09": "한글날",
+    "2026-12-25": "성탄절",
+    "2026-12-31": "KRX 연말 휴장"
+  },
+  "verified_at": "2026-10-18T17:50:08.070869+09:00",
+  "sources": [
+    "https://www.kasa.go.kr/prog/plcyBrf/brief/kor/sub01_01_04/view.do?plcyBrfNo=202",
+    "https://www.mpm.go.kr/mpm/comm/newsPress/newsPressRelease/?boardId=bbs_0000000000000029&category=&cntId=4250&mode=view&pageIdx=7",
+    "https://law.krx.co.kr/las/LawBon.jsp?lawid=000109&pubno=0000017480",
+    "https://www.nec.go.kr/site/nec/ex/bbs/View.do?bcIdx=297274&cbIdx=1090",
+    "https://kind.krx.co.kr/external/dst/notice/11637/%5B%ED%95%9C%EA%B5%AD%EA%B1%B0%EB%9E%98%EC%86%8C%5D%202026%EB%85%84%20%EC%98%AC%EB%B9%BC%EB%AF%B8%EA%B3%B5%EC%8B%9C%20%EC%95%88%EB%82%B4.pdf",
+    "https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf"
+  ],
+  "automatic_schedule_eligible": true,
+  "remaining_review": "KRX special-session hours are not assumed. Dates listed in special_session_review_dates are blocked; year-end entry into 2027 is blocked. Temporary market closures require calendar maintenance.",
+  "special_session_review_dates": [
+    "2026-01-02",
+    "2026-11-19"
+  ],
+  "special_session_source": "https://www.moe.go.kr/boardCnts/viewRenew.do?boardID=294&boardSeq=100526&lev=0&m=020402&opType=N&s=moe&statusYN=W",
+  "reviewed_through": "2026-12-30",
+  "special_session_policy": "BLOCK: no shifted-hour execution. Also block closing-bet entry when the next trading session is special or outside review coverage."
+}

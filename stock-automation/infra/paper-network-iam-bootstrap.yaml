@@ -140,6 +140,15 @@ Resources:
                 Resource: !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:*/*
                 Condition:
                   StringEquals: {ec2:ResourceTag/Project: paper-fixed-egress}
+              - Sid: RestartOnlyApprovedNat
+                Effect: Allow
+                Action: ec2:StartInstances
+                Resource: !Sub arn:${AWS::Partition}:ec2:ap-northeast-2:${AWS::AccountId}:instance/*
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: ap-northeast-2
+                    ec2:ResourceTag/Project: paper-fixed-egress
+                    ec2:ResourceTag/Name: stock-automation-paper-nat
               - Sid: ManageNamedNatSchedules
                 Effect: Allow
                 Action: [scheduler:CreateSchedule, scheduler:UpdateSchedule, scheduler:DeleteSchedule, scheduler:GetSchedule, scheduler:TagResource, scheduler:UntagResource, scheduler:ListTagsForResource]
@@ -167,6 +176,10 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
+          - Sid: InspectNetworkBootstrap
+            Effect: Allow
+            Action: [cloudformation:DescribeStacks, cloudformation:GetTemplate]
+            Resource: !Sub arn:${AWS::Partition}:cloudformation:ap-northeast-2:${AWS::AccountId}:stack/stock-automation-paper-network-iam/*
           - Sid: DeployOnlyPaperNetworkStackWithApprovedRole
             Effect: Allow
             Action: [cloudformation:CreateStack, cloudformation:UpdateStack, cloudformation:CreateChangeSet]

@@ -1,0 +1,558 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "One existing NAT timer trial only; no host start, broker or trading permissions",
+  "Parameters": {
+    "NatInstanceId": {
+      "Type": "String"
+    },
+    "ArtifactBucketName": {
+      "Type": "String"
+    },
+    "TelegramSecretArn": {
+      "Type": "String"
+    },
+    "TestId": {
+      "Type": "String",
+      "AllowedPattern": "[a-f0-9]{32}"
+    },
+    "CheckAt": {
+      "Type": "String"
+    },
+    "FailSafeAt": {
+      "Type": "String"
+    },
+    "ObservationState": {
+      "Type": "String",
+      "Default": "DISABLED",
+      "AllowedValues": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "OperatorUserName": {
+      "Type": "String",
+      "Default": "stock-paper-operator",
+      "AllowedValues": [
+        "stock-paper-operator"
+      ]
+    }
+  },
+  "Resources": {
+    "Boundary": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "ManagedPolicyName": "StockPaperTimerVerifierBoundary",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ec2:StopInstances"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${NatInstanceId}"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "ec2:ResourceTag/Project": "paper-fixed-egress",
+                  "ec2:ResourceTag/Name": "stock-automation-paper-nat",
+                  "aws:RequestedRegion": "ap-northeast-2"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ec2:DescribeInstances"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/validation/timer/${TestId}.json"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "secretsmanager:GetSecretValue"
+              ],
+              "Resource": {
+                "Ref": "TelegramSecretArn"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/stock-paper-timer-verifier:*"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "ObserverRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "stock-paper-timer-verifier",
+        "Path": "/stock-paper/",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "PermissionsBoundary": {
+          "Ref": "Boundary"
+        },
+        "Policies": [
+          {
+            "PolicyName": "one-nat-one-test",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:StopInstances"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${NatInstanceId}"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "ec2:ResourceTag/Project": "paper-fixed-egress",
+                      "ec2:ResourceTag/Name": "stock-automation-paper-nat",
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:DescribeInstances"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject",
+                    "s3:PutObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/validation/timer/${TestId}.json"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "secretsmanager:GetSecretValue"
+                  ],
+                  "Resource": {
+                    "Ref": "TelegramSecretArn"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/stock-paper-timer-verifier:*"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "LogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/stock-paper-timer-verifier",
+        "RetentionInDays": 7
+      }
+    },
+    "Verifier": {
+      "Type": "AWS::Lambda::Function",
+      "DependsOn": "LogGroup",
+      "Properties": {
+        "FunctionName": "stock-paper-timer-verifier",
+        "Runtime": "python3.13",
+        "Handler": "index.handler",
+        "MemorySize": 128,
+        "Timeout": 60,
+        "ReservedConcurrentExecutions": 1,
+        "Role": {
+          "Fn::GetAtt": [
+            "ObserverRole",
+            "Arn"
+          ]
+        },
+        "Code": {
+          "ZipFile": "\"\"\"Observe one existing NAT timer trial. Never start a host or a trading task.\"\"\"\nimport json\nimport os\nfrom datetime import datetime, timezone\nimport urllib.request\n\n\ndef stamp(value):\n    result = datetime.fromisoformat(value)\n    if result.tzinfo is None:\n        raise ValueError('TIMEZONE_REQUIRED')\n    return result\n\n\ndef evaluate(event, marker, vm, env, now):\n    \"\"\"An API stop, early stop, different boot or missing event is never a pass.\"\"\"\n    if marker.get('test_id') != env['TEST_ID'] or marker.get('instance_id') != env['NAT_INSTANCE_ID']:\n        raise ValueError('WRONG_TEST_MARKER')\n    if marker.get('status') in ('PASSED', 'FAILED'):\n        return 'ALREADY_FINAL'\n    if marker.get('status') != 'ARMED':\n        raise ValueError('TEST_NOT_ARMED')\n    if vm['LaunchTime'] != stamp(marker['launch_time']):\n        raise ValueError('BOOT_CHANGED')\n    if marker.get('timer_seconds') != 7200 or marker.get('timer_active') is not True:\n        raise ValueError('TIMER_PROOF_MISSING')\n    if event.get('source') != 'aws.ec2':\n        # The independent timeout only records failure; absence of a STOPPED event\n        # is not retrospective evidence that the two-hour timer worked.\n        if event.get('action') != 'TIMEOUT' or now < stamp(env['CHECK_AT']):\n            raise ValueError('UNSUPPORTED_OR_EARLY_EVENT')\n        return 'MISSING_STOP_EVENT'\n    if (event.get('detail-type') != 'EC2 Instance State-change Notification'\n            or event.get('detail', {}).get('instance-id') != env['NAT_INSTANCE_ID']\n            or event.get('detail', {}).get('state') != 'stopped'):\n        raise ValueError('UNRELATED_EVENT')\n    event_time = stamp(event['time'])\n    elapsed = (event_time - stamp(marker['boot_time'])).total_seconds()\n    if not stamp(marker['armed_at']) <= event_time <= now:\n        raise ValueError('EVENT_OUTSIDE_TEST')\n    if not 7200 <= elapsed <= 7500:\n        return 'STOP_OUTSIDE_120_MINUTE_WINDOW'\n    if vm['State']['Name'] != 'stopped':\n        return 'HOST_NOT_STOPPED'\n    if vm.get('StateReason', {}).get('Code') != 'Client.InstanceInitiatedShutdown':\n        return 'STOP_WAS_NOT_FROM_OS'\n    return 'PASSED'\n\n\ndef notify(secrets, env, code):\n    raw = secrets.get_secret_value(SecretId=env['TELEGRAM_SECRET_ARN'])\n    credentials = json.loads(raw['SecretString'])\n    data = json.dumps({'chat_id': credentials['chat_id'],\n        'text': '[SABU \ubaa8\uc758\ud658\uacbd] 120\ubd84 \uc790\ub3d9\uc815\uc9c0 \uc2dc\ud5d8: ' + code + '. \ub9e4\ub9e4 \uc608\uc57d\uc740 \uaebc\uc838 \uc788\uc2b5\ub2c8\ub2e4.'}).encode()\n    request = urllib.request.Request('https://api.telegram.org/bot' + credentials['bot_token'] + '/sendMessage',\n        data=data, headers={'Content-Type': 'application/json'})\n    with urllib.request.urlopen(request, timeout=6) as response:\n        if json.loads(response.read()).get('ok') is not True:\n            raise ValueError('NOTIFICATION_REJECTED')\n\n\ndef handle(event, *, clients, env, now):\n    ec2, s3 = clients['ec2'], clients['s3']\n    marker = json.loads(s3.get_object(Bucket=env['PAPER_BUCKET'], Key=env['RESULT_KEY'])['Body'].read())\n    vm = ec2.describe_instances(InstanceIds=[env['NAT_INSTANCE_ID']])['Reservations'][0]['Instances'][0]\n    tags = {t['Key']: t['Value'] for t in vm.get('Tags', [])}\n    if tags.get('Project') != 'paper-fixed-egress' or tags.get('Name') != 'stock-automation-paper-nat':\n        raise ValueError('HOST_IDENTITY_CHANGED')\n    reason = evaluate(event, marker, vm, env, now)\n    if reason == 'ALREADY_FINAL':\n        return {'status': 'ALREADY_FINAL'}\n    status = 'PASSED' if reason == 'PASSED' else 'FAILED'\n    # Cleanup precedes storage and notification: neither can leave a failed trial\n    # running. A different boot was rejected above and is never stopped here.\n    if status == 'FAILED' and vm['State']['Name'] not in ('stopped', 'stopping'):\n        ec2.stop_instances(InstanceIds=[env['NAT_INSTANCE_ID']])\n    marker.update(status=status, reason=reason, checked_at=now.isoformat(),\n        event_time=event.get('time'), state_reason=vm.get('StateReason', {}).get('Code'))\n    s3.put_object(Bucket=env['PAPER_BUCKET'], Key=env['RESULT_KEY'],\n        Body=json.dumps(marker).encode(), ContentType='application/json')\n    try:\n        notify(clients['secretsmanager'], env, status)\n    except Exception:\n        print(json.dumps({'status': 'NOTIFICATION_FAILED', 'paper_only': True}))\n    return {'status': status, 'reason': reason, 'paper_only': True}\n\n\ndef handler(event, context):\n    import boto3\n    from botocore.config import Config\n    clients = {name: boto3.client(name, config=Config(connect_timeout=3, read_timeout=8,\n        retries={'max_attempts': 1})) for name in ('ec2', 's3', 'secretsmanager')}\n    try:\n        result = handle(event, clients=clients, env=os.environ, now=datetime.now(timezone.utc))\n    except Exception:\n        print(json.dumps({'status': 'TIMER_CHECK_REJECTED_OR_FAILED', 'paper_only': True}))\n        raise ValueError('TIMER_CHECK_REJECTED_OR_FAILED') from None\n    print(json.dumps(result))\n    return result\n"
+        },
+        "Environment": {
+          "Variables": {
+            "NAT_INSTANCE_ID": {
+              "Ref": "NatInstanceId"
+            },
+            "PAPER_BUCKET": {
+              "Ref": "ArtifactBucketName"
+            },
+            "TEST_ID": {
+              "Ref": "TestId"
+            },
+            "RESULT_KEY": {
+              "Fn::Sub": "validation/timer/${TestId}.json"
+            },
+            "CHECK_AT": {
+              "Fn::Sub": "${CheckAt}+00:00"
+            },
+            "TELEGRAM_SECRET_ARN": {
+              "Ref": "TelegramSecretArn"
+            }
+          }
+        }
+      }
+    },
+    "StopRule": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "Name": "stock-paper-timer-stop-observer",
+        "State": {
+          "Ref": "ObservationState"
+        },
+        "EventPattern": {
+          "source": [
+            "aws.ec2"
+          ],
+          "detail-type": [
+            "EC2 Instance State-change Notification"
+          ],
+          "detail": {
+            "instance-id": [
+              {
+                "Ref": "NatInstanceId"
+              }
+            ],
+            "state": [
+              "stopped"
+            ]
+          }
+        },
+        "Targets": [
+          {
+            "Id": "timer-result",
+            "Arn": {
+              "Fn::GetAtt": [
+                "Verifier",
+                "Arn"
+              ]
+            },
+            "RetryPolicy": {
+              "MaximumEventAgeInSeconds": 300,
+              "MaximumRetryAttempts": 2
+            }
+          }
+        ]
+      }
+    },
+    "StopPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Ref": "Verifier"
+        },
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "StopRule",
+            "Arn"
+          ]
+        },
+        "SourceAccount": {
+          "Ref": "AWS::AccountId"
+        }
+      }
+    },
+    "SchedulerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "stock-paper-timer-scheduler",
+        "Path": "/stock-paper/",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "scheduler.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  }
+                },
+                "ArnLike": {
+                  "aws:SourceArn": {
+                    "Fn::Sub": "arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/default"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "one-off-check-and-stop",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:StopInstances"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${NatInstanceId}"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "ec2:ResourceTag/Project": "paper-fixed-egress",
+                      "ec2:ResourceTag/Name": "stock-automation-paper-nat",
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "lambda:InvokeFunction"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "Verifier",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "TimeoutCheck": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-timer-timeout",
+        "State": {
+          "Ref": "ObservationState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${CheckAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Verifier",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": "{\"action\":\"TIMEOUT\"}",
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "FallbackStop": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-timer-fallback-stop",
+        "State": {
+          "Ref": "ObservationState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${FailSafeAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::Sub": "arn:${AWS::Partition}:scheduler:::aws-sdk:ec2:stopInstances"
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"InstanceIds\":[\"${NatInstanceId}\"]}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 1
+          }
+        }
+      }
+    },
+    "OperatorReviewPolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "ManagedPolicyName": "StockPaperTimerVerifierReview",
+        "Users": [
+          {
+            "Ref": "OperatorUserName"
+          }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:PutObject"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/validation/timer/${TestId}.json"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "cloudformation:DescribeStacks",
+                "cloudformation:DescribeStackEvents",
+                "cloudformation:DescribeStackResources",
+                "cloudformation:GetTemplate"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-timer-test/*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "lambda:GetFunction",
+                "lambda:GetFunctionConfiguration",
+                "lambda:InvokeFunction"
+              ],
+              "Resource": {
+                "Fn::GetAtt": [
+                  "Verifier",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "scheduler:GetSchedule"
+              ],
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "TimeoutCheck",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "FallbackStop",
+                    "Arn"
+                  ]
+                }
+              ]
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "events:DescribeRule",
+                "events:ListTargetsByRule"
+              ],
+              "Resource": {
+                "Fn::GetAtt": [
+                  "StopRule",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:DescribeLogStreams",
+                "logs:GetLogEvents",
+                "logs:FilterLogEvents"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/stock-paper-timer-verifier:*"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "VerifierArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Verifier",
+          "Arn"
+        ]
+      }
+    },
+    "ResultKey": {
+      "Value": {
+        "Fn::Sub": "validation/timer/${TestId}.json"
+      }
+    }
+  }
+}

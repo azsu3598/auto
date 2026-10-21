@@ -1,0 +1,5 @@
+.auth-gate{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:24px;background:#07111ff5}
+.auth-gate[hidden]{display:none}
+.auth-card{width:min(100%,440px);padding:32px;border:1px solid #26384a;border-radius:20px;background:#101e2e;color:#eaf1f8;text-align:center}
+.auth-card h1{font-size:24px;line-height:1.4}.auth-card p{color:#b7c5d5;line-height:1.7;margin:20px 0}
+.auth-card button{min-height:48px;min-width:140px;justify-content:center}

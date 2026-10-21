@@ -1,0 +1,821 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Paper-only bounded NAT readiness, task-aware shutdown and sanitized failure alerts; schedules disabled",
+  "Parameters": {
+    "NatInstanceId": {
+      "Type": "String",
+      "AllowedPattern": "^i-[a-f0-9]{8,17}$"
+    },
+    "ClusterArn": {
+      "Type": "String",
+      "AllowedPattern": "^arn:aws:ecs:ap-northeast-2:[0-9]{12}:cluster/stock-automation-paper$"
+    },
+    "ArtifactBucketName": {
+      "Type": "String",
+      "AllowedPattern": "^stock-automation-paper-[0-9]{12}-ap-northeast-2$"
+    },
+    "PrivateSubnetCidr": {
+      "Type": "String",
+      "Default": "10.77.32.0/24",
+      "AllowedPattern": "^10[.]77[.][0-9]{1,3}[.]0/24$"
+    },
+    "TelegramSecretArn": {
+      "Type": "String",
+      "AllowedPattern": "^arn:aws:secretsmanager:ap-northeast-2:[0-9]{12}:secret:stock-automation-paper/telegram-[A-Za-z0-9]{6}$"
+    },
+    "ControlCodeKey": {
+      "Type": "String",
+      "AllowedPattern": "^config/control/paper-control-[a-f0-9]{64}[.]zip$"
+    },
+    "ScheduleState": {
+      "Type": "String",
+      "Default": "DISABLED",
+      "AllowedValues": [
+        "DISABLED"
+      ]
+    },
+    "FailureAlertsState": {
+      "Type": "String",
+      "Default": "ENABLED",
+      "AllowedValues": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "OperatorUserName": {
+      "Type": "String",
+      "Default": "stock-paper-operator",
+      "AllowedValues": [
+        "stock-paper-operator"
+      ]
+    }
+  },
+  "Resources": {
+    "ControlBoundary": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "ManagedPolicyName": "StockPaperControlBoundary",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ec2:StartInstances",
+                "ec2:StopInstances"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${NatInstanceId}"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "ec2:ResourceTag/Project": "paper-fixed-egress",
+                  "ec2:ResourceTag/Name": "stock-automation-paper-nat",
+                  "aws:RequestedRegion": "ap-northeast-2"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ec2:DescribeInstances"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ssm:DescribeInstanceInformation",
+                "ssm:GetCommandInvocation"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ssm:SendCommand"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${NatInstanceId}"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ssm:SendCommand"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:ListTasks"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "ArnEquals": {
+                  "ecs:cluster": {
+                    "Ref": "ClusterArn"
+                  }
+                },
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:DescribeTasks",
+                "ecs:StopTask"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/stock-automation-paper/*"
+              },
+              "Condition": {
+                "ArnEquals": {
+                  "ecs:cluster": {
+                    "Ref": "ClusterArn"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:PutObject"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/control/network/current.json"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/config/calendar/current.json"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "dynamodb:PutItem"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/stock-automation-paper"
+              },
+              "Condition": {
+                "ForAllValues:StringLike": {
+                  "dynamodb:LeadingKeys": [
+                    "CONTROL#NETWORK#*",
+                    "CONTROL#ALERT#*"
+                  ]
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "secretsmanager:GetSecretValue"
+              ],
+              "Resource": {
+                "Ref": "TelegramSecretArn"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/stock-paper-control:*"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "ControlRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "stock-paper-control",
+        "Path": "/stock-paper/",
+        "PermissionsBoundary": {
+          "Ref": "ControlBoundary"
+        },
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "bounded-control-only",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:StartInstances",
+                    "ec2:StopInstances"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${NatInstanceId}"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "ec2:ResourceTag/Project": "paper-fixed-egress",
+                      "ec2:ResourceTag/Name": "stock-automation-paper-nat",
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:DescribeInstances"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ssm:DescribeInstanceInformation",
+                    "ssm:GetCommandInvocation"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ssm:SendCommand"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${NatInstanceId}"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ssm:SendCommand"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:ListTasks"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "ArnEquals": {
+                      "ecs:cluster": {
+                        "Ref": "ClusterArn"
+                      }
+                    },
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:DescribeTasks",
+                    "ecs:StopTask"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/stock-automation-paper/*"
+                  },
+                  "Condition": {
+                    "ArnEquals": {
+                      "ecs:cluster": {
+                        "Ref": "ClusterArn"
+                      }
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:PutObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/control/network/current.json"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/config/calendar/current.json"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "dynamodb:PutItem"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/stock-automation-paper"
+                  },
+                  "Condition": {
+                    "ForAllValues:StringLike": {
+                      "dynamodb:LeadingKeys": [
+                        "CONTROL#NETWORK#*",
+                        "CONTROL#ALERT#*"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "secretsmanager:GetSecretValue"
+                  ],
+                  "Resource": {
+                    "Ref": "TelegramSecretArn"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/stock-paper-control:*"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "ControlLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/stock-paper-control",
+        "RetentionInDays": 30
+      }
+    },
+    "ControlFunction": {
+      "Type": "AWS::Lambda::Function",
+      "DependsOn": "ControlLogGroup",
+      "Properties": {
+        "FunctionName": "stock-paper-control",
+        "Runtime": "python3.13",
+        "Handler": "paper_control.handler",
+        "Role": {
+          "Fn::GetAtt": [
+            "ControlRole",
+            "Arn"
+          ]
+        },
+        "MemorySize": 128,
+        "Timeout": 600,
+        "ReservedConcurrentExecutions": 2,
+        "Code": {
+          "S3Bucket": {
+            "Ref": "ArtifactBucketName"
+          },
+          "S3Key": {
+            "Ref": "ControlCodeKey"
+          }
+        },
+        "Environment": {
+          "Variables": {
+            "PAPER_BUCKET": {
+              "Ref": "ArtifactBucketName"
+            },
+            "PAPER_TABLE": "stock-automation-paper",
+            "NAT_INSTANCE_ID": {
+              "Ref": "NatInstanceId"
+            },
+            "PAPER_CLUSTER": {
+              "Ref": "ClusterArn"
+            },
+            "PRIVATE_SUBNET_CIDR": {
+              "Ref": "PrivateSubnetCidr"
+            },
+            "NOTIFICATION_SECRET_ARN": {
+              "Ref": "TelegramSecretArn"
+            }
+          }
+        }
+      }
+    },
+    "ControlAsyncPolicy": {
+      "Type": "AWS::Lambda::EventInvokeConfig",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "ControlFunction"
+        },
+        "Qualifier": "$LATEST",
+        "MaximumEventAgeInSeconds": 60,
+        "MaximumRetryAttempts": 0
+      }
+    },
+    "FailureRule": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "Name": "stock-paper-task-failures",
+        "State": {
+          "Ref": "FailureAlertsState"
+        },
+        "EventPattern": {
+          "source": [
+            "aws.ecs"
+          ],
+          "detail-type": [
+            "ECS Task State Change"
+          ],
+          "detail": {
+            "clusterArn": [
+              {
+                "Ref": "ClusterArn"
+              }
+            ],
+            "lastStatus": [
+              "STOPPED"
+            ]
+          }
+        },
+        "Targets": [
+          {
+            "Id": "bounded-control",
+            "Arn": {
+              "Fn::GetAtt": [
+                "ControlFunction",
+                "Arn"
+              ]
+            },
+            "RetryPolicy": {
+              "MaximumEventAgeInSeconds": 60,
+              "MaximumRetryAttempts": 0
+            }
+          }
+        ]
+      }
+    },
+    "FailureInvokePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "ControlFunction"
+        },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "events.amazonaws.com",
+        "SourceAccount": {
+          "Ref": "AWS::AccountId"
+        },
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "FailureRule",
+            "Arn"
+          ]
+        }
+      }
+    },
+    "ControlSchedulerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "stock-paper-control-scheduler",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "scheduler.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "only-invoke-control",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "lambda:InvokeFunction"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "ControlFunction",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "OperatorControlPolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "ManagedPolicyName": "StockPaperControlInspection",
+        "Users": [
+          {
+            "Ref": "OperatorUserName"
+          }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "lambda:InvokeFunction",
+                "lambda:GetFunctionConfiguration"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:stock-paper-control"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "cloudformation:DescribeStacks",
+                "cloudformation:DescribeStackEvents",
+                "cloudformation:DescribeStackResources",
+                "cloudformation:GetTemplate"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-control/*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:DescribeLogStreams",
+                "logs:GetLogEvents",
+                "logs:FilterLogEvents"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/stock-paper-control:*"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "MorningStart": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-control-morning-start",
+        "State": {
+          "Ref": "ScheduleState"
+        },
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "ScheduleExpression": "cron(55 8 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "ControlFunction",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "ControlSchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": "{\"action\":\"START\",\"window\":\"morning\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}",
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "MorningStop": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-control-morning-stop",
+        "State": {
+          "Ref": "ScheduleState"
+        },
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "ScheduleExpression": "cron(25 9 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "ControlFunction",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "ControlSchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": "{\"action\":\"STOP\",\"window\":\"morning\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}",
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "AfternoonStart": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-control-afternoon-start",
+        "State": {
+          "Ref": "ScheduleState"
+        },
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "ScheduleExpression": "cron(40 14 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "ControlFunction",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "ControlSchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": "{\"action\":\"START\",\"window\":\"afternoon\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}",
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "AfternoonStop": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-control-afternoon-stop",
+        "State": {
+          "Ref": "ScheduleState"
+        },
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "ScheduleExpression": "cron(10 16 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "ControlFunction",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "ControlSchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": "{\"action\":\"STOP\",\"window\":\"afternoon\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}",
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "SaturdayStart": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-control-saturday-start",
+        "State": {
+          "Ref": "ScheduleState"
+        },
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "ScheduleExpression": "cron(50 7 ? * SAT *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "ControlFunction",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "ControlSchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": "{\"action\":\"START\",\"window\":\"saturday\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}",
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "SaturdayStop": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-control-saturday-stop",
+        "State": {
+          "Ref": "ScheduleState"
+        },
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "ScheduleExpression": "cron(40 8 ? * SAT *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "ControlFunction",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "ControlSchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": "{\"action\":\"STOP\",\"window\":\"saturday\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}",
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "ControlFunctionArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "ControlFunction",
+          "Arn"
+        ]
+      }
+    },
+    "ScheduleState": {
+      "Value": {
+        "Ref": "ScheduleState"
+      }
+    }
+  }
+}

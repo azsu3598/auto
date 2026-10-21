@@ -70,6 +70,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     doctor.add_argument("--online", action="store_true")
     doctor.add_argument("--aws", action="store_true")
+    doctor.add_argument("--write-probes", action="store_true", help="explicitly verify temporary/S3 storage and isolated DynamoDB transactions")
+    doctor.add_argument("--test-notification", action="store_true", help="explicitly send one paper-environment test notification")
+    storage_check = sub.add_parser("verify-storage-contract", help="explicit isolated paper wallet/lease storage checks; no strategy or broker calls")
+    storage_check.add_argument("--confirm-isolated-probe", action="store_true", required=True)
     dashboard = sub.add_parser(
         "dashboard", help="run the local read-only paper-trading operations console"
     )
@@ -142,12 +146,16 @@ def _add_replay_arguments(parser: argparse.ArgumentParser) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.command == "aws-run":
-        from .aws_runtime import run
-
+    if args.command == "verify-storage-contract":
+        from .storage_contracts import run
         return run()
+    if args.command == "aws-run":
+        from .scheduled_execution import run_bounded
+
+        return run_bounded()
     if args.command == "doctor":
-        report = diagnose(online=args.online, aws=args.aws)
+        report = diagnose(online=args.online, aws=args.aws,
+                          write_probes=args.write_probes, test_notification=args.test_notification)
         print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
         return 0 if report.ok else 1
     if args.command == "dashboard":
@@ -293,7 +301,8 @@ def _run_day_trade_kiwoom(args) -> int:
     client = ReliableKiwoomClient(
         get_client(mode=os.getenv("KIWOOM_MODE", "mock"), timeout_seconds=20),
         KiwoomRetryPolicy(
-            min_interval_seconds=float(os.getenv("KIWOOM_MIN_INTERVAL_SECONDS", "0.25")),
+            min_interval_seconds=max(0.25, float(os.getenv("KIWOOM_MIN_INTERVAL_SECONDS", "0.25"))),
+            per_api_min_interval_seconds=1.0,
             max_attempts=int(os.getenv("KIWOOM_READ_MAX_ATTEMPTS", "4")),
         ),
     )

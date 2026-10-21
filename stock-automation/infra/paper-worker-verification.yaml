@@ -1,0 +1,1211 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Disabled one-off prewarmed empty 09:05 paper worker verification; no recurring or live schedule activation",
+  "Parameters": {
+    "NatInstanceId": {
+      "Type": "String"
+    },
+    "ArtifactBucketName": {
+      "Type": "String"
+    },
+    "TelegramSecretArn": {
+      "Type": "String"
+    },
+    "TestId": {
+      "Type": "String",
+      "AllowedPattern": "[a-f0-9]{32}"
+    },
+    "StartAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "DispatchAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "RunAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "WatchAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "FailSafeAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "ProductionTaskDefinitionArn": {
+      "Type": "String"
+    },
+    "ImageUri": {
+      "Type": "String"
+    },
+    "ClusterArn": {
+      "Type": "String"
+    },
+    "TaskExecutionRoleArn": {
+      "Type": "String"
+    },
+    "TaskRoleArn": {
+      "Type": "String"
+    },
+    "AppLogGroupName": {
+      "Type": "String"
+    },
+    "ControlFunctionArn": {
+      "Type": "String"
+    },
+    "KiwoomDemoSecretArn": {
+      "Type": "String"
+    },
+    "DartSecretArn": {
+      "Type": "String"
+    },
+    "ExpectedEgressIp": {
+      "Type": "String"
+    },
+    "TradeNotificationTopicArn": {
+      "Type": "String"
+    },
+    "SubnetIds": {
+      "Type": "CommaDelimitedList"
+    },
+    "SecurityGroupIds": {
+      "Type": "CommaDelimitedList"
+    },
+    "VerificationState": {
+      "Type": "String",
+      "Default": "DISABLED",
+      "AllowedValues": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "OperatorUserName": {
+      "Type": "String",
+      "Default": "stock-paper-operator",
+      "AllowedValues": [
+        "stock-paper-operator"
+      ]
+    },
+    "StartingCash": {
+      "Type": "String",
+      "Default": "600000"
+    },
+    "MediumStartingCash": {
+      "Type": "String",
+      "Default": "600000"
+    },
+    "DayTradeStartingCash": {
+      "Type": "String",
+      "Default": "600000"
+    },
+    "BuyFeeBps": {
+      "Type": "String",
+      "Default": "1.5"
+    },
+    "SellFeeBps": {
+      "Type": "String",
+      "Default": "1.5"
+    },
+    "SellTaxBps": {
+      "Type": "String",
+      "Default": "20"
+    }
+  },
+  "Resources": {
+    "ValidationTask": {
+      "Type": "AWS::ECS::TaskDefinition",
+      "Properties": {
+        "Family": "stock-automation-paper-validation",
+        "Cpu": "512",
+        "Memory": "1024",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE"
+        ],
+        "ExecutionRoleArn": {
+          "Ref": "TaskExecutionRoleArn"
+        },
+        "TaskRoleArn": {
+          "Ref": "TaskRoleArn"
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "stock-automation-paper"
+          }
+        ],
+        "Volumes": [
+          {
+            "Name": "runtime-tmp"
+          }
+        ],
+        "ContainerDefinitions": [
+          {
+            "Name": "stock-automation",
+            "Image": {
+              "Ref": "ImageUri"
+            },
+            "Essential": true,
+            "User": "65534:65534",
+            "ReadonlyRootFilesystem": true,
+            "LinuxParameters": {
+              "Capabilities": {
+                "Drop": [
+                  "ALL"
+                ]
+              },
+              "InitProcessEnabled": true
+            },
+            "MountPoints": [
+              {
+                "SourceVolume": "runtime-tmp",
+                "ContainerPath": "/tmp",
+                "ReadOnly": false
+              }
+            ],
+            "EntryPoint": [
+              "python"
+            ],
+            "Command": [
+              "-c",
+              "\"\"\"Prewarm one diagnostic container, then use the unchanged real-clock worker.\"\"\"\nfrom datetime import datetime, timedelta, timezone\nimport json\nimport os\nimport time\n\n\ndef wait_for_occurrence(env, *, clock, sleep, monotonic):\n    if env.get('KIWOOM_MODE') != 'demo' or env.get('LIVE_ORDER_ENABLED') != '0' or env.get('RUN_PHASE') != 'EXIT_0905':\n        raise ValueError('EMPTY_PAPER_EXIT_ONLY')\n    occurrence = datetime.fromisoformat(env['SCHEDULED_AT'])\n    if occurrence.tzinfo is None:\n        raise ValueError('TIMEZONE_REQUIRED')\n    local = occurrence.astimezone(timezone(timedelta(hours=9)))\n    if local.weekday() >= 5 or (local.hour, local.minute, local.second, local.microsecond) != (9, 5, 0, 0):\n        raise ValueError('REGULAR_0905_OCCURRENCE_REQUIRED')\n    now = clock()\n    if (occurrence - now).total_seconds() > 300:\n        raise ValueError('PREWARM_TOO_EARLY')\n    deadline = monotonic() + 300\n    while clock() < occurrence:\n        if monotonic() >= deadline:\n            raise ValueError('PREWARM_BOUND_EXCEEDED')\n        sleep(1)\n\n\ndef main():\n    try:\n        wait_for_occurrence(os.environ, clock=lambda: datetime.now(timezone.utc), sleep=time.sleep, monotonic=time.monotonic)\n    except Exception:\n        print(json.dumps({'status': 'RUN_REJECTED', 'reason': 'INVALID_PREWARM_OR_OCCURRENCE', 'paper_only': True}), flush=True)\n        return 2\n    from stock_automation.scheduled_execution import run_bounded\n    return run_bounded()\n\n\nif __name__ == '__main__':\n    raise SystemExit(main())\n"
+            ],
+            "Environment": [
+              {
+                "Name": "KIWOOM_MODE",
+                "Value": "demo"
+              },
+              {
+                "Name": "KIWOOM_TOKEN_STORE",
+                "Value": "memory"
+              },
+              {
+                "Name": "LIVE_ORDER_ENABLED",
+                "Value": "0"
+              },
+              {
+                "Name": "NAT_INSTANCE_ID",
+                "Value": {
+                  "Ref": "NatInstanceId"
+                }
+              },
+              {
+                "Name": "EXPECTED_EGRESS_IP",
+                "Value": {
+                  "Ref": "ExpectedEgressIp"
+                }
+              },
+              {
+                "Name": "PAPER_BUCKET",
+                "Value": {
+                  "Ref": "ArtifactBucketName"
+                }
+              },
+              {
+                "Name": "PAPER_TABLE",
+                "Value": "stock-automation-paper"
+              },
+              {
+                "Name": "TRADING_CALENDAR_KEY",
+                "Value": "config/calendar/current.json"
+              },
+              {
+                "Name": "STARTING_CASH",
+                "Value": {
+                  "Ref": "StartingCash"
+                }
+              },
+              {
+                "Name": "MEDIUM_STARTING_CASH",
+                "Value": {
+                  "Ref": "MediumStartingCash"
+                }
+              },
+              {
+                "Name": "DAY_TRADE_STARTING_CASH",
+                "Value": {
+                  "Ref": "DayTradeStartingCash"
+                }
+              },
+              {
+                "Name": "BUY_FEE_BPS",
+                "Value": {
+                  "Ref": "BuyFeeBps"
+                }
+              },
+              {
+                "Name": "SELL_FEE_BPS",
+                "Value": {
+                  "Ref": "SellFeeBps"
+                }
+              },
+              {
+                "Name": "SELL_TAX_BPS",
+                "Value": {
+                  "Ref": "SellTaxBps"
+                }
+              },
+              {
+                "Name": "NOTIFICATION_CHANNEL",
+                "Value": "telegram"
+              },
+              {
+                "Name": "NOTIFICATION_SECRET_ARN",
+                "Value": {
+                  "Ref": "TelegramSecretArn"
+                }
+              },
+              {
+                "Name": "SNS_NOTIFICATION_TOPIC_ARN",
+                "Value": {
+                  "Ref": "TradeNotificationTopicArn"
+                }
+              }
+            ],
+            "Secrets": [
+              {
+                "Name": "APP_KEY_MOCK",
+                "ValueFrom": {
+                  "Fn::Sub": "${KiwoomDemoSecretArn}:app_key_mock::"
+                }
+              },
+              {
+                "Name": "APP_SECRET_MOCK",
+                "ValueFrom": {
+                  "Fn::Sub": "${KiwoomDemoSecretArn}:app_secret_mock::"
+                }
+              },
+              {
+                "Name": "DART_API_KEY",
+                "ValueFrom": {
+                  "Fn::Sub": "${DartSecretArn}:dart_api_key::"
+                }
+              }
+            ],
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "AppLogGroupName"
+                },
+                "awslogs-region": {
+                  "Ref": "AWS::Region"
+                },
+                "awslogs-stream-prefix": "paper"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "Boundary": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "ManagedPolicyName": "StockPaperWorkerVerifierBoundary",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ec2:StopInstances"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${NatInstanceId}"
+              },
+              "Condition": {
+                "StringEquals": {
+                  "ec2:ResourceTag/Project": "paper-fixed-egress",
+                  "ec2:ResourceTag/Name": "stock-automation-paper-nat",
+                  "aws:RequestedRegion": "ap-northeast-2"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "iam:PassRole"
+              ],
+              "Resource": [
+                {
+                  "Ref": "TaskExecutionRoleArn"
+                },
+                {
+                  "Ref": "TaskRoleArn"
+                }
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "iam:PassedToService": "ecs-tasks.amazonaws.com"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:RunTask"
+              ],
+              "Resource": {
+                "Ref": "ValidationTask"
+              },
+              "Condition": {
+                "ArnEquals": {
+                  "ecs:cluster": {
+                    "Ref": "ClusterArn"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:DescribeClusters"
+              ],
+              "Resource": {
+                "Ref": "ClusterArn"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:ListTasks"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "ArnEquals": {
+                  "ecs:cluster": {
+                    "Ref": "ClusterArn"
+                  }
+                },
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:DescribeTasks",
+                "ecs:StopTask"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/stock-automation-paper/*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:DescribeTaskDefinition",
+                "ec2:DescribeInstances"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "cloudformation:DescribeStacks"
+              ],
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper/*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-control/*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-network/*"
+                }
+              ]
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "lambda:InvokeFunction"
+              ],
+              "Resource": {
+                "Ref": "ControlFunctionArn"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "dynamodb:GetItem",
+                "dynamodb:Scan"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/stock-automation-paper"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/validation/worker/${TestId}.json"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/control/network/current.json"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "secretsmanager:GetSecretValue"
+              ],
+              "Resource": {
+                "Ref": "TelegramSecretArn"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:GetLogEvents"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${AppLogGroupName}:*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/stock-paper-worker-verifier:*"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "VerifierRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "stock-paper-worker-verifier",
+        "Path": "/stock-paper/",
+        "PermissionsBoundary": {
+          "Ref": "Boundary"
+        },
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "one-empty-worker-test",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:StopInstances"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${NatInstanceId}"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "ec2:ResourceTag/Project": "paper-fixed-egress",
+                      "ec2:ResourceTag/Name": "stock-automation-paper-nat",
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "iam:PassRole"
+                  ],
+                  "Resource": [
+                    {
+                      "Ref": "TaskExecutionRoleArn"
+                    },
+                    {
+                      "Ref": "TaskRoleArn"
+                    }
+                  ],
+                  "Condition": {
+                    "StringEquals": {
+                      "iam:PassedToService": "ecs-tasks.amazonaws.com"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:RunTask"
+                  ],
+                  "Resource": {
+                    "Ref": "ValidationTask"
+                  },
+                  "Condition": {
+                    "ArnEquals": {
+                      "ecs:cluster": {
+                        "Ref": "ClusterArn"
+                      }
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:DescribeClusters"
+                  ],
+                  "Resource": {
+                    "Ref": "ClusterArn"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:ListTasks"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "ArnEquals": {
+                      "ecs:cluster": {
+                        "Ref": "ClusterArn"
+                      }
+                    },
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:DescribeTasks",
+                    "ecs:StopTask"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/stock-automation-paper/*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:DescribeTaskDefinition",
+                    "ec2:DescribeInstances"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "cloudformation:DescribeStacks"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-control/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-network/*"
+                    }
+                  ]
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "lambda:InvokeFunction"
+                  ],
+                  "Resource": {
+                    "Ref": "ControlFunctionArn"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "dynamodb:GetItem",
+                    "dynamodb:Scan"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/stock-automation-paper"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject",
+                    "s3:PutObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/validation/worker/${TestId}.json"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/control/network/current.json"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "secretsmanager:GetSecretValue"
+                  ],
+                  "Resource": {
+                    "Ref": "TelegramSecretArn"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:GetLogEvents"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${AppLogGroupName}:*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/stock-paper-worker-verifier:*"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "LogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/stock-paper-worker-verifier",
+        "RetentionInDays": 7
+      }
+    },
+    "Verifier": {
+      "Type": "AWS::Lambda::Function",
+      "DependsOn": "LogGroup",
+      "Properties": {
+        "FunctionName": "stock-paper-worker-verifier",
+        "Runtime": "python3.13",
+        "Handler": "index.handler",
+        "MemorySize": 128,
+        "Timeout": 900,
+        "ReservedConcurrentExecutions": 1,
+        "Role": {
+          "Fn::GetAtt": [
+            "VerifierRole",
+            "Arn"
+          ]
+        },
+        "Code": {
+          "ZipFile": "\"\"\"One empty-position 09:05 paper worker test. Never enable trading schedules.\"\"\"\nimport json\nimport os\nimport re\nimport time\nimport urllib.request\nfrom datetime import datetime, timedelta, timezone\nimport hashlib\n\nKST = timezone(timedelta(hours=9))\n\n\ndef stamp(value):\n    result = datetime.fromisoformat(value)\n    if result.tzinfo is None:\n        raise ValueError('TIMEZONE_REQUIRED')\n    return result\n\n\ndef digest(rows):\n    return hashlib.sha256(json.dumps(sorted(rows, key=lambda x: x['pk']['S']), sort_keys=True).encode()).hexdigest()\n\n\ndef error_summary(error):\n    \"\"\"Keep failure stages diagnosable without leaking raw AWS messages/ARNs.\"\"\"\n    code = getattr(error, 'response', {}).get('Error', {}).get('Code', type(error).__name__)\n    operation = getattr(error, 'operation_name', '')\n    return {k: v for k, v in {'code': code, 'operation': operation}.items()\n        if isinstance(v, str) and re.fullmatch('[A-Za-z0-9_]+', v)}\n\n\ndef require_empty_business_ledger(rows, run_at, prior_attempt_keys=()):\n    \"\"\"Preserve explicitly reviewed, completed earlier empty-test run leases.\n\n    Never delete a permanent run lease to repeat a test. A business record, an\n    unreviewed control key, a running attempt or this occurrence remains blocked.\n    \"\"\"\n    allowed = set(prior_attempt_keys)\n    for row in rows:\n        key = row['pk']['S']\n        if key.startswith('CONTROL#ALERT'):\n            continue\n        prefix = 'CONTROL#RUN#EXIT_0905#'\n        if key not in allowed or not key.startswith(prefix):\n            raise ValueError('EMPTY_BUSINESS_LEDGER_REQUIRED')\n        at = stamp(key[len(prefix):])\n        local = at.astimezone(KST)\n        if (local.date() >= run_at.astimezone(KST).date() or local.weekday() >= 5\n                or (local.hour, local.minute, local.second, local.microsecond) != (9, 5, 0, 0)\n                or row.get('status') != {'S': 'COMPLETED'}\n                or not re.fullmatch('[a-f0-9]{32}', row.get('owner', {}).get('S', ''))\n                or not at <= stamp(row['started_at']['S']) <= at + timedelta(seconds=120)\n                or not stamp(row['started_at']['S']) <= stamp(row['finished_at']['S']) <= at + timedelta(seconds=250)):\n            raise ValueError('HISTORICAL_EMPTY_ATTEMPT_NOT_VERIFIED')\n\n\ndef validate_event(event, env, now):\n    run_at = stamp(env['RUN_AT'])\n    local = run_at.astimezone(KST)\n    if local.weekday() >= 5 or (local.hour, local.minute, local.second, local.microsecond) != (9, 5, 0, 0):\n        raise ValueError('ONLY_REGULAR_0905_TEST_ALLOWED')\n    if set(event) != {'action', 'test_id'} or event['test_id'] != env['TEST_ID']:\n        raise ValueError('WRONG_VERIFICATION_EVENT')\n    if event['action'] == 'RUN':\n        begin, seconds = run_at - timedelta(minutes=3), 60\n    elif event['action'] == 'WATCH':\n        begin, seconds = stamp(env['WATCH_AT']), 300\n    else:\n        raise ValueError('UNSUPPORTED_VERIFICATION_ACTION')\n    if not begin <= now <= begin + timedelta(seconds=seconds):\n        raise ValueError('OUTSIDE_VERIFICATION_WINDOW')\n    return run_at\n\n\nclass Verifier:\n    def __init__(self, clients, env, clock=None, sleep=time.sleep, monotonic=time.monotonic):\n        self.clients, self.env = clients, env\n        self.clock = clock or (lambda: datetime.now(timezone.utc))\n        self.sleep, self.monotonic = sleep, monotonic\n        self.state = None\n\n    def save(self):\n        self.clients['s3'].put_object(Bucket=self.env['PAPER_BUCKET'], Key=self.env['RESULT_KEY'],\n            Body=json.dumps(self.state).encode(), ContentType='application/json')\n\n    def rows(self):\n        args = {'TableName': self.env['PAPER_TABLE'], 'ConsistentRead': True, 'Limit': 200}\n        rows = []\n        for _ in range(10):\n            response = self.clients['dynamodb'].scan(**args)\n            rows.extend(row for row in response.get('Items', []) if not row['pk']['S'].startswith('CONTROL#NETWORK#'))\n            if not response.get('LastEvaluatedKey'):\n                return rows\n            args['ExclusiveStartKey'] = response['LastEvaluatedKey']\n        raise ValueError('LEDGER_SCAN_INCOMPLETE')\n\n    def instance(self):\n        vm = self.clients['ec2'].describe_instances(InstanceIds=[self.env['NAT_INSTANCE_ID']])['Reservations'][0]['Instances'][0]\n        tags = {t['Key']: t['Value'] for t in vm.get('Tags', [])}\n        if tags.get('Project') != 'paper-fixed-egress' or tags.get('Name') != 'stock-automation-paper-nat':\n            raise ValueError('NAT_IDENTITY_CHANGED')\n        return vm\n\n    def controller(self):\n        response = self.clients['lambda'].invoke(FunctionName=self.env['CONTROL_FUNCTION_ARN'],\n            InvocationType='RequestResponse', Payload=json.dumps({'action': 'VERIFY_STOP', 'test_id': self.env['TEST_ID']}).encode())\n        result = json.loads(response['Payload'].read())\n        if response.get('FunctionError') or result.get('state') != 'STOP_REQUESTED' or not result.get('cleanup_complete'):\n            raise ValueError('CONTROLLER_STOP_NOT_CONFIRMED')\n\n    def tasks(self):\n        tasks = {}\n        for desired in ('RUNNING', 'STOPPED'):\n            args = {'cluster': self.env['CLUSTER_ARN'], 'desiredStatus': desired, 'maxResults': 100}\n            for _ in range(10):\n                page = self.clients['ecs'].list_tasks(**args)\n                if page['taskArns']:\n                    detail = self.clients['ecs'].describe_tasks(cluster=self.env['CLUSTER_ARN'], tasks=page['taskArns'])\n                    if detail.get('failures'):\n                        raise ValueError('TASK_INSPECTION_FAILED')\n                    tasks.update({t['taskArn']: t for t in detail['tasks']})\n                if not page.get('nextToken'):\n                    break\n                args['nextToken'] = page['nextToken']\n            else:\n                raise ValueError('TASK_SCAN_INCOMPLETE')\n        return list(tasks.values())\n\n    def preflight(self, run_at):\n        cf, ecs = self.clients['cloudformation'], self.clients['ecs']\n        app = cf.describe_stacks(StackName='stock-automation-paper')['Stacks'][0]\n        params = {p['ParameterKey']: p['ParameterValue'] for p in app['Parameters']}\n        outputs = {p['OutputKey']: p['OutputValue'] for p in app['Outputs']}\n        if app['StackStatus'] != 'UPDATE_COMPLETE' or outputs['TaskDefinitionArn'] != self.env['PRODUCTION_TASK_DEFINITION_ARN']:\n            raise ValueError('APP_REVISION_CHANGED')\n        if params['ImageUri'] != self.env['EXPECTED_IMAGE_URI'] or any(params[k] != 'DISABLED' for k in ('CoreScheduleState', 'NxtScheduleState', 'AssignPublicIp')):\n            raise ValueError('APP_ISOLATION_OR_SCHEDULE_CHANGED')\n        control = cf.describe_stacks(StackName='stock-automation-paper-control')['Stacks'][0]\n        if {p['ParameterKey']: p['ParameterValue'] for p in control['Parameters']}['ScheduleState'] != 'DISABLED':\n            raise ValueError('CONTROL_SCHEDULE_CHANGED')\n        if {p['OutputKey']: p['OutputValue'] for p in control['Outputs']}['ControlFunctionArn'] != self.env['CONTROL_FUNCTION_ARN']:\n            raise ValueError('CONTROL_FUNCTION_CHANGED')\n        network = cf.describe_stacks(StackName='stock-automation-paper-network')['Stacks'][0]\n        if {p['OutputKey']: p['OutputValue'] for p in network['Outputs']}['StartScheduleState'] != 'DISABLED':\n            raise ValueError('NETWORK_SCHEDULE_CHANGED')\n        production = ecs.describe_task_definition(taskDefinition=self.env['PRODUCTION_TASK_DEFINITION_ARN'])['taskDefinition']\n        diagnostic = ecs.describe_task_definition(taskDefinition=self.env['TASK_DEFINITION_ARN'])['taskDefinition']\n        container = production['containerDefinitions'][0]\n        trial = diagnostic['containerDefinitions'][0]\n        task_env = {p['name']: p['value'] for p in container['environment']}\n        if (container['image'] != self.env['EXPECTED_IMAGE_URI'] or container['user'] != '65534:65534'\n                or not container['readonlyRootFilesystem'] or container.get('command') != ['aws-run']\n                or task_env.get('KIWOOM_MODE') != 'demo' or task_env.get('LIVE_ORDER_ENABLED') != '0'):\n            raise ValueError('TASK_SAFETY_CHANGED')\n        if any(diagnostic.get(k) != production.get(k) for k in ('taskRoleArn', 'executionRoleArn', 'cpu', 'memory', 'networkMode', 'volumes')):\n            raise ValueError('DIAGNOSTIC_TASK_CONFIGURATION_CHANGED')\n        if {k: v for k, v in trial.items() if k not in ('entryPoint', 'command')} != {k: v for k, v in container.items() if k not in ('entryPoint', 'command')}:\n            raise ValueError('DIAGNOSTIC_CONTAINER_CHANGED')\n        if (trial.get('entryPoint') != ['python'] or len(trial.get('command', [])) != 2 or trial['command'][0] != '-c'\n                or hashlib.sha256(trial['command'][1].encode()).hexdigest() != self.env['BOOTSTRAP_SHA256']):\n            raise ValueError('PREWARM_SOURCE_CHANGED')\n        cluster = ecs.describe_clusters(clusters=[self.env['CLUSTER_ARN']])['clusters'][0]\n        if cluster['runningTasksCount'] or cluster['pendingTasksCount']:\n            raise ValueError('EXISTING_TASK_PRESENT')\n        rows = self.rows()\n        if digest(rows) != self.state['baseline_digest']:\n            raise ValueError('LEDGER_CHANGED_BEFORE_TEST')\n        # No outbox, wallet, position, decision or equity record may be touched.\n        # Reviewed earlier completed test leases remain permanent and unchanged.\n        require_empty_business_ledger(rows, run_at, self.state.get('prior_attempt_keys', ()))\n        vm = self.instance()\n        proof = json.loads(self.clients['s3'].get_object(Bucket=self.env['PAPER_BUCKET'], Key='control/network/current.json')['Body'].read())\n        start = stamp(self.env['START_AT'])\n        now = self.clock()\n        if (vm['State']['Name'] != 'running' or vm['SourceDestCheck']\n                or not start <= vm['LaunchTime'] <= run_at\n                or proof['state'] != 'READY' or proof['instance_id'] != self.env['NAT_INSTANCE_ID']\n                or stamp(proof['launch_time']) != vm['LaunchTime']\n                or not vm['LaunchTime'] <= stamp(proof['ready_at']) <= now < stamp(proof['expires_at'])\n                or stamp(proof['expires_at']) > vm['LaunchTime'] + timedelta(minutes=120)):\n            raise ValueError('CURRENT_BOOT_NOT_READY')\n        self.state['launch_time'] = vm['LaunchTime'].isoformat()\n        self.save()\n        return container['name']\n\n    def verify_task(self, task, run_at, container_name):\n        if task['lastStatus'] != 'STOPPED' or [c.get('exitCode') for c in task['containers']] != [0]:\n            raise ValueError('WORKER_NOT_SUCCESSFUL')\n        stream = 'paper/' + container_name + '/' + task['taskArn'].rsplit('/', 1)[-1]\n        lines = []\n        for _ in range(6):\n            response = self.clients['logs'].get_log_events(logGroupName=self.env['APP_LOG_GROUP'], logStreamName=stream, startFromHead=True, limit=500)\n            lines = [r['message'] for r in response['events']]\n            if lines:\n                break\n            self.sleep(2)\n        parsed = []\n        for line in lines:\n            try:\n                parsed.append(json.loads(line))\n            except ValueError:\n                continue\n        if len([p for p in parsed if p.get('status') == 'EXIT_REVIEW_COMPLETE' and p.get('results') == []]) != 1:\n            raise ValueError('EMPTY_EXIT_WORKER_LOG_NOT_VERIFIED')\n        if any(p.get('status') in ('RUN_FAILED', 'RUN_REJECTED', 'RUN_TIMED_OUT', 'SKIPPED') for p in parsed):\n            raise ValueError('WORKER_REJECTION_PRESENT')\n        occurrence = run_at.astimezone(timezone.utc).isoformat()\n        key = 'CONTROL#RUN#EXIT_0905#' + occurrence\n        lease = self.clients['dynamodb'].get_item(TableName=self.env['PAPER_TABLE'], Key={'pk': {'S': key}}, ConsistentRead=True).get('Item', {})\n        if (lease.get('status') != {'S': 'COMPLETED'} or not re.fullmatch('[a-f0-9]{32}', lease.get('owner', {}).get('S', ''))\n                or not run_at <= stamp(lease['started_at']['S']) <= run_at + timedelta(seconds=120)\n                or not stamp(lease['started_at']['S']) <= stamp(lease['finished_at']['S']) <= run_at + timedelta(seconds=250)):\n            raise ValueError('REAL_WORKER_ATTEMPT_NOT_COMPLETED')\n        if digest([row for row in self.rows() if row['pk']['S'] != key]) != self.state['baseline_digest']:\n            raise ValueError('UNEXPECTED_LEDGER_CHANGE')\n        self.state['worker_attempt_key'] = key\n        self.state['checks'] = ['pinned_image_and_schedules_off', 'empty_business_ledger', 'current_boot_ready',\n            'real_0905_worker_exit_zero', 'empty_exit_log', 'real_attempt_completed', 'no_business_ledger_change']\n        self.state['normal_time_worker_verified'] = True\n\n    def cleanup(self):\n        ecs = self.clients['ecs']\n        inventory_error = None\n        try:\n            tasks = self.tasks()\n        except Exception as error:\n            # A denied inventory read must not skip the independent bounded\n            # controller/host stop. Preserve FAILED until reconciliation.\n            inventory_error = error\n            self.state['cleanup_inventory_error'] = error_summary(error)\n            tasks = []\n        active_own_tasks = [task for task in tasks\n            if task.get('startedBy') == self.env['TEST_ID'] and task['lastStatus'] != 'STOPPED']\n        for task in active_own_tasks:\n            if task.get('startedBy') == self.env['TEST_ID'] and task['lastStatus'] != 'STOPPED':\n                ecs.stop_task(cluster=self.env['CLUSTER_ARN'], task=task['taskArn'], reason='Bounded normal-time paper verification cleanup')\n        vm = self.instance()\n        expected_launch = self.state.get('launch_time')\n        if expected_launch and stamp(expected_launch) != vm['LaunchTime']:\n            raise ValueError('CLEANUP_BOOT_CHANGED')\n        if vm['State']['Name'] == 'stopped':\n            if inventory_error or active_own_tasks:\n                raise ValueError('TASK_CLEANUP_NOT_CONFIRMED')\n            return\n        # If preflight never completed, require this test's control-start lease\n        # and the planned boot window before touching the existing NAT.\n        if not expected_launch:\n            key = 'CONTROL#NETWORK#START#manual-' + self.env['TEST_ID']\n            lease = self.clients['dynamodb'].get_item(TableName=self.env['PAPER_TABLE'], Key={'pk': {'S': key}}, ConsistentRead=True).get('Item')\n            if not lease or not stamp(self.env['START_AT']) <= vm['LaunchTime'] <= stamp(self.env['RUN_AT']):\n                raise ValueError('CLEANUP_BOOT_NOT_OWNED')\n        try:\n            self.controller()\n        finally:\n            current = self.instance()\n            if current['LaunchTime'] != vm['LaunchTime']:\n                raise ValueError('CLEANUP_BOOT_CHANGED')\n            if current['State']['Name'] != 'stopped':\n                self.clients['ec2'].stop_instances(InstanceIds=[self.env['NAT_INSTANCE_ID']])\n        deadline = self.monotonic() + 75\n        while self.monotonic() < deadline:\n            current = self.instance()\n            if current['LaunchTime'] != vm['LaunchTime']:\n                raise ValueError('CLEANUP_BOOT_CHANGED')\n            if current['State']['Name'] == 'stopped':\n                if inventory_error:\n                    raise ValueError('TASK_INVENTORY_REQUIRES_RECONCILIATION')\n                return\n            self.sleep(3)\n        raise ValueError('NAT_STOP_NOT_CONFIRMED')\n\n    def notify(self, status):\n        raw = self.clients['secretsmanager'].get_secret_value(SecretId=self.env['TELEGRAM_SECRET_ARN'])\n        credentials = json.loads(raw['SecretString'])\n        body = json.dumps({'chat_id': credentials['chat_id'],\n            'text': '[SABU PAPER] 09:05 worker test: ' + status + '. Trading schedules remain OFF.'}).encode()\n        request = urllib.request.Request('https://api.telegram.org/bot' + credentials['bot_token'] + '/sendMessage', data=body, headers={'Content-Type': 'application/json'})\n        with urllib.request.urlopen(request, timeout=6) as response:\n            if json.loads(response.read()).get('ok') is not True:\n                raise ValueError('NOTIFICATION_REJECTED')\n\n    def handle(self, event):\n        run_at = validate_event(event, self.env, self.clock())\n        self.state = json.loads(self.clients['s3'].get_object(Bucket=self.env['PAPER_BUCKET'], Key=self.env['RESULT_KEY'])['Body'].read())\n        if (self.state.get('test_id') != self.env['TEST_ID'] or self.state.get('occurrence') != self.env['RUN_AT']\n                or self.state.get('task_definition') != self.env['TASK_DEFINITION_ARN']):\n            raise ValueError('WRONG_TEST_MARKER')\n        if self.state.get('status') in ('PASSED', 'FAILED'):\n            return {'status': 'ALREADY_FINAL'}\n        reason, passed = 'UNRECONCILED_OR_MISSING_RUN', False\n        try:\n            if event['action'] != 'RUN' or self.state.get('status') != 'ARMED':\n                raise ValueError(reason)\n            self.state.update(status='RUNNING', started_at=self.clock().isoformat())\n            self.save()\n            container = self.preflight(run_at)\n            # Preserve the original scheduled occurrence. The deployed parent and\n            # worker still enforce their real clocks and normal phase deadlines.\n            response = self.clients['ecs'].run_task(cluster=self.env['CLUSTER_ARN'], taskDefinition=self.env['TASK_DEFINITION_ARN'],\n                count=1, launchType='FARGATE', platformVersion='LATEST', clientToken=self.env['TEST_ID'], startedBy=self.env['TEST_ID'],\n                networkConfiguration={'awsvpcConfiguration': {'subnets': self.env['SUBNET_IDS'].split(','),\n                    'securityGroups': self.env['SECURITY_GROUP_IDS'].split(','), 'assignPublicIp': 'DISABLED'}},\n                overrides={'containerOverrides': [{'name': container, 'environment': [\n                    {'name': 'RUN_PHASE', 'value': 'EXIT_0905'}, {'name': 'SCHEDULED_AT', 'value': self.env['RUN_AT']}]}]})\n            if response.get('failures') or len(response.get('tasks', [])) != 1:\n                raise ValueError('TASK_LAUNCH_NOT_CONFIRMED')\n            task_arn = response['tasks'][0]['taskArn']\n            self.state['task_arn'] = task_arn\n            self.save()\n            deadline = self.monotonic() + 480\n            while self.monotonic() < deadline:\n                detail = self.clients['ecs'].describe_tasks(cluster=self.env['CLUSTER_ARN'], tasks=[task_arn])\n                if detail.get('failures'):\n                    raise ValueError('TASK_INSPECTION_FAILED')\n                task = detail['tasks'][0]\n                if task['lastStatus'] == 'STOPPED':\n                    break\n                self.sleep(4)\n            else:\n                raise ValueError('TASK_BOUND_EXCEEDED')\n            self.verify_task(task, run_at, container)\n            passed, reason = True, 'NORMAL_TIME_EMPTY_EXIT_VERIFIED'\n        except Exception as error:\n            reason = str(error) if isinstance(error, ValueError) and re.fullmatch('[A-Z0-9_]+', str(error)) else type(error).__name__\n            self.state['worker_error'] = error_summary(error)\n        self.state['worker_reason'] = reason\n        try:\n            self.cleanup()\n            self.state['cleanup_complete'] = True\n        except Exception as error:\n            passed, reason = False, 'CLEANUP_REQUIRES_RECONCILIATION'\n            self.state['cleanup_complete'] = False\n            self.state['cleanup_error'] = error_summary(error)\n        status = 'PASSED' if passed else 'FAILED'\n        self.state.update(status=status, reason=reason, checked_at=self.clock().isoformat(), trading_schedules_changed=False)\n        self.save()\n        try:\n            self.notify(status)\n            self.state['notification_accepted'] = True\n        except Exception:\n            self.state['notification_accepted'] = False\n        self.save()\n        return {'status': status, 'reason': reason, 'trading_schedules_changed': False}\n\n\ndef handler(event, context):\n    import boto3\n    from botocore.config import Config\n    try:\n        validate_event(event, os.environ, datetime.now(timezone.utc))\n        clients = {name: boto3.client(name, config=Config(connect_timeout=3, read_timeout=230 if name == 'lambda' else 8,\n            retries={'max_attempts': 0 if name == 'lambda' else 1})) for name in\n            ('s3', 'ec2', 'ecs', 'dynamodb', 'cloudformation', 'lambda', 'logs', 'secretsmanager')}\n        result = Verifier(clients, os.environ).handle(event)\n    except Exception:\n        result = {'status': 'VERIFICATION_REJECTED_OR_FAILED', 'trading_schedules_changed': False}\n    print(json.dumps(result))\n    return result\n"
+        },
+        "Environment": {
+          "Variables": {
+            "PAPER_BUCKET": {
+              "Ref": "ArtifactBucketName"
+            },
+            "PAPER_TABLE": "stock-automation-paper",
+            "TEST_ID": {
+              "Ref": "TestId"
+            },
+            "RESULT_KEY": {
+              "Fn::Sub": "validation/worker/${TestId}.json"
+            },
+            "NAT_INSTANCE_ID": {
+              "Ref": "NatInstanceId"
+            },
+            "RUN_AT": {
+              "Fn::Sub": "${RunAt}+00:00"
+            },
+            "START_AT": {
+              "Fn::Sub": "${StartAt}+00:00"
+            },
+            "WATCH_AT": {
+              "Fn::Sub": "${WatchAt}+00:00"
+            },
+            "TASK_DEFINITION_ARN": {
+              "Ref": "ValidationTask"
+            },
+            "PRODUCTION_TASK_DEFINITION_ARN": {
+              "Ref": "ProductionTaskDefinitionArn"
+            },
+            "EXPECTED_IMAGE_URI": {
+              "Ref": "ImageUri"
+            },
+            "CLUSTER_ARN": {
+              "Ref": "ClusterArn"
+            },
+            "SUBNET_IDS": {
+              "Fn::Join": [
+                ",",
+                {
+                  "Ref": "SubnetIds"
+                }
+              ]
+            },
+            "SECURITY_GROUP_IDS": {
+              "Fn::Join": [
+                ",",
+                {
+                  "Ref": "SecurityGroupIds"
+                }
+              ]
+            },
+            "CONTROL_FUNCTION_ARN": {
+              "Ref": "ControlFunctionArn"
+            },
+            "APP_LOG_GROUP": {
+              "Ref": "AppLogGroupName"
+            },
+            "TELEGRAM_SECRET_ARN": {
+              "Ref": "TelegramSecretArn"
+            },
+            "BOOTSTRAP_SHA256": "6fdb44f070e97f27768f2c9926dbf323a1b773aa0496a89ade3270d4dab664f4"
+          }
+        }
+      }
+    },
+    "SchedulerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "stock-paper-worker-test-scheduler",
+        "Path": "/stock-paper/",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "scheduler.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  }
+                },
+                "ArnLike": {
+                  "aws:SourceArn": {
+                    "Fn::Sub": "arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/default"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "one-off-start-check-and-stop",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:StopInstances"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${NatInstanceId}"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "ec2:ResourceTag/Project": "paper-fixed-egress",
+                      "ec2:ResourceTag/Name": "stock-automation-paper-nat",
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "lambda:InvokeFunction"
+                  ],
+                  "Resource": [
+                    {
+                      "Ref": "ControlFunctionArn"
+                    },
+                    {
+                      "Fn::GetAtt": [
+                        "Verifier",
+                        "Arn"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "StartTest": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-worker-test-start",
+        "State": {
+          "Ref": "VerificationState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${StartAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Ref": "ControlFunctionArn"
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"VERIFY_START\",\"test_id\":\"${TestId}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "RunTest": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-worker-test-run",
+        "State": {
+          "Ref": "VerificationState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${DispatchAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Verifier",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"RUN\",\"test_id\":\"${TestId}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "WatchTest": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-worker-test-watch",
+        "State": {
+          "Ref": "VerificationState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${WatchAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Verifier",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"WATCH\",\"test_id\":\"${TestId}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "FallbackStop": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-worker-test-fallback-stop",
+        "State": {
+          "Ref": "VerificationState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${FailSafeAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::Sub": "arn:${AWS::Partition}:scheduler:::aws-sdk:ec2:stopInstances"
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"InstanceIds\":[\"${NatInstanceId}\"]}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "OperatorReviewPolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "ManagedPolicyName": "StockPaperWorkerVerifierReview",
+        "Users": [
+          {
+            "Ref": "OperatorUserName"
+          }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:ListTasks"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "ArnEquals": {
+                  "ecs:cluster": {
+                    "Ref": "ClusterArn"
+                  }
+                },
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "cloudformation:DescribeStacks",
+                "cloudformation:DescribeStackEvents",
+                "cloudformation:DescribeStackResources",
+                "cloudformation:GetTemplate"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-worker-test/*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "lambda:GetFunction",
+                "lambda:GetFunctionConfiguration"
+              ],
+              "Resource": {
+                "Fn::GetAtt": [
+                  "Verifier",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/validation/worker/${TestId}.json"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "scheduler:GetSchedule",
+                "scheduler:UpdateSchedule"
+              ],
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "StartTest",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "RunTest",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "WatchTest",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "FallbackStop",
+                    "Arn"
+                  ]
+                }
+              ]
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "iam:PassRole"
+              ],
+              "Resource": {
+                "Fn::GetAtt": [
+                  "SchedulerRole",
+                  "Arn"
+                ]
+              },
+              "Condition": {
+                "StringEquals": {
+                  "iam:PassedToService": "scheduler.amazonaws.com"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:DescribeLogStreams",
+                "logs:GetLogEvents",
+                "logs:FilterLogEvents"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/stock-paper-worker-verifier:*"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "VerifierArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Verifier",
+          "Arn"
+        ]
+      }
+    },
+    "ValidationTaskArn": {
+      "Value": {
+        "Ref": "ValidationTask"
+      }
+    },
+    "SchedulerRoleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "SchedulerRole",
+          "Arn"
+        ]
+      }
+    },
+    "ResultKey": {
+      "Value": {
+        "Fn::Sub": "validation/worker/${TestId}.json"
+      }
+    },
+    "StartTestArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "StartTest",
+          "Arn"
+        ]
+      }
+    },
+    "RunTestArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "RunTest",
+          "Arn"
+        ]
+      }
+    },
+    "WatchTestArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "WatchTest",
+          "Arn"
+        ]
+      }
+    },
+    "FallbackStopArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "FallbackStop",
+          "Arn"
+        ]
+      }
+    }
+  }
+}

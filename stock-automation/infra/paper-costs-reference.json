@@ -1,0 +1,15 @@
+{
+  "purpose": "AI paper ledger cost reference, not a confirmed personal account fee",
+  "verified_at": "2026-10-18T16:40:05.015362+09:00",
+  "user_selected": "official_general_rates",
+  "BuyFeeBps": 1.5,
+  "SellFeeBps": 1.5,
+  "SellTaxBps": 20,
+  "commission_percent": 0.015,
+  "sell_tax_percent": 0.2,
+  "scope": "KRX ordinary cash shares (KOSPI/KOSDAQ); promotions, ETFs and other products excluded",
+  "sources": [
+    "https://www1.kiwoom.com/h/domestic/stock/VStockMainView?dummyVal=0",
+    "https://openapi2.kiwoom.com/intro?dummyVal=0"
+  ]
+}

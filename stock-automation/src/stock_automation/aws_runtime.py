@@ -1639,8 +1639,17 @@ def _run_tuning(*, s3, notifier, bucket: str, now: datetime) -> int:
     return 0
 
 
-def run() -> int:
+def _run_worker() -> int:
     """ECS entrypoint for scheduled analysis and paper execution only."""
+    from .scheduled_execution import ScheduleRejected, execution_deadline
+
+    # Repeat validation in the worker: process startup may itself be delayed.
+    try:
+        execution_deadline(os.environ, datetime.now(KST))
+    except ScheduleRejected as error:
+        print(json.dumps({"status": "RUN_REJECTED", "reason": str(error), "paper_only": True}))
+        return 2
+
     import boto3
     from kiwoom import get_client
 
@@ -1685,7 +1694,8 @@ def run() -> int:
     client = ReliableKiwoomClient(
         raw_client,
         KiwoomRetryPolicy(
-            min_interval_seconds=float(os.getenv("KIWOOM_MIN_INTERVAL_SECONDS", "0.25")),
+            min_interval_seconds=max(0.25, float(os.getenv("KIWOOM_MIN_INTERVAL_SECONDS", "0.25"))),
+            per_api_min_interval_seconds=1.0,
             max_attempts=int(os.getenv("KIWOOM_READ_MAX_ATTEMPTS", "4")),
         ),
     )
@@ -1865,5 +1875,57 @@ def run() -> int:
     return 0
 
 
+def run() -> int:
+    """Fence stale networks, unreviewed sessions and repeated attempts first."""
+    from .scheduled_execution import ScheduleRejected, execution_deadline
+    from .runtime_safety import RuntimeRejected, acquire_attempt, finish_attempt, verify_network
+    import urllib.request
+
+    now = datetime.now(KST)
+    try:
+        execution_deadline(os.environ, now)
+    except ScheduleRejected as error:
+        print(json.dumps({"status": "RUN_REJECTED", "reason": str(error), "paper_only": True}))
+        return 2
+    phase = os.getenv("RUN_PHASE", "ENTRY_1520")
+    attempt = None
+    try:
+        import boto3
+        s3, ec2, ddb = (boto3.client(name) for name in ("s3", "ec2", "dynamodb"))
+        bucket, table = _require("PAPER_BUCKET"), _require("PAPER_TABLE")
+        calendar = TradingCalendar.from_dict(_load_json(s3, bucket, _require("TRADING_CALENDAR_KEY")))
+        if phase == "TUNE_WEEKLY":
+            if (not calendar.automatic_schedule_eligible or calendar.reviewed_through is None
+                    or now.date() > calendar.reviewed_through):
+                raise RuntimeRejected("CALENDAR_NOT_APPROVED")
+        else:
+            calendar.require_automatic_session(now.date(), check_next_session=phase == "ENTRY_1520")
+        def observed_egress():
+            with urllib.request.urlopen("https://checkip.amazonaws.com", timeout=5) as response:
+                return response.read(65).decode("ascii").strip()
+        verify_network(s3=s3, ec2=ec2, env=os.environ, now=datetime.now(KST), egress_probe=observed_egress)
+        # Repeat the time check after AWS/HTTPS round trips, before acquiring a lease.
+        execution_deadline(os.environ, datetime.now(KST))
+        occurrence = os.getenv("SCHEDULED_AT") or now.isoformat()
+        attempt = acquire_attempt(ddb, table, phase, occurrence, datetime.now(KST))
+        status = _run_worker()
+    except (RuntimeRejected, ScheduleRejected) as error:
+        print(json.dumps({"status": "RUN_REJECTED", "reason": str(error), "paper_only": True}))
+        status = 2
+    except Exception as error:
+        print(json.dumps({"status": "RUN_FAILED", "reason": type(error).__name__, "paper_only": True}))
+        status = 1
+    if attempt:
+        try:
+            finish_attempt(ddb, table, attempt, "COMPLETED" if status == 0 else "RECONCILE_REQUIRED", datetime.now(KST))
+        except Exception:
+            print(json.dumps({"status": "RUN_FAILED", "reason": "ATTEMPT_FINISH_REQUIRES_RECONCILIATION", "paper_only": True}))
+            return 1
+    return status
+
+
 if __name__ == "__main__":
-    raise SystemExit(run())
+    import sys
+    from .scheduled_execution import run_bounded
+
+    raise SystemExit(run() if sys.argv[1:] == ["--bounded-worker"] else run_bounded())

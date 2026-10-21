@@ -1,0 +1,1749 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "One dated paper closing-bet session after independent morning PASS; no regular schedule changes",
+  "Parameters": {
+    "NatInstanceId": {
+      "Type": "String"
+    },
+    "ArtifactBucketName": {
+      "Type": "String"
+    },
+    "TelegramSecretArn": {
+      "Type": "String"
+    },
+    "ImageUri": {
+      "Type": "String"
+    },
+    "ClusterArn": {
+      "Type": "String"
+    },
+    "TaskExecutionRoleArn": {
+      "Type": "String"
+    },
+    "TaskRoleArn": {
+      "Type": "String"
+    },
+    "AppLogGroupName": {
+      "Type": "String"
+    },
+    "ControlFunctionArn": {
+      "Type": "String"
+    },
+    "KiwoomDemoSecretArn": {
+      "Type": "String"
+    },
+    "DartSecretArn": {
+      "Type": "String"
+    },
+    "ExpectedEgressIp": {
+      "Type": "String"
+    },
+    "TradeNotificationTopicArn": {
+      "Type": "String"
+    },
+    "SubnetIds": {
+      "Type": "CommaDelimitedList"
+    },
+    "SecurityGroupIds": {
+      "Type": "CommaDelimitedList"
+    },
+    "OperatorUserName": {
+      "Type": "String",
+      "Default": "stock-paper-operator",
+      "AllowedValues": [
+        "stock-paper-operator"
+      ]
+    },
+    "StartingCash": {
+      "Type": "String",
+      "Default": "600000"
+    },
+    "MediumStartingCash": {
+      "Type": "String",
+      "Default": "600000"
+    },
+    "DayTradeStartingCash": {
+      "Type": "String",
+      "Default": "600000"
+    },
+    "BuyFeeBps": {
+      "Type": "String",
+      "Default": "1.5"
+    },
+    "SellFeeBps": {
+      "Type": "String",
+      "Default": "1.5"
+    },
+    "SellTaxBps": {
+      "Type": "String",
+      "Default": "20"
+    },
+    "PilotId": {
+      "Type": "String",
+      "AllowedPattern": "[a-f0-9]{32}"
+    },
+    "PlanKey": {
+      "Type": "String"
+    },
+    "PlanSha256": {
+      "Type": "String",
+      "AllowedPattern": "[a-f0-9]{64}"
+    },
+    "MorningResultKey": {
+      "Type": "String"
+    },
+    "EntryDate": {
+      "Type": "String"
+    },
+    "ExitDate": {
+      "Type": "String"
+    },
+    "PilotState": {
+      "Type": "String",
+      "Default": "DISABLED",
+      "AllowedValues": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "RegularScheduleArns": {
+      "Type": "CommaDelimitedList"
+    },
+    "GateScheduleAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "StartPmScheduleAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "Scan1450ScheduleAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "Shortlist1510ScheduleAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "Entry1520ScheduleAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "EquitySnapshot1550ScheduleAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "StopPmScheduleAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "ReportPmScheduleAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "StartAmScheduleAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "Exit0905ScheduleAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "Exit0910ScheduleAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "StopAmScheduleAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "ReportAmScheduleAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "FallbackPmScheduleAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    },
+    "FallbackAmScheduleAt": {
+      "Type": "String",
+      "AllowedPattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    }
+  },
+  "Resources": {
+    "PilotTask": {
+      "Type": "AWS::ECS::TaskDefinition",
+      "Properties": {
+        "Family": "stock-automation-paper-pilot",
+        "Cpu": "512",
+        "Memory": "1024",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE"
+        ],
+        "ExecutionRoleArn": {
+          "Ref": "TaskExecutionRoleArn"
+        },
+        "TaskRoleArn": {
+          "Ref": "TaskRoleArn"
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "stock-automation-paper"
+          }
+        ],
+        "Volumes": [
+          {
+            "Name": "runtime-tmp"
+          }
+        ],
+        "ContainerDefinitions": [
+          {
+            "Name": "stock-automation",
+            "Image": {
+              "Ref": "ImageUri"
+            },
+            "Essential": true,
+            "User": "65534:65534",
+            "ReadonlyRootFilesystem": true,
+            "LinuxParameters": {
+              "Capabilities": {
+                "Drop": [
+                  "ALL"
+                ]
+              },
+              "InitProcessEnabled": true
+            },
+            "MountPoints": [
+              {
+                "SourceVolume": "runtime-tmp",
+                "ContainerPath": "/tmp",
+                "ReadOnly": false
+              }
+            ],
+            "EntryPoint": [
+              "python"
+            ],
+            "Command": [
+              "-c",
+              "\"\"\"Prewarm a dated paper phase without changing the production clock guards.\"\"\"\nfrom datetime import datetime, timedelta, timezone\nimport json\nimport os\nimport time\n\nPHASE_TIMES = {'SCAN_1450': (14, 50), 'SHORTLIST_1510': (15, 10),\n    'ENTRY_1520': (15, 20), 'EQUITY_SNAPSHOT_1550': (15, 50),\n    'EXIT_0905': (9, 5), 'EXIT_0910': (9, 10)}\nKST = timezone(timedelta(hours=9))\n\n\ndef wait_for_occurrence(env, *, clock, sleep, monotonic):\n    phase = env.get('RUN_PHASE')\n    if env.get('KIWOOM_MODE') != 'demo' or env.get('LIVE_ORDER_ENABLED') != '0' or phase not in PHASE_TIMES:\n        raise ValueError('DATED_PAPER_PHASE_ONLY')\n    occurrence = datetime.fromisoformat(env['SCHEDULED_AT'])\n    dispatch = datetime.fromisoformat(env['DISPATCHED_AT'])\n    if occurrence.tzinfo is None or dispatch.tzinfo is None:\n        raise ValueError('TIMEZONE_REQUIRED')\n    local = occurrence.astimezone(KST)\n    day = env['PILOT_EXIT_DATE'] if phase.startswith('EXIT_') else env['PILOT_ENTRY_DATE']\n    if (local.date().isoformat() != day or local.weekday() >= 5\n            or (local.hour, local.minute) != PHASE_TIMES[phase] or local.second or local.microsecond\n            or not 120 <= (occurrence - dispatch).total_seconds() <= 180):\n        raise ValueError('WRONG_PILOT_OCCURRENCE')\n    now = clock()\n    if now < dispatch or not -120 <= (occurrence - now).total_seconds() <= 300:\n        raise ValueError('OUTSIDE_PREWARM_WINDOW')\n    deadline = monotonic() + 300\n    while clock() < occurrence:\n        if monotonic() >= deadline:\n            raise ValueError('PREWARM_BOUND_EXCEEDED')\n        sleep(1)\n    # run_bounded independently enforces the original, phase-specific late limit.\n\n\ndef main():\n    try:\n        wait_for_occurrence(os.environ, clock=lambda: datetime.now(timezone.utc), sleep=time.sleep, monotonic=time.monotonic)\n    except Exception:\n        print(json.dumps({'status': 'RUN_REJECTED', 'reason': 'INVALID_PILOT_OCCURRENCE', 'paper_only': True}), flush=True)\n        return 2\n    from stock_automation.scheduled_execution import run_bounded\n    return run_bounded()\n\n\nif __name__ == '__main__':\n    raise SystemExit(main())\n"
+            ],
+            "Environment": [
+              {
+                "Name": "KIWOOM_MODE",
+                "Value": "demo"
+              },
+              {
+                "Name": "KIWOOM_TOKEN_STORE",
+                "Value": "memory"
+              },
+              {
+                "Name": "LIVE_ORDER_ENABLED",
+                "Value": "0"
+              },
+              {
+                "Name": "NAT_INSTANCE_ID",
+                "Value": {
+                  "Ref": "NatInstanceId"
+                }
+              },
+              {
+                "Name": "EXPECTED_EGRESS_IP",
+                "Value": {
+                  "Ref": "ExpectedEgressIp"
+                }
+              },
+              {
+                "Name": "PAPER_BUCKET",
+                "Value": {
+                  "Ref": "ArtifactBucketName"
+                }
+              },
+              {
+                "Name": "PAPER_TABLE",
+                "Value": "stock-automation-paper"
+              },
+              {
+                "Name": "TRADING_CALENDAR_KEY",
+                "Value": "config/calendar/current.json"
+              },
+              {
+                "Name": "STARTING_CASH",
+                "Value": {
+                  "Ref": "StartingCash"
+                }
+              },
+              {
+                "Name": "MEDIUM_STARTING_CASH",
+                "Value": {
+                  "Ref": "MediumStartingCash"
+                }
+              },
+              {
+                "Name": "DAY_TRADE_STARTING_CASH",
+                "Value": {
+                  "Ref": "DayTradeStartingCash"
+                }
+              },
+              {
+                "Name": "BUY_FEE_BPS",
+                "Value": {
+                  "Ref": "BuyFeeBps"
+                }
+              },
+              {
+                "Name": "SELL_FEE_BPS",
+                "Value": {
+                  "Ref": "SellFeeBps"
+                }
+              },
+              {
+                "Name": "SELL_TAX_BPS",
+                "Value": {
+                  "Ref": "SellTaxBps"
+                }
+              },
+              {
+                "Name": "NOTIFICATION_CHANNEL",
+                "Value": "telegram"
+              },
+              {
+                "Name": "NOTIFICATION_SECRET_ARN",
+                "Value": {
+                  "Ref": "TelegramSecretArn"
+                }
+              },
+              {
+                "Name": "SNS_NOTIFICATION_TOPIC_ARN",
+                "Value": {
+                  "Ref": "TradeNotificationTopicArn"
+                }
+              },
+              {
+                "Name": "PILOT_ENTRY_DATE",
+                "Value": {
+                  "Ref": "EntryDate"
+                }
+              },
+              {
+                "Name": "PILOT_EXIT_DATE",
+                "Value": {
+                  "Ref": "ExitDate"
+                }
+              }
+            ],
+            "Secrets": [
+              {
+                "Name": "APP_KEY_MOCK",
+                "ValueFrom": {
+                  "Fn::Sub": "${KiwoomDemoSecretArn}:app_key_mock::"
+                }
+              },
+              {
+                "Name": "APP_SECRET_MOCK",
+                "ValueFrom": {
+                  "Fn::Sub": "${KiwoomDemoSecretArn}:app_secret_mock::"
+                }
+              },
+              {
+                "Name": "DART_API_KEY",
+                "ValueFrom": {
+                  "Fn::Sub": "${DartSecretArn}:dart_api_key::"
+                }
+              }
+            ],
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "AppLogGroupName"
+                },
+                "awslogs-region": {
+                  "Ref": "AWS::Region"
+                },
+                "awslogs-stream-prefix": "paper"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "Boundary": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "ManagedPolicyName": "StockPaperPilotBoundary",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:RunTask"
+              ],
+              "Resource": {
+                "Ref": "PilotTask"
+              },
+              "Condition": {
+                "ArnEquals": {
+                  "ecs:cluster": {
+                    "Ref": "ClusterArn"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "iam:PassRole"
+              ],
+              "Resource": [
+                {
+                  "Ref": "TaskExecutionRoleArn"
+                },
+                {
+                  "Ref": "TaskRoleArn"
+                }
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "iam:PassedToService": "ecs-tasks.amazonaws.com"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:DescribeClusters"
+              ],
+              "Resource": {
+                "Ref": "ClusterArn"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:DescribeTasks",
+                "ecs:StopTask"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/stock-automation-paper/*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:DescribeTaskDefinition",
+                "ec2:DescribeInstances"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "cloudformation:DescribeStacks"
+              ],
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper/*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-control/*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-network/*"
+                }
+              ]
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "scheduler:GetSchedule"
+              ],
+              "Resource": {
+                "Ref": "RegularScheduleArns"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "lambda:InvokeFunction"
+              ],
+              "Resource": {
+                "Ref": "ControlFunctionArn"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "dynamodb:GetItem",
+                "dynamodb:Scan"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/stock-automation-paper"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/validation/pilot/${PilotId}/*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject"
+              ],
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${PlanKey}"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${MorningResultKey}"
+                }
+              ]
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "secretsmanager:GetSecretValue"
+              ],
+              "Resource": {
+                "Ref": "TelegramSecretArn"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/stock-paper-pilot:*"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "PilotRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "stock-paper-pilot",
+        "Path": "/stock-paper/",
+        "PermissionsBoundary": {
+          "Ref": "Boundary"
+        },
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "one-dated-paper-session",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:RunTask"
+                  ],
+                  "Resource": {
+                    "Ref": "PilotTask"
+                  },
+                  "Condition": {
+                    "ArnEquals": {
+                      "ecs:cluster": {
+                        "Ref": "ClusterArn"
+                      }
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "iam:PassRole"
+                  ],
+                  "Resource": [
+                    {
+                      "Ref": "TaskExecutionRoleArn"
+                    },
+                    {
+                      "Ref": "TaskRoleArn"
+                    }
+                  ],
+                  "Condition": {
+                    "StringEquals": {
+                      "iam:PassedToService": "ecs-tasks.amazonaws.com"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:DescribeClusters"
+                  ],
+                  "Resource": {
+                    "Ref": "ClusterArn"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:DescribeTasks",
+                    "ecs:StopTask"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/stock-automation-paper/*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:DescribeTaskDefinition",
+                    "ec2:DescribeInstances"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "cloudformation:DescribeStacks"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-control/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-network/*"
+                    }
+                  ]
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "scheduler:GetSchedule"
+                  ],
+                  "Resource": {
+                    "Ref": "RegularScheduleArns"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "lambda:InvokeFunction"
+                  ],
+                  "Resource": {
+                    "Ref": "ControlFunctionArn"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "dynamodb:GetItem",
+                    "dynamodb:Scan"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/stock-automation-paper"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject",
+                    "s3:PutObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/validation/pilot/${PilotId}/*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${PlanKey}"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${MorningResultKey}"
+                    }
+                  ]
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "secretsmanager:GetSecretValue"
+                  ],
+                  "Resource": {
+                    "Ref": "TelegramSecretArn"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/stock-paper-pilot:*"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "LogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/stock-paper-pilot",
+        "RetentionInDays": 7
+      }
+    },
+    "Pilot": {
+      "Type": "AWS::Lambda::Function",
+      "DependsOn": "LogGroup",
+      "Properties": {
+        "FunctionName": "stock-paper-pilot",
+        "Runtime": "python3.13",
+        "Handler": "index.handler",
+        "MemorySize": 128,
+        "Timeout": 900,
+        "ReservedConcurrentExecutions": 2,
+        "Role": {
+          "Fn::GetAtt": [
+            "PilotRole",
+            "Arn"
+          ]
+        },
+        "Code": {
+          "ZipFile": "\"\"\"One dated closing-bet paper session, gated on an independent morning PASS.\n\nAll schedules are one-off. No schedule mutation, broker orders, or ledger writes\nare available to this controller. The unchanged paper worker owns simulated cash.\n\"\"\"\nimport hashlib\nimport json\nimport os\nimport re\nimport time\nimport urllib.request\nfrom datetime import datetime, timedelta, timezone\n\nKST = timezone(timedelta(hours=9))\nPHASE_TIMES = {'SCAN_1450': (14, 50), 'SHORTLIST_1510': (15, 10),\n    'ENTRY_1520': (15, 20), 'EQUITY_SNAPSHOT_1550': (15, 50),\n    'EXIT_0905': (9, 5), 'EXIT_0910': (9, 10)}\n\n\ndef stamp(value):\n    result = datetime.fromisoformat(value)\n    if result.tzinfo is None:\n        raise ValueError('TIMEZONE_REQUIRED')\n    return result\n\n\ndef digest(rows):\n    return hashlib.sha256(json.dumps(sorted(rows, key=lambda r: r['pk']['S']), sort_keys=True).encode()).hexdigest()\n\n\ndef validate_plan(plan, now=None):\n    entry, exit_day = plan['entry_date'], plan['exit_date']\n    if exit_day <= entry or plan['starting_cash'] != '600000' or plan['paper_only'] is not True:\n        raise ValueError('INVALID_PAPER_PLAN')\n    expected = {'GATE', 'START_PM', 'STOP_PM', 'START_AM', 'STOP_AM', 'REPORT_PM', 'REPORT_AM', *PHASE_TIMES}\n    if set(plan['events']) != expected:\n        raise ValueError('EXACT_PILOT_EVENTS_REQUIRED')\n    for name, item in plan['events'].items():\n        dispatch = stamp(item['dispatch_at']).astimezone(KST)\n        day = exit_day if name.endswith('_AM') or name.startswith('EXIT_') else entry\n        if dispatch.date().isoformat() != day or dispatch.weekday() >= 5 or dispatch.second or dispatch.microsecond:\n            raise ValueError('INVALID_PILOT_DATE')\n        if name in PHASE_TIMES:\n            occurrence = stamp(item['scheduled_at']).astimezone(KST)\n            if (occurrence.date().isoformat() != day or (occurrence.hour, occurrence.minute) != PHASE_TIMES[name]\n                    or occurrence.second or occurrence.microsecond\n                    or (occurrence - dispatch).total_seconds() != (120 if name == 'EXIT_0910' else 180)):\n                raise ValueError('INVALID_PHASE_OCCURRENCE')\n        else:\n            exact = {'GATE': (9, 25), 'START_PM': (14, 40), 'STOP_PM': (16, 10),\n                'START_AM': (8, 55), 'STOP_AM': (9, 25), 'REPORT_PM': (16, 15), 'REPORT_AM': (9, 40)}[name]\n            if (dispatch.hour, dispatch.minute) != exact:\n                raise ValueError('INVALID_CONTROL_OCCURRENCE')\n    if now is not None and not stamp(plan['events']['GATE']['dispatch_at']) <= now <= stamp(plan['events']['REPORT_AM']['dispatch_at']) + timedelta(minutes=5):\n        raise ValueError('OUTSIDE_PILOT_DATES')\n\n\nclass Pilot:\n    def __init__(self, clients, env, clock=None, sleep=time.sleep, monotonic=time.monotonic):\n        self.clients, self.env = clients, env\n        self.clock = clock or (lambda: datetime.now(timezone.utc))\n        self.sleep, self.monotonic = sleep, monotonic\n\n    def get(self, key, optional=False):\n        try:\n            return json.loads(self.clients['s3'].get_object(Bucket=self.env['PAPER_BUCKET'], Key=key)['Body'].read())\n        except Exception as error:\n            if optional and getattr(error, 'response', {}).get('Error', {}).get('Code') in ('NoSuchKey', '404'):\n                return None\n            raise\n\n    def key(self, name):\n        return self.env['RESULT_PREFIX'] + '/' + name + '.json'\n\n    def save(self, name, value, create=False):\n        args = {'Bucket': self.env['PAPER_BUCKET'], 'Key': self.key(name),\n            'Body': json.dumps(value).encode(), 'ContentType': 'application/json'}\n        if create:\n            args['IfNoneMatch'] = '*'\n        self.clients['s3'].put_object(**args)\n\n    def rows(self):\n        args = {'TableName': self.env['PAPER_TABLE'], 'ConsistentRead': True, 'Limit': 200}\n        rows = []\n        for _ in range(10):\n            response = self.clients['dynamodb'].scan(**args)\n            rows.extend(response.get('Items', []))\n            if not response.get('LastEvaluatedKey'):\n                return rows\n            args['ExclusiveStartKey'] = response['LastEvaluatedKey']\n        raise ValueError('LEDGER_SCAN_INCOMPLETE')\n\n    def proof(self, plan):\n        proof = self.get(plan['morning_result_key'])\n        if (proof.get('status') != 'PASSED' or proof.get('normal_time_worker_verified') is not True\n                or proof.get('cleanup_complete') is not True or proof.get('test_id') != plan['morning_test_id']\n                or proof.get('occurrence') != plan['morning_occurrence']\n                or proof.get('task_definition') != plan['morning_task_definition']\n                or stamp(proof['checked_at']) > self.clock()\n                or stamp(proof['checked_at']) < stamp(plan['morning_occurrence'])):\n            raise ValueError('MORNING_PASS_NOT_VERIFIED')\n        key = 'CONTROL#RUN#EXIT_0905#' + stamp(plan['morning_occurrence']).astimezone(timezone.utc).isoformat()\n        lease = self.clients['dynamodb'].get_item(TableName=self.env['PAPER_TABLE'], Key={'pk': {'S': key}}, ConsistentRead=True).get('Item', {})\n        at = stamp(plan['morning_occurrence'])\n        if (proof.get('worker_attempt_key') != key or lease.get('status') != {'S': 'COMPLETED'}\n                or not re.fullmatch('[a-f0-9]{32}', lease.get('owner', {}).get('S', ''))\n                or not at <= stamp(lease['started_at']['S']) <= at + timedelta(seconds=120)\n                or not stamp(lease['started_at']['S']) <= stamp(lease['finished_at']['S']) <= at + timedelta(seconds=250)):\n            raise ValueError('MORNING_ATTEMPT_NOT_VERIFIED')\n        return proof, key\n\n    def configuration(self, plan):\n        for stack_name, expected in plan['stack_parameters'].items():\n            stack = self.clients['cloudformation'].describe_stacks(StackName=stack_name)['Stacks'][0]\n            if stack['StackStatus'] not in ('CREATE_COMPLETE', 'UPDATE_COMPLETE'):\n                raise ValueError('STACK_NOT_STABLE')\n            actual = {p['ParameterKey']: p['ParameterValue'] for p in stack['Parameters']}\n            if any(actual.get(k) != v for k, v in expected.items()):\n                raise ValueError('APP_CONFIGURATION_CHANGED')\n        for schedule in plan['regular_schedules']:\n            actual = self.clients['scheduler'].get_schedule(Name=schedule['name'], GroupName='default')\n            if actual['Arn'] != schedule['arn'] or actual['State'] != 'DISABLED':\n                raise ValueError('REGULAR_SCHEDULE_NOT_DISABLED')\n        ecs = self.clients['ecs']\n        production = ecs.describe_task_definition(taskDefinition=plan['production_task_definition'])['taskDefinition']\n        trial = ecs.describe_task_definition(taskDefinition=self.env['TASK_DEFINITION_ARN'])['taskDefinition']\n        if digest_task(production) != plan['production_task_hash']:\n            raise ValueError('PRODUCTION_TASK_CHANGED')\n        for name in ('taskRoleArn', 'executionRoleArn', 'cpu', 'memory', 'networkMode', 'volumes'):\n            if trial.get(name) != production.get(name):\n                raise ValueError('PILOT_ISOLATION_CHANGED')\n        original, warm = production['containerDefinitions'][0], trial['containerDefinitions'][0]\n        a = {k: v for k, v in original.items() if k not in ('command', 'entryPoint', 'environment')}\n        b = {k: v for k, v in warm.items() if k not in ('command', 'entryPoint', 'environment')}\n        env = {x['name']: x['value'] for x in warm['environment']}\n        expected_env = {x['name']: x['value'] for x in original['environment']}\n        expected_env.update(PILOT_ENTRY_DATE=plan['entry_date'], PILOT_EXIT_DATE=plan['exit_date'])\n        if (a != b or env != expected_env or env['KIWOOM_MODE'] != 'demo' or env['LIVE_ORDER_ENABLED'] != '0'\n                or env['STARTING_CASH'] != '600000' or warm.get('entryPoint') != ['python']\n                or len(warm.get('command', [])) != 2 or warm['command'][0] != '-c'\n                or hashlib.sha256(warm['command'][1].encode()).hexdigest() != plan['bootstrap_sha256']):\n            raise ValueError('PAPER_CONTAINER_CHANGED')\n\n    def gate(self, plan):\n        proof, attempt = self.proof(plan)\n        self.configuration(plan)\n        rows = [r for r in self.rows() if not r['pk']['S'].startswith('CONTROL#NETWORK#') and r['pk']['S'] != attempt]\n        if any(not r['pk']['S'].startswith('CONTROL#ALERT') for r in rows) or digest(rows) != proof['baseline_digest']:\n            raise ValueError('EMPTY_BASELINE_CHANGED')\n        vm = self.clients['ec2'].describe_instances(InstanceIds=[self.env['NAT_INSTANCE_ID']])['Reservations'][0]['Instances'][0]\n        cluster = self.clients['ecs'].describe_clusters(clusters=[self.env['CLUSTER_ARN']])['clusters'][0]\n        if vm['State']['Name'] != 'stopped' or cluster['runningTasksCount'] or cluster['pendingTasksCount']:\n            raise ValueError('MORNING_CLEANUP_NOT_CURRENT')\n        self.save('ready', {'status': 'READY', 'pilot_id': self.env['PILOT_ID'],\n            'plan_sha256': self.env['PLAN_SHA256'], 'morning_proof_sha256': hashlib.sha256(json.dumps(proof, sort_keys=True).encode()).hexdigest(),\n            'checked_at': self.clock().isoformat()}, create=True)\n        return 'READY'\n\n    def require_ready(self, plan):\n        ready = self.get(self.key('ready'))\n        if (ready.get('status') != 'READY' or ready.get('pilot_id') != self.env['PILOT_ID']\n                or ready.get('plan_sha256') != self.env['PLAN_SHA256']):\n            raise ValueError('PILOT_NOT_READY')\n        self.proof(plan)\n        self.configuration(plan)\n\n    def controller(self, action, window, at):\n        response = self.clients['lambda'].invoke(FunctionName=self.env['CONTROL_FUNCTION_ARN'], InvocationType='RequestResponse',\n            Payload=json.dumps({'action': action, 'window': window, 'scheduled_at': at}).encode())\n        result = json.loads(response['Payload'].read())\n        expected = 'READY' if action == 'START' else 'STOP_REQUESTED'\n        if response.get('FunctionError') or result.get('state') != expected or (action == 'STOP' and result.get('cleanup_complete') is not True):\n            raise ValueError('CONTROLLER_NOT_CONFIRMED')\n        return expected\n\n    def run(self, name, item, plan):\n        cluster = self.clients['ecs'].describe_clusters(clusters=[self.env['CLUSTER_ARN']])['clusters'][0]\n        if cluster['runningTasksCount'] or cluster['pendingTasksCount']:\n            raise ValueError('EXISTING_TASK_PRESENT')\n        # Entry also requires the two earlier real workers to have completed.\n        if name in ('SHORTLIST_1510', 'ENTRY_1520'):\n            prerequisites = ['SCAN_1450'] + (['SHORTLIST_1510'] if name == 'ENTRY_1520' else [])\n            for phase in prerequisites:\n                if (self.get(self.key(phase), optional=True) or {}).get('status') != 'COMPLETED':\n                    raise ValueError('PREREQUISITE_NOT_COMPLETED')\n        ecs = self.clients['ecs']\n        token = hashlib.sha256((self.env['PILOT_ID'] + name).encode()).hexdigest()[:32]\n        response = ecs.run_task(cluster=self.env['CLUSTER_ARN'], taskDefinition=self.env['TASK_DEFINITION_ARN'],\n            count=1, launchType='FARGATE', platformVersion='LATEST', clientToken=token, startedBy=self.env['PILOT_ID'],\n            networkConfiguration={'awsvpcConfiguration': {'subnets': self.env['SUBNET_IDS'].split(','),\n                'securityGroups': self.env['SECURITY_GROUP_IDS'].split(','), 'assignPublicIp': 'DISABLED'}},\n            overrides={'containerOverrides': [{'name': 'stock-automation', 'environment': [\n                {'name': 'RUN_PHASE', 'value': name}, {'name': 'SCHEDULED_AT', 'value': item['scheduled_at']},\n                {'name': 'DISPATCHED_AT', 'value': item['dispatch_at']}]}]})\n        if response.get('failures') or len(response.get('tasks', [])) != 1:\n            raise ValueError('TASK_LAUNCH_NOT_CONFIRMED')\n        task_arn = response['tasks'][0]['taskArn']\n        deadline = self.monotonic() + 660\n        try:\n            while self.monotonic() < deadline:\n                result = ecs.describe_tasks(cluster=self.env['CLUSTER_ARN'], tasks=[task_arn])\n                if result.get('failures') or len(result.get('tasks', [])) != 1:\n                    raise ValueError('TASK_INSPECTION_FAILED')\n                task = result['tasks'][0]\n                if task['lastStatus'] == 'STOPPED':\n                    break\n                self.sleep(3)\n            else:\n                raise ValueError('TASK_BOUND_EXCEEDED')\n            if [c.get('exitCode') for c in task['containers']] != [0]:\n                raise ValueError('PAPER_WORKER_NOT_SUCCESSFUL')\n            occurrence = stamp(item['scheduled_at']).astimezone(timezone.utc).isoformat()\n            lease = self.clients['dynamodb'].get_item(TableName=self.env['PAPER_TABLE'],\n                Key={'pk': {'S': 'CONTROL#RUN#' + name + '#' + occurrence}}, ConsistentRead=True).get('Item', {})\n            if lease.get('status') != {'S': 'COMPLETED'}:\n                raise ValueError('REAL_ATTEMPT_NOT_COMPLETED')\n            return 'COMPLETED'\n        except Exception:\n            ecs.stop_task(cluster=self.env['CLUSTER_ARN'], task=task_arn, reason='Bounded one-session paper pilot cleanup')\n            raise\n\n    def report(self, name):\n        rows = self.rows()\n        open_count = sum(r['pk']['S'].startswith('OPEN#CLOSING_BET#') for r in rows)\n        entry = self.get(self.key('ENTRY_1520'), optional=True) or {}\n        exit_result = self.get(self.key('EXIT_0910'), optional=True) or {}\n        # Worker COMPLETED proves execution, not a purchase or a successful exit.\n        self.notify(name + ': entry_worker=' + entry.get('status', 'NO_RECORD')\n            + '; exit_worker=' + exit_result.get('status', 'NO_RECORD') + '; open_positions=' + str(open_count)\n            + ('. RECONCILIATION_REQUIRED.' if name == 'REPORT_AM' and open_count else '.'))\n        return 'RECONCILIATION_REQUIRED' if name == 'REPORT_AM' and open_count else 'REPORTED'\n\n    def notify(self, message):\n        raw = self.clients['secretsmanager'].get_secret_value(SecretId=self.env['TELEGRAM_SECRET_ARN'])\n        credentials = json.loads(raw['SecretString'])\n        body = json.dumps({'chat_id': credentials['chat_id'], 'text': '[SABU PAPER PILOT] ' + message}).encode()\n        request = urllib.request.Request('https://api.telegram.org/bot' + credentials['bot_token'] + '/sendMessage', data=body,\n            headers={'Content-Type': 'application/json'})\n        with urllib.request.urlopen(request, timeout=6) as response:\n            if json.loads(response.read()).get('ok') is not True:\n                raise ValueError('NOTIFICATION_REJECTED')\n\n    def handle(self, event):\n        raw = self.clients['s3'].get_object(Bucket=self.env['PAPER_BUCKET'], Key=self.env['PLAN_KEY'])['Body'].read()\n        if hashlib.sha256(raw).hexdigest() != self.env['PLAN_SHA256']:\n            raise ValueError('PLAN_HASH_MISMATCH')\n        plan = json.loads(raw)\n        validate_plan(plan, self.clock())\n        if set(event) != {'action', 'pilot_id'} or event['pilot_id'] != self.env['PILOT_ID'] or event['action'] not in plan['events']:\n            raise ValueError('WRONG_PILOT_EVENT')\n        name = event['action']; item = plan['events'][name]\n        if not stamp(item['dispatch_at']) <= self.clock() <= stamp(item['dispatch_at']) + timedelta(seconds=60):\n            raise ValueError('OUTSIDE_DISPATCH_WINDOW')\n        if self.get(self.key(name), optional=True) is not None:\n            return {'status': 'ALREADY_ATTEMPTED', 'phase': name}\n        state = {'status': 'RUNNING', 'pilot_id': self.env['PILOT_ID'], 'started_at': self.clock().isoformat()}\n        self.save(name, state, create=True)\n        try:\n            if name == 'GATE':\n                status = self.gate(plan)\n            elif name.startswith('REPORT_'):\n                status = self.report(name)\n            elif name.startswith('STOP_'):\n                # Cleanup never depends on READY or PASS; an own start attempt\n                # is required, including one with an ambiguous start response.\n                if self.get(self.key('START_' + name[-2:]), optional=True) is None:\n                    status = 'NO_OWN_START'\n                else:\n                    status = self.controller('STOP', 'morning' if name.endswith('_AM') else 'afternoon', item['dispatch_at'])\n            else:\n                self.require_ready(plan)\n                if name.startswith('START_'):\n                    status = self.controller('START', 'morning' if name.endswith('_AM') else 'afternoon', item['dispatch_at'])\n                else:\n                    status = self.run(name, item, plan)\n            state['status'] = status\n        except Exception as error:\n            reason = str(error) if isinstance(error, ValueError) and re.fullmatch('[A-Z0-9_]+', str(error)) else type(error).__name__\n            state.update(status='BLOCKED_OR_FAILED', reason=reason)\n        state['finished_at'] = self.clock().isoformat()\n        self.save(name, state)\n        if name == 'GATE' or state['status'] == 'BLOCKED_OR_FAILED':\n            try:\n                self.notify(name + ': ' + state['status'] + '. ' + state.get('reason', 'One dated paper session only; regular schedules remain OFF.'))\n            except Exception:\n                pass\n        return {'status': state['status'], 'phase': name}\n\n\ndef digest_task(task):\n    # SDK dates/metadata differ between JSON files and live reads. Hash only the\n    # runtime configuration, including every environment and secret reference.\n    names = ('taskDefinitionArn', 'family', 'revision', 'networkMode', 'cpu', 'memory', 'taskRoleArn',\n        'executionRoleArn', 'volumes', 'containerDefinitions', 'requiresCompatibilities', 'runtimePlatform')\n    return hashlib.sha256(json.dumps({k: task.get(k) for k in names}, sort_keys=True).encode()).hexdigest()\n\n\ndef handler(event, context):\n    import boto3\n    from botocore.config import Config\n    try:\n        clients = {name: boto3.client(name, config=Config(connect_timeout=3, read_timeout=230 if name == 'lambda' else 8,\n            retries={'max_attempts': 0 if name == 'lambda' else 1})) for name in\n            ('s3', 'ec2', 'ecs', 'dynamodb', 'cloudformation', 'lambda', 'scheduler', 'secretsmanager')}\n        result = Pilot(clients, os.environ).handle(event)\n    except Exception:\n        result = {'status': 'PILOT_REJECTED_OR_FAILED'}\n    print(json.dumps(result))\n    return result\n"
+        },
+        "Environment": {
+          "Variables": {
+            "PAPER_BUCKET": {
+              "Ref": "ArtifactBucketName"
+            },
+            "PAPER_TABLE": "stock-automation-paper",
+            "PILOT_ID": {
+              "Ref": "PilotId"
+            },
+            "PLAN_KEY": {
+              "Ref": "PlanKey"
+            },
+            "PLAN_SHA256": {
+              "Ref": "PlanSha256"
+            },
+            "RESULT_PREFIX": {
+              "Fn::Sub": "validation/pilot/${PilotId}"
+            },
+            "NAT_INSTANCE_ID": {
+              "Ref": "NatInstanceId"
+            },
+            "TASK_DEFINITION_ARN": {
+              "Ref": "PilotTask"
+            },
+            "CLUSTER_ARN": {
+              "Ref": "ClusterArn"
+            },
+            "SUBNET_IDS": {
+              "Fn::Join": [
+                ",",
+                {
+                  "Ref": "SubnetIds"
+                }
+              ]
+            },
+            "SECURITY_GROUP_IDS": {
+              "Fn::Join": [
+                ",",
+                {
+                  "Ref": "SecurityGroupIds"
+                }
+              ]
+            },
+            "CONTROL_FUNCTION_ARN": {
+              "Ref": "ControlFunctionArn"
+            },
+            "TELEGRAM_SECRET_ARN": {
+              "Ref": "TelegramSecretArn"
+            }
+          }
+        }
+      }
+    },
+    "SchedulerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "stock-paper-pilot-scheduler",
+        "Path": "/stock-paper/",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "scheduler.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  }
+                },
+                "ArnLike": {
+                  "aws:SourceArn": {
+                    "Fn::Sub": "arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/default"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "dated-pilot-and-fallback-stop",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:StopInstances"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${NatInstanceId}"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "ec2:ResourceTag/Project": "paper-fixed-egress",
+                      "ec2:ResourceTag/Name": "stock-automation-paper-nat",
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "lambda:InvokeFunction"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "Pilot",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "GateSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-pilot-gate",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${GateScheduleAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"GATE\",\"pilot_id\":\"${PilotId}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "StartPmSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-pilot-start-pm",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${StartPmScheduleAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"START_PM\",\"pilot_id\":\"${PilotId}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "Scan1450Schedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-pilot-scan-1450",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${Scan1450ScheduleAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"SCAN_1450\",\"pilot_id\":\"${PilotId}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "Shortlist1510Schedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-pilot-shortlist-1510",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${Shortlist1510ScheduleAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"SHORTLIST_1510\",\"pilot_id\":\"${PilotId}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "Entry1520Schedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-pilot-entry-1520",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${Entry1520ScheduleAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"ENTRY_1520\",\"pilot_id\":\"${PilotId}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "EquitySnapshot1550Schedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-pilot-equity-snapshot-1550",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${EquitySnapshot1550ScheduleAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"EQUITY_SNAPSHOT_1550\",\"pilot_id\":\"${PilotId}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "StopPmSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-pilot-stop-pm",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${StopPmScheduleAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"STOP_PM\",\"pilot_id\":\"${PilotId}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "ReportPmSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-pilot-report-pm",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${ReportPmScheduleAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"REPORT_PM\",\"pilot_id\":\"${PilotId}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "StartAmSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-pilot-start-am",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${StartAmScheduleAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"START_AM\",\"pilot_id\":\"${PilotId}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "Exit0905Schedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-pilot-exit-0905",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${Exit0905ScheduleAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"EXIT_0905\",\"pilot_id\":\"${PilotId}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "Exit0910Schedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-pilot-exit-0910",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${Exit0910ScheduleAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"EXIT_0910\",\"pilot_id\":\"${PilotId}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "StopAmSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-pilot-stop-am",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${StopAmScheduleAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"STOP_AM\",\"pilot_id\":\"${PilotId}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "ReportAmSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-pilot-report-am",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${ReportAmScheduleAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"REPORT_AM\",\"pilot_id\":\"${PilotId}\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "FallbackPmSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-pilot-fallback-pm",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${FallbackPmScheduleAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::Sub": "arn:${AWS::Partition}:scheduler:::aws-sdk:ec2:stopInstances"
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"InstanceIds\":[\"${NatInstanceId}\"]}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "FallbackAmSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-pilot-fallback-am",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": {
+          "Fn::Sub": "at(${FallbackAmScheduleAt})"
+        },
+        "ScheduleExpressionTimezone": "UTC",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::Sub": "arn:${AWS::Partition}:scheduler:::aws-sdk:ec2:stopInstances"
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"InstanceIds\":[\"${NatInstanceId}\"]}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        }
+      }
+    },
+    "OperatorReviewPolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "ManagedPolicyName": "StockPaperPilotReview",
+        "Users": [
+          {
+            "Ref": "OperatorUserName"
+          }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "cloudformation:DescribeStacks",
+                "cloudformation:DescribeStackEvents",
+                "cloudformation:DescribeStackResources",
+                "cloudformation:GetTemplate"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-pilot/*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "lambda:GetFunction",
+                "lambda:GetFunctionConfiguration"
+              ],
+              "Resource": {
+                "Fn::GetAtt": [
+                  "Pilot",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject"
+              ],
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/validation/pilot/${PilotId}/*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${PlanKey}"
+                }
+              ]
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "scheduler:GetSchedule",
+                "scheduler:UpdateSchedule"
+              ],
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "GateSchedule",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "StartPmSchedule",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "Scan1450Schedule",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "Shortlist1510Schedule",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "Entry1520Schedule",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "EquitySnapshot1550Schedule",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "StopPmSchedule",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "ReportPmSchedule",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "StartAmSchedule",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "Exit0905Schedule",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "Exit0910Schedule",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "StopAmSchedule",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "ReportAmSchedule",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "FallbackPmSchedule",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::GetAtt": [
+                    "FallbackAmSchedule",
+                    "Arn"
+                  ]
+                }
+              ]
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "iam:PassRole"
+              ],
+              "Resource": {
+                "Fn::GetAtt": [
+                  "SchedulerRole",
+                  "Arn"
+                ]
+              },
+              "Condition": {
+                "StringEquals": {
+                  "iam:PassedToService": "scheduler.amazonaws.com"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:DescribeLogStreams",
+                "logs:GetLogEvents",
+                "logs:FilterLogEvents"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/stock-paper-pilot:*"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "PilotArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Pilot",
+          "Arn"
+        ]
+      }
+    },
+    "PilotTaskArn": {
+      "Value": {
+        "Ref": "PilotTask"
+      }
+    },
+    "SchedulerRoleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "SchedulerRole",
+          "Arn"
+        ]
+      }
+    },
+    "GateScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "GateSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "StartPmScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "StartPmSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "Scan1450ScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Scan1450Schedule",
+          "Arn"
+        ]
+      }
+    },
+    "Shortlist1510ScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Shortlist1510Schedule",
+          "Arn"
+        ]
+      }
+    },
+    "Entry1520ScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Entry1520Schedule",
+          "Arn"
+        ]
+      }
+    },
+    "EquitySnapshot1550ScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "EquitySnapshot1550Schedule",
+          "Arn"
+        ]
+      }
+    },
+    "StopPmScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "StopPmSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "ReportPmScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "ReportPmSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "StartAmScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "StartAmSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "Exit0905ScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Exit0905Schedule",
+          "Arn"
+        ]
+      }
+    },
+    "Exit0910ScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Exit0910Schedule",
+          "Arn"
+        ]
+      }
+    },
+    "StopAmScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "StopAmSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "ReportAmScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "ReportAmSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "FallbackPmScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "FallbackPmSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "FallbackAmScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "FallbackAmSchedule",
+          "Arn"
+        ]
+      }
+    }
+  }
+}
