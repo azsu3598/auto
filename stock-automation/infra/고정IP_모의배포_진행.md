@@ -1,5 +1,22 @@
 # 고정 IP를 사용하는 AWS 모의운용 배포
 
+## 2026-10-22 PC-C 최신 — 1회 종가배팅 모의 예약15개 활성화·모바일 복구 완료
+
+관리자 표준 새 스택 생성 완료 후 실제 pilot 스택 CREATE_COMPLETE·원격 템플릿/매개변수·실제 Lambda 패키지/환경·정확한 예약/대상을 대조했다. 실제 Lambda 역할의 읽기 전용 READINESS_CHECK를 활성화 전후 모두 통과했고, immutable plan을 조건부 게시한 뒤 종료/fallback 우선으로 이번1회 예약15개를 켰다. 별도 최종 조회에서도 **pilot15개 ENABLED·기존 정기23개 DISABLED**를 확인했다. status 도구의 실제 조회는 NAT stopped·ECS running/pending0·열린 가상수량0·ARMED·미래 단계 NO_RECORD다.
+
+가상자금600,000원, **10/23(금)09:25 준비 검사·14:40 기동·14:50 스캔·15:10 후보·15:20 진입 판단·16:10 정리/정지·16:15 보고·16:20 독립 정지**, **다음 거래일10/26(월)08:55 기동·09:05 위험 확인·09:10 잔여 수량 청산·09:25 정리/정지·09:35 독립 정지·09:40 최종 보고**다. 15:50 자산 집계와 기존120분 보호도 유지한다. 키움 demo 읽기+프로그램 내부 가상 장부이며 증권사 주문을 제출하지 않는다. NO_TRADE는 정상 결과이고 이1회 뒤 새 자동진입은 없다. 실제 미래 시세 판단/가상 체결/청산 성공은 아직 미검증이다.
+
+모바일은 검증된 일시 중지 전 원본3개만 복구했다. HTTPS·보안 헤더·Cognito 로그인200·미인증/잘못된 토큰 거부·S3 직접 접근403을 확인했고 사용자도 휴대폰 로그인 후 숫자 표시를 확인했다. 새 서버/IP/실주문 권한을 만들지 않았다. 상태/중지는 tools/paper_operations.py status/stop 및 루트 PC-C 안내를 따른다. 실제 stop은 시험으로 실행하지 않았으며 기존 포지션을 임의매도/삭제하지 않는다.
+
+증거는 Git 제외 runtime/paper-pilot-armed-20261022.json, paper-pilot-final-read-20261022.json, paper-web-resume-20261022.json이다. 이전 전체339개/skip0·focused pilot25/operations4·Node4·9템플릿/업로드파일 lint/구문·AWS ValidateTemplate 통과를 유지했다. 이후에는 배포/상태 읽기·웹 복구·운영 기록만 수행했고 운영 worker/image 변경 없음. LIVE0·실계좌 Secret/실주문·kill switch 해제 없음. commit/push 미요청·미실행이다.
+
+## 2026-10-22 PC-C 최신 — 정상 시간 자동 재검증 PASSED
+
+실제 AWS 자동 예약이08:55 기동·09:02 준비·정상09:05 빈 청산 worker를 수행하고 **09:06:06 PASSED**를 기록했다. 완료 lease/허용 시각/정리 완료/동일 부팅/현재 stopped **7/7**을 대조했고 저녁 현재 ECS running/pending0·정상 제어 STOP_REQUESTED·Telegram API 전송 성공도 확인했다. 아침에 실패했던 목록 조회/종료 권한은 수정된 Lambda 자동 실행 경로에서도 확인됐다.
+
+종료된 시험4개만 실제 OFF로 정리하고 재조회4/4 및 PASSED 객체 불변을 확인했다. 결과/영구 lease는 보존하며 raw 증거는 Git 제외 runtime/paper-worker-retest-observed-result-20261022.json과 paper-worker-retest-diagnosis-20261022.json에 둔다. 일반 모의매매 예약/오후 pilot/모바일 웹은 아직 활성화하지 않았다. 빈 청산 성공은 종가배팅 진입/시세 판단/체결·5거래일 운용 검증을 대신하지 않는다. 새 코드/이미지 변경 없이 이전327개 검증을 유지한다.
+
+
 ## 2026-10-21 PC-C 최신 — 10월22일 PC OFF 재검증 ARMED_IN_AWS
 
 관리자 업데이트 실제 소스/권한/매개변수/진단 정의를 대조한 뒤 새 고유 시험 표식을 생성하고 시험용4개만 켰다. 최종 별도 재조회4/4 일치, 현재 NAT stopped·클러스터0·옛 FAILED/영구 lease 보존을 확인했다. **10/22 KST 08:55 기동→09:02 준비→실제09:05 빈 청산 검증→09:16 감시→09:20 독립정지**이며 PC OFF로 진행된다. 일반 모의매매/오후 pilot/모바일은 아직 비활성이다. 결과는 아직 미래이고 ARMED를 PASSED로 표시하지 않는다.

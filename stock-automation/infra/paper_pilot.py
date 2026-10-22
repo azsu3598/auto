@@ -28,6 +28,27 @@ def digest(rows):
     return hashlib.sha256(json.dumps(sorted(rows, key=lambda r: r['pk']['S']), sort_keys=True).encode()).hexdigest()
 
 
+def validate_calendar(plan):
+    calendar = plan['approved_calendar']
+    entry = datetime.fromisoformat(plan['entry_date']).date()
+    exit_day = datetime.fromisoformat(plan['exit_date']).date()
+    reviewed = datetime.fromisoformat(calendar['reviewed_through']).date()
+    holidays = set(calendar.get('holidays', []))
+    special = set(calendar.get('special_session_review_dates', []))
+    def eligible(day):
+        return day.year == calendar['year'] and day.weekday() < 5 and day.isoformat() not in holidays
+    if (calendar.get('automatic_schedule_eligible') is not True or reviewed < exit_day
+            or not eligible(entry) or entry.isoformat() in special):
+        raise ValueError('CALENDAR_NOT_APPROVED')
+    following = entry + timedelta(days=1)
+    for _ in range(14):
+        if eligible(following): break
+        following += timedelta(days=1)
+    else: raise ValueError('NEXT_SESSION_NOT_FOUND')
+    if following != exit_day or exit_day.isoformat() in special:
+        raise ValueError('NEXT_SESSION_NOT_APPROVED')
+
+
 def validate_plan(plan, now=None):
     entry, exit_day = plan['entry_date'], plan['exit_date']
     if exit_day <= entry or plan['starting_cash'] != '600000' or plan['paper_only'] is not True:
@@ -62,6 +83,12 @@ class Pilot:
         self.sleep, self.monotonic = sleep, monotonic
 
     def get(self, key, optional=False):
+        if optional:
+            # A missing GetObject is 403 without unrestricted ListBucket. Use a
+            # prefix-scoped list instead; never mistake AccessDenied for absent.
+            page = self.clients['s3'].list_objects_v2(Bucket=self.env['PAPER_BUCKET'], Prefix=key, MaxKeys=1)
+            if not any(row['Key'] == key for row in page.get('Contents', [])):
+                return None
         try:
             return json.loads(self.clients['s3'].get_object(Bucket=self.env['PAPER_BUCKET'], Key=key)['Body'].read())
         except Exception as error:
@@ -110,6 +137,11 @@ class Pilot:
         return proof, key
 
     def configuration(self, plan):
+        if 'approved_calendar' in plan:
+            validate_calendar(plan)
+            current = self.get('config/calendar/current.json')
+            if current != plan['approved_calendar']:
+                raise ValueError('CALENDAR_CHANGED')
         for stack_name, expected in plan['stack_parameters'].items():
             stack = self.clients['cloudformation'].describe_stacks(StackName=stack_name)['Stacks'][0]
             if stack['StackStatus'] not in ('CREATE_COMPLETE', 'UPDATE_COMPLETE'):
@@ -141,22 +173,44 @@ class Pilot:
                 or hashlib.sha256(warm['command'][1].encode()).hexdigest() != plan['bootstrap_sha256']):
             raise ValueError('PAPER_CONTAINER_CHANGED')
 
-    def gate(self, plan):
+    def readiness(self, plan):
+        if self.get(self.key('STOP'), optional=True) is not None:
+            raise ValueError('PILOT_MANUALLY_STOPPED')
         proof, attempt = self.proof(plan)
         self.configuration(plan)
         rows = [r for r in self.rows() if not r['pk']['S'].startswith('CONTROL#NETWORK#') and r['pk']['S'] != attempt]
-        if any(not r['pk']['S'].startswith('CONTROL#ALERT') for r in rows) or digest(rows) != proof['baseline_digest']:
+        for row in rows:
+            key = row['pk']['S']
+            if key.startswith('CONTROL#ALERT'): continue
+            prefix = 'CONTROL#RUN#EXIT_0905#'
+            if key not in plan.get('prior_attempt_keys', []) or not key.startswith(prefix):
+                raise ValueError('EMPTY_BASELINE_CHANGED')
+            at = stamp(key[len(prefix):])
+            if (at.astimezone(KST).date() >= stamp(plan['morning_occurrence']).astimezone(KST).date()
+                    or (at.astimezone(KST).hour, at.astimezone(KST).minute, at.second, at.microsecond) != (9, 5, 0, 0)
+                    or row.get('status') != {'S': 'COMPLETED'}
+                    or not re.fullmatch('[a-f0-9]{32}', row.get('owner', {}).get('S', ''))
+                    or not at <= stamp(row['started_at']['S']) <= at + timedelta(seconds=120)
+                    or not stamp(row['started_at']['S']) <= stamp(row['finished_at']['S']) <= at + timedelta(seconds=250)):
+                raise ValueError('HISTORICAL_ATTEMPT_CHANGED')
+        if digest(rows) != proof['baseline_digest']:
             raise ValueError('EMPTY_BASELINE_CHANGED')
         vm = self.clients['ec2'].describe_instances(InstanceIds=[self.env['NAT_INSTANCE_ID']])['Reservations'][0]['Instances'][0]
         cluster = self.clients['ecs'].describe_clusters(clusters=[self.env['CLUSTER_ARN']])['clusters'][0]
         if vm['State']['Name'] != 'stopped' or cluster['runningTasksCount'] or cluster['pendingTasksCount']:
             raise ValueError('MORNING_CLEANUP_NOT_CURRENT')
+        return proof
+
+    def gate(self, plan):
+        proof = self.readiness(plan)
         self.save('ready', {'status': 'READY', 'pilot_id': self.env['PILOT_ID'],
             'plan_sha256': self.env['PLAN_SHA256'], 'morning_proof_sha256': hashlib.sha256(json.dumps(proof, sort_keys=True).encode()).hexdigest(),
             'checked_at': self.clock().isoformat()}, create=True)
         return 'READY'
 
     def require_ready(self, plan):
+        if self.get(self.key('STOP'), optional=True) is not None:
+            raise ValueError('PILOT_MANUALLY_STOPPED')
         ready = self.get(self.key('ready'))
         if (ready.get('status') != 'READY' or ready.get('pilot_id') != self.env['PILOT_ID']
                 or ready.get('plan_sha256') != self.env['PLAN_SHA256']):
@@ -183,6 +237,8 @@ class Pilot:
             for phase in prerequisites:
                 if (self.get(self.key(phase), optional=True) or {}).get('status') != 'COMPLETED':
                     raise ValueError('PREREQUISITE_NOT_COMPLETED')
+        if name == 'ENTRY_1520' and any(r['pk']['S'].startswith(('OPEN#', 'PENDING#')) for r in self.rows()):
+            raise ValueError('EXISTING_POSITION_OR_PENDING_STATE')
         ecs = self.clients['ecs']
         token = hashlib.sha256((self.env['PILOT_ID'] + name).encode()).hexdigest()[:32]
         response = ecs.run_task(cluster=self.env['CLUSTER_ARN'], taskDefinition=self.env['TASK_DEFINITION_ARN'],
@@ -219,16 +275,30 @@ class Pilot:
             ecs.stop_task(cluster=self.env['CLUSTER_ARN'], task=task_arn, reason='Bounded one-session paper pilot cleanup')
             raise
 
-    def report(self, name):
+    def report(self, name, plan=None):
         rows = self.rows()
         open_count = sum(r['pk']['S'].startswith('OPEN#CLOSING_BET#') for r in rows)
         entry = self.get(self.key('ENTRY_1520'), optional=True) or {}
         exit_result = self.get(self.key('EXIT_0910'), optional=True) or {}
         # Worker COMPLETED proves execution, not a purchase or a successful exit.
-        self.notify(name + ': entry_worker=' + entry.get('status', 'NO_RECORD')
+        decision = 'NO_RECORD'
+        if plan and plan.get('decision_key'):
+            artifact = self.get(plan['decision_key'], optional=True) or {}
+            if artifact.get('idempotency_key'):
+                stored = self.clients['dynamodb'].get_item(TableName=self.env['PAPER_TABLE'],
+                    Key={'pk': {'S': artifact['idempotency_key']}}, ConsistentRead=True).get('Item', {})
+                if stored.get('payload_json') and json.loads(stored['payload_json']['S']) == artifact:
+                    decision = artifact.get('decision', 'UNKNOWN')
+        network_ok = True
+        if plan:
+            vm = self.clients['ec2'].describe_instances(InstanceIds=[self.env['NAT_INSTANCE_ID']])['Reservations'][0]['Instances'][0]
+            cluster = self.clients['ecs'].describe_clusters(clusters=[self.env['CLUSTER_ARN']])['clusters'][0]
+            network_ok = vm['State']['Name'] == 'stopped' and not cluster['runningTasksCount'] and not cluster['pendingTasksCount']
+        self.report_detail = {'decision': decision, 'open_positions': open_count, 'network_stopped_and_idle': network_ok}
+        self.notify(name + ': decision=' + decision + '; entry_worker=' + entry.get('status', 'NO_RECORD')
             + '; exit_worker=' + exit_result.get('status', 'NO_RECORD') + '; open_positions=' + str(open_count)
-            + ('. RECONCILIATION_REQUIRED.' if name == 'REPORT_AM' and open_count else '.'))
-        return 'RECONCILIATION_REQUIRED' if name == 'REPORT_AM' and open_count else 'REPORTED'
+            + ('. RECONCILIATION_REQUIRED.' if not network_ok or (name == 'REPORT_AM' and open_count) else '.'))
+        return 'RECONCILIATION_REQUIRED' if not network_ok or (name == 'REPORT_AM' and open_count) else 'REPORTED'
 
     def notify(self, message):
         raw = self.clients['secretsmanager'].get_secret_value(SecretId=self.env['TELEGRAM_SECRET_ARN'])
@@ -245,6 +315,15 @@ class Pilot:
         if hashlib.sha256(raw).hexdigest() != self.env['PLAN_SHA256']:
             raise ValueError('PLAN_HASH_MISMATCH')
         plan = json.loads(raw)
+        # This explicit read-only action verifies the actual Lambda role now.
+        # It never starts tasks, writes markers, sends messages or bypasses a
+        # future trading phase window. READY is created only by the dated GATE.
+        if event == {'action': 'READINESS_CHECK', 'pilot_id': self.env['PILOT_ID']}:
+            validate_plan(plan)
+            if self.clock() >= stamp(plan['events']['GATE']['dispatch_at']):
+                raise ValueError('READINESS_REVIEW_WINDOW_CLOSED')
+            self.readiness(plan)
+            return {'status': 'READINESS_VERIFIED', 'paper_only': True, 'mutations': False}
         validate_plan(plan, self.clock())
         if set(event) != {'action', 'pilot_id'} or event['pilot_id'] != self.env['PILOT_ID'] or event['action'] not in plan['events']:
             raise ValueError('WRONG_PILOT_EVENT')
@@ -259,7 +338,8 @@ class Pilot:
             if name == 'GATE':
                 status = self.gate(plan)
             elif name.startswith('REPORT_'):
-                status = self.report(name)
+                status = self.report(name, plan)
+                state['report'] = self.report_detail
             elif name.startswith('STOP_'):
                 # Cleanup never depends on READY or PASS; an own start attempt
                 # is required, including one with an ambiguous start response.
@@ -303,7 +383,13 @@ def handler(event, context):
             retries={'max_attempts': 0 if name == 'lambda' else 1})) for name in
             ('s3', 'ec2', 'ecs', 'dynamodb', 'cloudformation', 'lambda', 'scheduler', 'secretsmanager')}
         result = Pilot(clients, os.environ).handle(event)
-    except Exception:
+    except Exception as error:
         result = {'status': 'PILOT_REJECTED_OR_FAILED'}
+        code = getattr(error, 'response', {}).get('Error', {}).get('Code', type(error).__name__)
+        operation = getattr(error, 'operation_name', '')
+        for key, value in (('error_code', code), ('operation', operation)):
+            if isinstance(value, str) and re.fullmatch('[A-Za-z0-9_]+', value): result[key] = value
+        if isinstance(error, ValueError) and re.fullmatch('[A-Z0-9_]+', str(error)):
+            result['reason'] = str(error)
     print(json.dumps(result))
     return result

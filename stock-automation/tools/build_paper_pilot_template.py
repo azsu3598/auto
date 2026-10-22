@@ -1,11 +1,24 @@
 """Build a disabled one-session paper pilot; never change regular schedules."""
 import argparse
+import base64
 import copy
 import importlib.util
 import json
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def inline_source():
+    # CloudFormation's inline body limit includes parameters and IAM policies.
+    # This is deterministic packaging of the reviewed plaintext repository file;
+    # deployment verification compares both wrapper and canonical source hashes.
+    source=(ROOT/'infra/paper_pilot.py').read_text(encoding='utf-8').encode()
+    encoded=base64.b64encode(zlib.compress(source,9)).decode('ascii')
+    return ('# Canonical source: infra/paper_pilot.py; deterministic inline packaging.\n'
+        'import base64, zlib\nSOURCE_ZLIB_BASE64 = '+repr(encoded)+'\n'
+        'exec(compile(zlib.decompress(base64.b64decode(SOURCE_ZLIB_BASE64)), "paper_pilot.py", "exec"))\n')
 
 
 def build():
@@ -24,7 +37,7 @@ def build():
     parameters = copy.deepcopy(original['Parameters'])
     for name in ('TestId', 'StartAt', 'DispatchAt', 'RunAt', 'WatchAt', 'FailSafeAt', 'VerificationState', 'ProductionTaskDefinitionArn'):
         parameters.pop(name)
-    for name in ('PilotId', 'PlanKey', 'PlanSha256', 'MorningResultKey', 'EntryDate', 'ExitDate'):
+    for name in ('PilotId', 'PlanKey', 'PlanSha256', 'MorningResultKey', 'EntryDate', 'ExitDate', 'DecisionKey'):
         parameters[name] = {'Type': 'String'}
     parameters['PilotId']['AllowedPattern'] = '[a-f0-9]{32}'
     parameters['PlanSha256']['AllowedPattern'] = '[a-f0-9]{64}'
@@ -60,8 +73,13 @@ def build():
         {'Effect': 'Allow', 'Action': ['dynamodb:GetItem', 'dynamodb:Scan'],
             'Resource': sub('arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/stock-automation-paper')},
         {'Effect': 'Allow', 'Action': ['s3:GetObject', 's3:PutObject'], 'Resource': result},
+        {'Effect': 'Allow', 'Action': ['s3:ListBucket'],
+            'Resource': sub('arn:${AWS::Partition}:s3:::${ArtifactBucketName}'),
+            'Condition': {'StringLike': {'s3:prefix': [sub('validation/pilot/${PilotId}/*'), ref('DecisionKey')]}}},
         {'Effect': 'Allow', 'Action': ['s3:GetObject'], 'Resource': [
             sub('arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${PlanKey}'),
+            sub('arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${DecisionKey}'),
+            sub('arn:${AWS::Partition}:s3:::${ArtifactBucketName}/config/calendar/current.json'),
             sub('arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${MorningResultKey}')]},
         {'Effect': 'Allow', 'Action': ['secretsmanager:GetSecretValue'], 'Resource': ref('TelegramSecretArn')},
         {'Effect': 'Allow', 'Action': ['logs:CreateLogStream', 'logs:PutLogEvents'], 'Resource': log}]}
@@ -77,7 +95,7 @@ def build():
         'Pilot': {'Type': 'AWS::Lambda::Function', 'DependsOn': 'LogGroup', 'Properties': {
             'FunctionName': 'stock-paper-pilot', 'Runtime': 'python3.13', 'Handler': 'index.handler',
             'MemorySize': 128, 'Timeout': 900, 'ReservedConcurrentExecutions': 2, 'Role': arn('PilotRole'),
-            'Code': {'ZipFile': (ROOT/'infra/paper_pilot.py').read_text(encoding='utf-8')},
+            'Code': {'ZipFile': inline_source()},
             'Environment': {'Variables': {
                 'PAPER_BUCKET': ref('ArtifactBucketName'), 'PAPER_TABLE': 'stock-automation-paper', 'PILOT_ID': ref('PilotId'),
                 'PLAN_KEY': ref('PlanKey'), 'PLAN_SHA256': ref('PlanSha256'),
@@ -113,6 +131,8 @@ def build():
             'cloudformation:DescribeStackResources', 'cloudformation:GetTemplate'],
             'Resource': sub('arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-pilot/*')},
         {'Effect': 'Allow', 'Action': ['lambda:GetFunction', 'lambda:GetFunctionConfiguration'], 'Resource': arn('Pilot')},
+        {'Effect': 'Allow', 'Action': ['lambda:InvokeFunction'], 'Resource': arn('Pilot')},
+        {'Effect': 'Allow', 'Action': ['scheduler:GetSchedule'], 'Resource': ref('RegularScheduleArns')},
         {'Effect': 'Allow', 'Action': ['s3:GetObject', 's3:PutObject'], 'Resource': [result, sub('arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${PlanKey}')]},
         {'Effect': 'Allow', 'Action': ['scheduler:GetSchedule', 'scheduler:UpdateSchedule'], 'Resource': [arn(key) for key in schedule_ids]},
         {'Effect': 'Allow', 'Action': ['iam:PassRole'], 'Resource': arn('SchedulerRole'),

@@ -1,0 +1,1653 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Five date-bounded paper sessions only after verified prior completion; no live orders or regular schedule changes",
+  "Parameters": {
+    "NatInstanceId": {
+      "Type": "String"
+    },
+    "ArtifactBucketName": {
+      "Type": "String"
+    },
+    "TelegramSecretArn": {
+      "Type": "String"
+    },
+    "ImageUri": {
+      "Type": "String"
+    },
+    "ClusterArn": {
+      "Type": "String"
+    },
+    "TaskExecutionRoleArn": {
+      "Type": "String"
+    },
+    "TaskRoleArn": {
+      "Type": "String"
+    },
+    "AppLogGroupName": {
+      "Type": "String"
+    },
+    "ControlFunctionArn": {
+      "Type": "String"
+    },
+    "KiwoomDemoSecretArn": {
+      "Type": "String"
+    },
+    "DartSecretArn": {
+      "Type": "String"
+    },
+    "ExpectedEgressIp": {
+      "Type": "String"
+    },
+    "TradeNotificationTopicArn": {
+      "Type": "String"
+    },
+    "SubnetIds": {
+      "Type": "CommaDelimitedList"
+    },
+    "SecurityGroupIds": {
+      "Type": "CommaDelimitedList"
+    },
+    "StartingCash": {
+      "Type": "String",
+      "Default": "600000"
+    },
+    "MediumStartingCash": {
+      "Type": "String",
+      "Default": "600000"
+    },
+    "DayTradeStartingCash": {
+      "Type": "String",
+      "Default": "600000"
+    },
+    "BuyFeeBps": {
+      "Type": "String",
+      "Default": "1.5"
+    },
+    "SellFeeBps": {
+      "Type": "String",
+      "Default": "1.5"
+    },
+    "SellTaxBps": {
+      "Type": "String",
+      "Default": "20"
+    },
+    "PilotId": {
+      "Type": "String",
+      "AllowedPattern": "[a-f0-9]{32}"
+    },
+    "PlanKey": {
+      "Type": "String"
+    },
+    "PlanSha256": {
+      "Type": "String",
+      "AllowedPattern": "[a-f0-9]{64}"
+    },
+    "MorningResultKey": {
+      "Type": "String"
+    },
+    "EntryDate": {
+      "Type": "String"
+    },
+    "ExitDate": {
+      "Type": "String"
+    },
+    "DecisionKey": {
+      "Type": "String"
+    },
+    "PilotState": {
+      "Type": "String",
+      "Default": "DISABLED",
+      "AllowedValues": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "RegularScheduleArns": {
+      "Type": "CommaDelimitedList"
+    },
+    "PmStart": {
+      "Type": "String"
+    },
+    "PmEnd": {
+      "Type": "String"
+    },
+    "AmStart": {
+      "Type": "String"
+    },
+    "AmEnd": {
+      "Type": "String"
+    },
+    "ParentPrefix": {
+      "Type": "String"
+    },
+    "ParentPlanKey": {
+      "Type": "String"
+    }
+  },
+  "Resources": {
+    "PilotTask": {
+      "Type": "AWS::ECS::TaskDefinition",
+      "Properties": {
+        "Family": "stock-automation-paper-batch",
+        "Cpu": "512",
+        "Memory": "1024",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": [
+          "FARGATE"
+        ],
+        "ExecutionRoleArn": {
+          "Ref": "TaskExecutionRoleArn"
+        },
+        "TaskRoleArn": {
+          "Ref": "TaskRoleArn"
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "stock-automation-paper"
+          }
+        ],
+        "Volumes": [
+          {
+            "Name": "runtime-tmp"
+          }
+        ],
+        "ContainerDefinitions": [
+          {
+            "Name": "stock-automation",
+            "Image": {
+              "Ref": "ImageUri"
+            },
+            "Essential": true,
+            "User": "65534:65534",
+            "ReadonlyRootFilesystem": true,
+            "LinuxParameters": {
+              "Capabilities": {
+                "Drop": [
+                  "ALL"
+                ]
+              },
+              "InitProcessEnabled": true
+            },
+            "MountPoints": [
+              {
+                "SourceVolume": "runtime-tmp",
+                "ContainerPath": "/tmp",
+                "ReadOnly": false
+              }
+            ],
+            "EntryPoint": [
+              "python"
+            ],
+            "Command": [
+              "-c",
+              "\"\"\"Prewarm a dated paper phase without changing the production clock guards.\"\"\"\nfrom datetime import datetime, timedelta, timezone\nimport json\nimport os\nimport time\n\nPHASE_TIMES = {'SCAN_1450': (14, 50), 'SHORTLIST_1510': (15, 10),\n    'ENTRY_1520': (15, 20), 'EQUITY_SNAPSHOT_1550': (15, 50),\n    'EXIT_0905': (9, 5), 'EXIT_0910': (9, 10)}\nKST = timezone(timedelta(hours=9))\n\n\ndef wait_for_occurrence(env, *, clock, sleep, monotonic):\n    phase = env.get('RUN_PHASE')\n    if env.get('KIWOOM_MODE') != 'demo' or env.get('LIVE_ORDER_ENABLED') != '0' or phase not in PHASE_TIMES:\n        raise ValueError('DATED_PAPER_PHASE_ONLY')\n    occurrence = datetime.fromisoformat(env['SCHEDULED_AT'])\n    dispatch = datetime.fromisoformat(env['DISPATCHED_AT'])\n    if occurrence.tzinfo is None or dispatch.tzinfo is None:\n        raise ValueError('TIMEZONE_REQUIRED')\n    local = occurrence.astimezone(KST)\n    day = env['PILOT_EXIT_DATE'] if phase.startswith('EXIT_') else env['PILOT_ENTRY_DATE']\n    if (local.date().isoformat() != day or local.weekday() >= 5\n            or (local.hour, local.minute) != PHASE_TIMES[phase] or local.second or local.microsecond\n            or not 120 <= (occurrence - dispatch).total_seconds() <= 180):\n        raise ValueError('WRONG_PILOT_OCCURRENCE')\n    now = clock()\n    if now < dispatch or not -120 <= (occurrence - now).total_seconds() <= 300:\n        raise ValueError('OUTSIDE_PREWARM_WINDOW')\n    deadline = monotonic() + 300\n    while clock() < occurrence:\n        if monotonic() >= deadline:\n            raise ValueError('PREWARM_BOUND_EXCEEDED')\n        sleep(1)\n    # run_bounded independently enforces the original, phase-specific late limit.\n\n\ndef main():\n    try:\n        wait_for_occurrence(os.environ, clock=lambda: datetime.now(timezone.utc), sleep=time.sleep, monotonic=time.monotonic)\n    except Exception:\n        print(json.dumps({'status': 'RUN_REJECTED', 'reason': 'INVALID_PILOT_OCCURRENCE', 'paper_only': True}), flush=True)\n        return 2\n    from stock_automation.scheduled_execution import run_bounded\n    return run_bounded()\n\n\nif __name__ == '__main__':\n    raise SystemExit(main())\n"
+            ],
+            "Environment": [
+              {
+                "Name": "KIWOOM_MODE",
+                "Value": "demo"
+              },
+              {
+                "Name": "KIWOOM_TOKEN_STORE",
+                "Value": "memory"
+              },
+              {
+                "Name": "LIVE_ORDER_ENABLED",
+                "Value": "0"
+              },
+              {
+                "Name": "NAT_INSTANCE_ID",
+                "Value": {
+                  "Ref": "NatInstanceId"
+                }
+              },
+              {
+                "Name": "EXPECTED_EGRESS_IP",
+                "Value": {
+                  "Ref": "ExpectedEgressIp"
+                }
+              },
+              {
+                "Name": "PAPER_BUCKET",
+                "Value": {
+                  "Ref": "ArtifactBucketName"
+                }
+              },
+              {
+                "Name": "PAPER_TABLE",
+                "Value": "stock-automation-paper"
+              },
+              {
+                "Name": "TRADING_CALENDAR_KEY",
+                "Value": "config/calendar/current.json"
+              },
+              {
+                "Name": "STARTING_CASH",
+                "Value": {
+                  "Ref": "StartingCash"
+                }
+              },
+              {
+                "Name": "MEDIUM_STARTING_CASH",
+                "Value": {
+                  "Ref": "MediumStartingCash"
+                }
+              },
+              {
+                "Name": "DAY_TRADE_STARTING_CASH",
+                "Value": {
+                  "Ref": "DayTradeStartingCash"
+                }
+              },
+              {
+                "Name": "BUY_FEE_BPS",
+                "Value": {
+                  "Ref": "BuyFeeBps"
+                }
+              },
+              {
+                "Name": "SELL_FEE_BPS",
+                "Value": {
+                  "Ref": "SellFeeBps"
+                }
+              },
+              {
+                "Name": "SELL_TAX_BPS",
+                "Value": {
+                  "Ref": "SellTaxBps"
+                }
+              },
+              {
+                "Name": "NOTIFICATION_CHANNEL",
+                "Value": "telegram"
+              },
+              {
+                "Name": "NOTIFICATION_SECRET_ARN",
+                "Value": {
+                  "Ref": "TelegramSecretArn"
+                }
+              },
+              {
+                "Name": "SNS_NOTIFICATION_TOPIC_ARN",
+                "Value": {
+                  "Ref": "TradeNotificationTopicArn"
+                }
+              },
+              {
+                "Name": "PILOT_ENTRY_DATE",
+                "Value": {
+                  "Ref": "EntryDate"
+                }
+              },
+              {
+                "Name": "PILOT_EXIT_DATE",
+                "Value": {
+                  "Ref": "ExitDate"
+                }
+              }
+            ],
+            "Secrets": [
+              {
+                "Name": "APP_KEY_MOCK",
+                "ValueFrom": {
+                  "Fn::Sub": "${KiwoomDemoSecretArn}:app_key_mock::"
+                }
+              },
+              {
+                "Name": "APP_SECRET_MOCK",
+                "ValueFrom": {
+                  "Fn::Sub": "${KiwoomDemoSecretArn}:app_secret_mock::"
+                }
+              },
+              {
+                "Name": "DART_API_KEY",
+                "ValueFrom": {
+                  "Fn::Sub": "${DartSecretArn}:dart_api_key::"
+                }
+              }
+            ],
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": {
+                  "Ref": "AppLogGroupName"
+                },
+                "awslogs-region": {
+                  "Ref": "AWS::Region"
+                },
+                "awslogs-stream-prefix": "paper"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "Boundary": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "ManagedPolicyName": "StockPaperBatchBoundary",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:RunTask"
+              ],
+              "Resource": {
+                "Ref": "PilotTask"
+              },
+              "Condition": {
+                "ArnEquals": {
+                  "ecs:cluster": {
+                    "Ref": "ClusterArn"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "iam:PassRole"
+              ],
+              "Resource": [
+                {
+                  "Ref": "TaskExecutionRoleArn"
+                },
+                {
+                  "Ref": "TaskRoleArn"
+                }
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "iam:PassedToService": "ecs-tasks.amazonaws.com"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:DescribeClusters"
+              ],
+              "Resource": {
+                "Ref": "ClusterArn"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:DescribeTasks",
+                "ecs:StopTask"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/stock-automation-paper/*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ecs:DescribeTaskDefinition",
+                "ec2:DescribeInstances"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": "ap-northeast-2"
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "cloudformation:DescribeStacks"
+              ],
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper/*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-control/*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-network/*"
+                }
+              ]
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "scheduler:GetSchedule"
+              ],
+              "Resource": {
+                "Ref": "RegularScheduleArns"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "lambda:InvokeFunction"
+              ],
+              "Resource": {
+                "Ref": "ControlFunctionArn"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "dynamodb:GetItem",
+                "dynamodb:Scan"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/stock-automation-paper"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/validation/batch/${PilotId}/*"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:ListBucket"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}"
+              },
+              "Condition": {
+                "StringLike": {
+                  "s3:prefix": [
+                    {
+                      "Fn::Sub": "validation/batch/${PilotId}/*"
+                    },
+                    {
+                      "Ref": "DecisionKey"
+                    },
+                    {
+                      "Fn::Sub": "${ParentPrefix}/*"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject"
+              ],
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${PlanKey}"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${DecisionKey}"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/config/calendar/current.json"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${MorningResultKey}"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${ParentPrefix}/*"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${ParentPlanKey}"
+                }
+              ]
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "secretsmanager:GetSecretValue"
+              ],
+              "Resource": {
+                "Ref": "TelegramSecretArn"
+              }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/stock-paper-batch:*"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "PilotRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "stock-paper-batch",
+        "Path": "/stock-paper/",
+        "PermissionsBoundary": {
+          "Ref": "Boundary"
+        },
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "five-dated-paper-sessions",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:RunTask"
+                  ],
+                  "Resource": {
+                    "Ref": "PilotTask"
+                  },
+                  "Condition": {
+                    "ArnEquals": {
+                      "ecs:cluster": {
+                        "Ref": "ClusterArn"
+                      }
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "iam:PassRole"
+                  ],
+                  "Resource": [
+                    {
+                      "Ref": "TaskExecutionRoleArn"
+                    },
+                    {
+                      "Ref": "TaskRoleArn"
+                    }
+                  ],
+                  "Condition": {
+                    "StringEquals": {
+                      "iam:PassedToService": "ecs-tasks.amazonaws.com"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:DescribeClusters"
+                  ],
+                  "Resource": {
+                    "Ref": "ClusterArn"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:DescribeTasks",
+                    "ecs:StopTask"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/stock-automation-paper/*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ecs:DescribeTaskDefinition",
+                    "ec2:DescribeInstances"
+                  ],
+                  "Resource": "*",
+                  "Condition": {
+                    "StringEquals": {
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "cloudformation:DescribeStacks"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-control/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/stock-automation-paper-network/*"
+                    }
+                  ]
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "scheduler:GetSchedule"
+                  ],
+                  "Resource": {
+                    "Ref": "RegularScheduleArns"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "lambda:InvokeFunction"
+                  ],
+                  "Resource": {
+                    "Ref": "ControlFunctionArn"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "dynamodb:GetItem",
+                    "dynamodb:Scan"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/stock-automation-paper"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject",
+                    "s3:PutObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/validation/batch/${PilotId}/*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:ListBucket"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}"
+                  },
+                  "Condition": {
+                    "StringLike": {
+                      "s3:prefix": [
+                        {
+                          "Fn::Sub": "validation/batch/${PilotId}/*"
+                        },
+                        {
+                          "Ref": "DecisionKey"
+                        },
+                        {
+                          "Fn::Sub": "${ParentPrefix}/*"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${PlanKey}"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${DecisionKey}"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/config/calendar/current.json"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${MorningResultKey}"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${ParentPrefix}/*"
+                    },
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucketName}/${ParentPlanKey}"
+                    }
+                  ]
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "secretsmanager:GetSecretValue"
+                  ],
+                  "Resource": {
+                    "Ref": "TelegramSecretArn"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/stock-paper-batch:*"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "LogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/stock-paper-batch",
+        "RetentionInDays": 7
+      }
+    },
+    "Pilot": {
+      "Type": "AWS::Lambda::Function",
+      "DependsOn": "LogGroup",
+      "Properties": {
+        "FunctionName": "stock-paper-batch",
+        "Runtime": "python3.13",
+        "Handler": "index.handler",
+        "MemorySize": 128,
+        "Timeout": 900,
+        "ReservedConcurrentExecutions": 2,
+        "Role": {
+          "Fn::GetAtt": [
+            "PilotRole",
+            "Arn"
+          ]
+        },
+        "Code": {
+          "ZipFile": "# Canonical sources: infra/paper_pilot.py and infra/paper_batch.py.\nimport base64,json,sys,types,zlib\nSOURCES_ZLIB_BASE64='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'\n_sources=json.loads(zlib.decompress(base64.b64decode(SOURCES_ZLIB_BASE64)))\n_base=types.ModuleType(\"paper_pilot\");sys.modules[\"paper_pilot\"]=_base\nexec(compile(_sources[\"paper_pilot\"],\"paper_pilot.py\",\"exec\"),_base.__dict__)\nexec(compile(_sources[\"paper_batch\"],\"paper_batch.py\",\"exec\"))\n"
+        },
+        "Environment": {
+          "Variables": {
+            "PAPER_BUCKET": {
+              "Ref": "ArtifactBucketName"
+            },
+            "PAPER_TABLE": "stock-automation-paper",
+            "PILOT_ID": {
+              "Ref": "PilotId"
+            },
+            "PLAN_KEY": {
+              "Ref": "PlanKey"
+            },
+            "PLAN_SHA256": {
+              "Ref": "PlanSha256"
+            },
+            "RESULT_PREFIX": {
+              "Fn::Sub": "validation/batch/${PilotId}"
+            },
+            "NAT_INSTANCE_ID": {
+              "Ref": "NatInstanceId"
+            },
+            "TASK_DEFINITION_ARN": {
+              "Ref": "PilotTask"
+            },
+            "CLUSTER_ARN": {
+              "Ref": "ClusterArn"
+            },
+            "SUBNET_IDS": {
+              "Fn::Join": [
+                ",",
+                {
+                  "Ref": "SubnetIds"
+                }
+              ]
+            },
+            "SECURITY_GROUP_IDS": {
+              "Fn::Join": [
+                ",",
+                {
+                  "Ref": "SecurityGroupIds"
+                }
+              ]
+            },
+            "CONTROL_FUNCTION_ARN": {
+              "Ref": "ControlFunctionArn"
+            },
+            "TELEGRAM_SECRET_ARN": {
+              "Ref": "TelegramSecretArn"
+            }
+          }
+        },
+        "Description": "Five dated paper sessions; predecessor gate, permanent failure halt, no real orders"
+      }
+    },
+    "SchedulerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "stock-paper-batch-scheduler",
+        "Path": "/stock-paper/",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "scheduler.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  }
+                },
+                "ArnLike": {
+                  "aws:SourceArn": {
+                    "Fn::Sub": "arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/default"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "dated-pilot-and-fallback-stop",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:StopInstances"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${NatInstanceId}"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "ec2:ResourceTag/Project": "paper-fixed-egress",
+                      "ec2:ResourceTag/Name": "stock-automation-paper-nat",
+                      "aws:RequestedRegion": "ap-northeast-2"
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "lambda:InvokeFunction"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "Pilot",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "GateSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-batch-gate",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": "cron(45 9 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"GATE\",\"batch_id\":\"${PilotId}\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        },
+        "StartDate": {
+          "Ref": "PmStart"
+        },
+        "EndDate": {
+          "Ref": "PmEnd"
+        }
+      }
+    },
+    "StartPmSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-batch-start-pm",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": "cron(40 14 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"START_PM\",\"batch_id\":\"${PilotId}\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        },
+        "StartDate": {
+          "Ref": "PmStart"
+        },
+        "EndDate": {
+          "Ref": "PmEnd"
+        }
+      }
+    },
+    "Scan1450Schedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-batch-scan-1450",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": "cron(47 14 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"SCAN_1450\",\"batch_id\":\"${PilotId}\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        },
+        "StartDate": {
+          "Ref": "PmStart"
+        },
+        "EndDate": {
+          "Ref": "PmEnd"
+        }
+      }
+    },
+    "Shortlist1510Schedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-batch-shortlist-1510",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": "cron(7 15 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"SHORTLIST_1510\",\"batch_id\":\"${PilotId}\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        },
+        "StartDate": {
+          "Ref": "PmStart"
+        },
+        "EndDate": {
+          "Ref": "PmEnd"
+        }
+      }
+    },
+    "Entry1520Schedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-batch-entry-1520",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": "cron(17 15 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"ENTRY_1520\",\"batch_id\":\"${PilotId}\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        },
+        "StartDate": {
+          "Ref": "PmStart"
+        },
+        "EndDate": {
+          "Ref": "PmEnd"
+        }
+      }
+    },
+    "EquitySnapshot1550Schedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-batch-equity-snapshot-1550",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": "cron(47 15 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"EQUITY_SNAPSHOT_1550\",\"batch_id\":\"${PilotId}\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        },
+        "StartDate": {
+          "Ref": "PmStart"
+        },
+        "EndDate": {
+          "Ref": "PmEnd"
+        }
+      }
+    },
+    "StopPmSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-batch-stop-pm",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": "cron(10 16 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"STOP_PM\",\"batch_id\":\"${PilotId}\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        },
+        "StartDate": {
+          "Ref": "PmStart"
+        },
+        "EndDate": {
+          "Ref": "PmEnd"
+        }
+      }
+    },
+    "ReportPmSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-batch-report-pm",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": "cron(15 16 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"REPORT_PM\",\"batch_id\":\"${PilotId}\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        },
+        "StartDate": {
+          "Ref": "PmStart"
+        },
+        "EndDate": {
+          "Ref": "PmEnd"
+        }
+      }
+    },
+    "StartAmSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-batch-start-am",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": "cron(55 8 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"START_AM\",\"batch_id\":\"${PilotId}\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        },
+        "StartDate": {
+          "Ref": "AmStart"
+        },
+        "EndDate": {
+          "Ref": "AmEnd"
+        }
+      }
+    },
+    "Exit0905Schedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-batch-exit-0905",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": "cron(2 9 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"EXIT_0905\",\"batch_id\":\"${PilotId}\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        },
+        "StartDate": {
+          "Ref": "AmStart"
+        },
+        "EndDate": {
+          "Ref": "AmEnd"
+        }
+      }
+    },
+    "Exit0910Schedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-batch-exit-0910",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": "cron(8 9 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"EXIT_0910\",\"batch_id\":\"${PilotId}\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        },
+        "StartDate": {
+          "Ref": "AmStart"
+        },
+        "EndDate": {
+          "Ref": "AmEnd"
+        }
+      }
+    },
+    "StopAmSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-batch-stop-am",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": "cron(25 9 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"STOP_AM\",\"batch_id\":\"${PilotId}\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        },
+        "StartDate": {
+          "Ref": "AmStart"
+        },
+        "EndDate": {
+          "Ref": "AmEnd"
+        }
+      }
+    },
+    "ReportAmSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-batch-report-am",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": "cron(40 9 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::GetAtt": [
+              "Pilot",
+              "Arn"
+            ]
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"action\":\"REPORT_AM\",\"batch_id\":\"${PilotId}\",\"scheduled_at\":\"<aws.scheduler.scheduled-time>\"}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        },
+        "StartDate": {
+          "Ref": "AmStart"
+        },
+        "EndDate": {
+          "Ref": "AmEnd"
+        }
+      }
+    },
+    "FallbackPmSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-batch-fallback-pm",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": "cron(20 16 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::Sub": "arn:${AWS::Partition}:scheduler:::aws-sdk:ec2:stopInstances"
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"InstanceIds\":[\"${NatInstanceId}\"]}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        },
+        "StartDate": {
+          "Ref": "PmStart"
+        },
+        "EndDate": {
+          "Ref": "PmEnd"
+        }
+      }
+    },
+    "FallbackAmSchedule": {
+      "Type": "AWS::Scheduler::Schedule",
+      "Properties": {
+        "Name": "stock-paper-batch-fallback-am",
+        "State": {
+          "Ref": "PilotState"
+        },
+        "ScheduleExpression": "cron(35 9 ? * MON-FRI *)",
+        "ScheduleExpressionTimezone": "Asia/Seoul",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "Target": {
+          "Arn": {
+            "Fn::Sub": "arn:${AWS::Partition}:scheduler:::aws-sdk:ec2:stopInstances"
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRole",
+              "Arn"
+            ]
+          },
+          "Input": {
+            "Fn::Sub": "{\"InstanceIds\":[\"${NatInstanceId}\"]}"
+          },
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 60,
+            "MaximumRetryAttempts": 0
+          }
+        },
+        "StartDate": {
+          "Ref": "AmStart"
+        },
+        "EndDate": {
+          "Ref": "AmEnd"
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "PilotArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Pilot",
+          "Arn"
+        ]
+      }
+    },
+    "PilotTaskArn": {
+      "Value": {
+        "Ref": "PilotTask"
+      }
+    },
+    "SchedulerRoleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "SchedulerRole",
+          "Arn"
+        ]
+      }
+    },
+    "GateScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "GateSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "StartPmScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "StartPmSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "Scan1450ScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Scan1450Schedule",
+          "Arn"
+        ]
+      }
+    },
+    "Shortlist1510ScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Shortlist1510Schedule",
+          "Arn"
+        ]
+      }
+    },
+    "Entry1520ScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Entry1520Schedule",
+          "Arn"
+        ]
+      }
+    },
+    "EquitySnapshot1550ScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "EquitySnapshot1550Schedule",
+          "Arn"
+        ]
+      }
+    },
+    "StopPmScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "StopPmSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "ReportPmScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "ReportPmSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "StartAmScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "StartAmSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "Exit0905ScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Exit0905Schedule",
+          "Arn"
+        ]
+      }
+    },
+    "Exit0910ScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Exit0910Schedule",
+          "Arn"
+        ]
+      }
+    },
+    "StopAmScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "StopAmSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "ReportAmScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "ReportAmSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "FallbackPmScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "FallbackPmSchedule",
+          "Arn"
+        ]
+      }
+    },
+    "FallbackAmScheduleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "FallbackAmSchedule",
+          "Arn"
+        ]
+      }
+    }
+  }
+}

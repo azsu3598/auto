@@ -279,6 +279,52 @@ python -m compileall -q src tests
 
 ## 10. 세션 전달 기록
 
+### 2026-10-22 20:04 KST — PC-C / 실제 역할 준비 검사·1회 모의 예약15개 ON·모바일 새 로그인 확인 완료
+
+- 관리자 콘솔에서 처음 리소스 가져오기 절차로 진입해22개 자원의 DeletionPolicy 오류가 반복됐다. 가져오기용 정책을 추가하지 않고 표준 새 리소스 생성 경로로 안내했다. 생성 완료 응답 뒤 실제 **stock-automation-paper-pilot CREATE_COMPLETE**, 원격 템플릿/매개변수·Lambda 실제 ZIP wrapper/canonical source SHA·환경/자원 제한·정확한15개 예약 시각/대상/역할/재전송 제한을 대조했다. 이전 새 스택 AccessDenied를 스택 없음으로 판단하지 않았다.
+- Git 제외 runtime/arm_paper_pilot_20261022.py를 실행했다. immutable plan 조건부 게시/동일 bytes 재확인과 **실제 Lambda 역할의 READINESS_CHECK 활성화 전후2회**를 통과했다. 실제 달력/이전 정상시험/원장 기준선·stopped/idle·기존 정기23개 OFF를 읽으며 서버/worker를 시작하거나 가짜 시각으로 phase를 실행하지 않았다. 독립 정지→종료→보고→청산→진입/분석→START→GATE 순서로 **이번1회15개만 활성화**, 실제 재조회 후 **ARMED_IN_AWS**를 저장했다. 별도 최종 SDK 조회도 **pilot15개 ENABLED·기존 정기23개 DISABLED**를 확인했다. 정기 예약·실거래를 켜지 않았다.
+- tools/paper_operations.py status 실제 실행은 **서버 stopped·running/pending0·가상지갑 NOT_CREATED·열린 가상수량0·ARMED·미래 단계 NO_RECORD**다. 실제 stop은 의도된 운용을 차단하므로 시험으로 누르지 않았다. 증거는 runtime/paper-pilot-armed-20261022.json과 paper-pilot-final-read-20261022.json이며 민감 식별자는 Git에 넣지 않았다. 운영 도구/검증은 기존 Windows CA/작업 프로필을 재사용하고 API Secret을 직접 읽지 않는다.
+- 확정 KST 계획: **가상600,000원·10/23(금)09:25 GATE→14:40 기동→14:50 스캔→15:10 후보→15:20 진입 판단→15:50 자산→16:10 정리/정지→16:15 보고→16:20 독립 정지**, **10/26(월)08:55 기동→09:05 위험 확인→09:10 남은 가상수량 청산→09:25 정리/정지→09:35 독립 정지→09:40 보고**. 준비 worker는2~3분 먼저 실행되지만 원래 판단 시각과 기간 제한을 유지한다. 키움 demo 읽기+내부 가상 장부이며 브로커 모의/실주문 제출이 아니다. 조건 부족 NO_TRADE 허용, 이1회 뒤 자동 새 진입 없음. 미래 판단/체결/청산·5거래일 통과는 아직 결과가 아니다.
+- 기존 '모의매매 시작 시 모바일 재개' 요청에 따라 Git 제외 runtime/resume_mobile_dashboard_20261022.py를 준비/구문 검사하고 실행했다. pause 증거/원본 백업 해시·나머지 자산/config·원격 웹 템플릿/readonly API ZIP/LIVE0 불변을 확인하고 원본3개만 복구했다. CloudFront invalidation 완료·HTTPS bytes/no-store/보안 헤더·로그인200·미인증/잘못된 토큰 거부·S3 직접403을 확인했다. 과거 pause 증거/백업은 보존하고 새 runtime/paper-web-resume-20261022.json 및 복구 전 paused 자산 백업을 남겼다. 사용자가 **휴대폰 로그인 후 숫자 표시**도 확인했다. 비밀번호/키를 받지 않았고 새 서버/IP·주문 권한 없음. 웹은 서버 정지 중에도 저장된 모의 원장을 읽는다.
+- PC-C_단독진행_전체인수인계.md 최신 안내를 실제 ARMED 상태/전체 일정/상태·중지/모바일 확인/1회 범위/보존 파일로 갱신하고 infra/고정IP_모의배포_진행.md에 새 기록을 추가했다. 과거 기록 보존. 이전 전체 **339개/skip0·pilot25/operations4·Node4·9템플릿/업로드 파일 lint·구문·AWS ValidateTemplate**는 아래 준비 기록을 유지하며 이후 배포/상태·웹 복구·기록만 수행했고 운영 worker/image 변경 없음. 최종 문서 diff 검사를 수행한다. 코드/도구 변경은 이번 미커밋 상태로 보존했고 pull/commit/push 미요청·미실행이다.
+- **LIVE_ORDER_ENABLED=0·실계좌 Secret/실주문 없음·kill switch 해제 없음**. 기존 취약점의 패치 완료나 모든 AWS 권한 정상으로 확대하지 않는다. 다음은 미래 GATE/진입/청산 결과를 status/Telegram/readonly 원장으로 확인하고 실패 시 신규 진입을 차단하는 것. 이 immutable 계획의 날짜를 바꾸거나 lease/STOP을 지워 재사용하지 않는다. SDK ENABLED와 CFN PilotState 기본 DISABLED 차이는 검토 후 의도된 활성화 상태다. 사용자 대화 마감은 오늘22:00이며 PC OFF 후 Codex 개발/복구가 계속되는 것으로 안내하지 않는다.
+
+### 2026-10-22 KST — PC-C / 단독 status 명령 실제 성공·운영 안내 저장·pilot 관리자 생성 응답 대기
+
+- 새 tools/paper_operations.py status를 실제 작업 계정으로 실행해 server stopped·running/pending0·가상지갑 NOT_CREATED·포지션0·새 pilot phase NO_RECORD(아직 준비 전)를 확인했다. 이는 프로그램 가상 장부의 실제 조회이며 실계좌 잔고가 아니다. 읽기 전용으로 동작했고 private 식별자/Secret 값은 출력하지 않았다.
+- 루트 PC-C_단독진행_전체인수인계.md 맨 위에 최신 운영 안내를 추가했다. 이번1회 운용 범위/시간·CMD 상태 확인·로그인 만료 대응·중지할 때만 실행하는 stop·상태 코드 의미·중지 후 가상 포지션 보존·새 시작 기능 없음·보존 파일/남은 검증/PC OFF 범위를 정리했다. 과거 본문은 보존했다. 모바일은 아직 중지, 현재 ADMIN_CREATION_PENDING으로 정확히 표시했다. 이전 전체339개/skip0·focused pilot25/operations4·Node4·9템플릿/실제 업로드파일 lint/AWS ValidateTemplate 검증 유지, 추가 운영 소스 변경 없음.
+- 사용자에게 관리자 서울 CloudFormation **새 스택 stock-automation-paper-pilot**, 파일 **C:/Test/runtime/paper-pilot-console-20261022-final.yaml**, 기본값/PilotState DISABLED·IAM 역할 미선택·이름 지정 IAM 확인 후 생성을 요청했고 완료 응답 대기다. 이유는 작업 계정에 새 IAM 구성 생성 권한이 없기 때문이다. 다음은 runtime/arm_paper_pilot_20261022.py로 실제검증/READINESS/조건부plan게시/15개arming이다. 이 단계 전 자동 모의매매가 켜졌다고 표시하지 않는다. 실제 pilot stop은 누르지 않았다.
+- 이번 최종 안내 저장에서도 AWS 쓰기/새서버 기동/주문·실거래 설정 변경 없음. Git commit/push 미요청·미실행, 이번 미커밋 파일 보존. 오늘22:00 KST 마감 안에 관리자 반영 후 검증/arming·모바일 복구 여부·최종 상태 안내를 마무리한다.
+
+
+### 2026-10-22 KST — PC-C / 대화 종료 대비1회 종가배팅 모의운용·독립 중지 도구 준비·관리자 생성 대기
+
+- 오늘22시 대화 마감 전에 사용 가능한 범위를 마무리하기 위해 기존 paper pilot 초안을 실제1회 운용으로 준비했다. **10/23 15:20 가상진입→다음 거래일10/26 09:05/09:10 가상청산**, 가상자금600,000원, 프로그램 내부 가상 장부이며 증권사 주문을 제출하지 않는다. 조건 미달 NO_TRADE 허용, 이1회 이후 새 자동진입 없음. 새 EC2/EIP·상시 서비스 없이 기존 image/roles/private network를 재사용한다. 관리자 반영·실제 역할 READINESS·arming은 아직 남았으며 현재 **ADMIN_CREATION_PENDING**이다.
+- 변경: infra/paper_pilot.py, tools/build_paper_pilot_template.py, 생성 infra/paper-one-session-pilot.yaml, tests/test_paper_pilot.py, 새 tools/paper_operations.py, tests/test_paper_operations.py. 기존 오전 PASSED/영구 완료 lease를 실제 대조하고 승인한 과거 빈 EXIT_0905 완료 제어 기록만 허용하며 전체 원장 기준선/실제 현재 stopped·idle를 유지한다. 거래일/다음 거래일/달력 변경을 검증하고, 원래 phase clock/window/attempt/runtime 가드를 그대로 호출한다. 준비 상태 확인 전용 READINESS_CHECK는 actual Lambda role로 읽기만 하며 시작/결과 쓰기/알림을 하지 않는다.
+- STOP 표식 존재 시 GATE/모든 후속 START·RUN을 차단한다. 종료/보고/native fallback은 남긴다. ENTRY는 실제 SCAN/SHORTLIST 완료와 기존 OPEN/PENDING 없음도 요구한다. 보고는 S3 결정이 실제 DDB payload와 일치할 때만 BUY/NO_TRADE로 표현하고, 남은 포지션/서버 미정지는 RECONCILIATION_REQUIRED로 남긴다. 없는 S3 표식을403으로 오인하지 않게 자기 prefix/정확한 decision key에 제한된 ListObjects 권한으로 확인한다. Role/Boundary에는 정기 예약 변경·DDB 쓰기·실계좌 Secret·직접 EC2 시작 권한을 넣지 않았다.
+- CloudFormation compact body에 실제 기본값을 넣으니51,200byte를 넘었던 초기 준비는 자원 생성 전 중단했다. canonical infra/paper_pilot.py를 zlib/base64로 결정적 인라인 패키징하고 wrapper/원문 해시 대조 및 원문 복원 테스트를 추가했다. 파일은 Git 제외 **runtime/paper-pilot-console-20261022-final.yaml**(업로드), paper-pilot-plan-20261022-final.json, paper-pilot-immutable-plan-20261022-final.json이다. v1/v2 로컬 준비 파일도 보존한다. 실제 변수 해석 후 IAM 크기 Boundary5528/Review5400 수준으로 제한6144 미만을 확인했다. 새 final source/기본값 AWS ValidateTemplate·lint 통과, 기존 진단 Task와 운영 이미지 불변이다.
+- **전체339개/skip0**, pilot focused25개·운영도구4개 포함, Node4개, 소스9템플릿/실제 업로드 파일 lint·구문·diff 검사 통과. Docker Desktop이 꺼져 있어 정상 시작한 뒤 전체를 실행했다. 운영 Docker 이미지를 빌드하거나 ECR로 보내지 않았다. 새 변경은 제어/검증/운영 도구이며 production worker는 그대로다.
+- 사용자 도구 tools/paper_operations.py는 status/stop만 제공하고 시작·재설정 기능이 없다. stop은 자기 STOP 표식을 조건부 저장→신규진입 관련9개 예약 OFF→기존 제어 VERIFY_STOP→실제 stopped/idle 확인 순서이며 종료/보고 예약은 보존한다. 실제 가상 포지션을 삭제하거나 임의매도하지 않는다. 로그인은 기존 stock-paper-operator 프로필/Windows CA/계정 일치를 확인하고 Secret을 직접 읽지 않는다. actual pilot에 stop을 누르면 재개하지 않는 설계이므로 실환경 destructive stop 시험은 하지 않았다. 실패 분기/순서·대상·영역 차단은4개 단위검사로 확인했다.
+- 다음 실제 도구 **runtime/arm_paper_pilot_20261022.py**: 관리자 새 스택 stock-automation-paper-pilot CREATE_COMPLETE 후 전체 템플릿/매개변수/실제 ZIP wrapper·canonical source SHA/환경/15개 정확한 대상/시각을 대조한다. immutable plan을 조건부 게시/읽기 확인하고 actual Lambda READINESS_CHECK로 broker order 없이 역할/달력/기준선/운영/모든 기존 정기 예약 실제 OFF를 확인한 후 fallback/stop/report/exit 우선으로15개만 켠다. 실패 시 전부 OFF로 복구한다. 아직 실행하지 않았다.
+- 기존 두 문서 수정 외 AWS 자원/예약 변경은 아직 없다. 오전 정상시험 PASSED·현재stopped·기존 실제 종료시험4개OFF는 직전 읽기 확인을 따른다. 현재 main/0e61376의 이번 변경은 미커밋이며 기존 작업을 보존했다. push 미요청이므로 commit/push 없음. LIVE0·실계좌 Secret/실주문·kill switch 해제 없음. 모바일 웹은 아직 일시 중지 상태이며 실제 pilot arming 확인 후 별도 복구/인증 조회 검증을 마무리한다.
+
+
+### 2026-10-22 KST — PC-C / 정상 시간 AWS 자동 재검증 PASSED·정리 권한 포함7/7·종료 시험4개 OFF
+
+- 사용자 AWS 재인증 완료 후 runtime/check_worker_retest_20261022.py를 실행했다. 새 시험 결과 **PASSED / NORMAL_TIME_EMPTY_EXIT_VERIFIED**, 정상 시간 worker verified·cleanup_complete·실제 COMPLETED lease·시작/종료 허용 창·동일 시험 부팅·현재 stopped의 **7/7** 대조를 통과했다. 실제 실행은 KST **09:02:17 준비 시작→정상09:05 빈 EXIT_0905→09:06:06 전체 결과 PASSED**다. 이번에는 수정된 Lambda 역할에서 자동 예약 전체 실행 및 목록 조회/종료 정리를 통과한 실제 증거이며 전날 PC 계정 장외 진단과 구분된다.
+- 추가 runtime/diagnose_worker_retest_20261022.py 읽기로 현재 NAT stopped·ECS running/pending0·real attempt COMPLETED·worker EXIT_REVIEW_COMPLETE/results=[]·제어 READY/STOP_REQUESTED와 검증 PASSED/뒤늦은 WATCH ALREADY_FINAL을 확인했다. Telegram API notification_accepted=true이며 사용자가 실제 수신/열람했는지는 별도 미확인이다. 저녁 조회에서는 ECS의 역사적 Task 상세가 만료돼 UNAVAILABLE이므로 현재 exitCode 재조회로 확대하지 않고 오전 검증 표식·원래 로그·영구 lease를 대조했다.
+- 종료된 재시험4개를 정리했다. stopped/idle·정확한 TestId/PASSED/cleanup_complete·기존 arming의 대상/역할/입력/시각 불변·모든 발생 시각 과거를 확인한 뒤 **StartTest→RunTest→WatchTest→FallbackStop 네 개만 DISABLED**로 바꿨다. 각 재조회4/4 OFF와 속성 불변, PASSED 객체 전체 해시 불변을 확인했다. 결과/lease를 고치거나 지우지 않았고 재실행·서버 기동·정기 매매 예약 활성화를 하지 않았다. 정기 모의매매 예약은 CFN 설정상 OFF이고 직접 실제 상태 조회는 기존 권한 제한이 있으므로 전체 SDK 조회 성공으로 표현하지 않는다.
+- 증거는 Git 제외 runtime/paper-worker-retest-observed-result-20261022.json, paper-worker-retest-diagnosis-20261022.json, paper-worker-retest-finished-schedules-disabled-20261022.json에 보관한다. **오전 권한 오류 수정이 정상 시간 Lambda 자동 실행/정리 경로에서도 확인됐다.** 다만 이번은 빈 청산 worker 검증이므로 종가배팅 진입·최신 시세/촉매 판단·가상 체결·잔고 운용·5거래일 성공으로 확대하지 않는다. 조건부 오후 pilot은 여전히 미배포·미활성이며 모바일 웹 일시 중지도 변경하지 않았다.
+- 추적 변경은 본 인수인계와 운영 진행 문서뿐이다. main/0e61376에서 시작해 소스/이미지 변경·새 회귀 없음, 이전 전체327개/skip0·focused28·Node4·9템플릿 검증 유지. 문서 diff 검사 수행, pull/commit/push 없음. LIVE_ORDER_ENABLED=0·실계좌 Secret·실주문·kill switch 해제 없음. 최종 대화 마감은 오늘22:00 KST이며 다음 작업은 종가배팅 모의운용의 실제 준비 범위와 독립 상태 확인/중지 절차를 확정하는 것이다. 이미 지난 시험을 그대로 재생하지 않는다.
+
+
+### 2026-10-22 19:12 KST — PC-C / 당일 재시험 결과 확인 요청·AWS 재인증 대기
+
+- 사용자 확인 요청으로 AGENTS→PC-C 전체 인수인계→공동 인수인계를 읽고 실제 main/0e61376(모의 테스트 예정)·깨끗한 작업 폴더·충돌 없음을 확인했다. 4f0413e 이후 이전 세션 작업이 새 커밋에 들어가 있으므로 예전 dirty 상태로 간주하지 않는다. pull/코드 변경/덮어쓰기 없음.
+- runtime/check_worker_retest_20261022.py 실행은 LoginRefreshRequired로 중단됐다. 오늘 AWS 시험 성공/실패·서버 현 상태는 아직 조회하지 못했다. 사용자에게 CMD aws login --profile stock-paper-operator --remote의 브라우저와 CMD Updated profile 완료를 요청했다. 인증값은 요청하지 않았다. 마감22:00 KST를 유지하며 재인증 직후 새 결과 도구부터 실행한다.
+- 예비 읽기 도구 runtime/diagnose_worker_retest_20261022.py를 Git 제외 경로에 준비하고 py_compile 통과했다. 새 재시험 계획/runtime_parameters·새 arming 출력만 읽고 결과/정리/worker·제어 로그·현재 서버·클러스터·실제 lease를 진단한다. 과거10/21 결과를 새 결과로 오인하지 않는다. 이번 AWS 변경·재기동·재실행·예약/주문 활성화 없음, 앱 코드/새 전체 회귀 없음. 이전327개/skip0·focused28·Node4·9템플릿 검증은 이전 기록이며 이번 재검사로 표시하지 않는다. 실거래/실계좌 Secret·kill switch 해제 없음. commit/push 없음.
+
+
 ### 2026-10-21 KST — PC-C / 최종 대화 마감10월22일22:00 KST 확정
 
 - 사용자가 내일10/22 **오후10시(22:00 KST)**까지 대화 가능하다고 답했다. 오전에는 PC를 꺼두며, 이미 등록된 AWS 시험은 PC와 독립적으로 실행한다. 다음 접속 시 runtime/check_worker_retest_20261022.py로 실제 결과/현재 서버 상태부터 읽고, 마감 전 모의운용 가능 여부와 남은 작업·사용자 단독 상태 확인/중지/오류 대응 절차를 확정한다. 미배포 pilot이나 미검증 운용을 완료로 표시하지 않는다. 최종 대화 이후 Codex의 개발/복구 작업이 자동으로 계속된다고 안내하지 않는다.

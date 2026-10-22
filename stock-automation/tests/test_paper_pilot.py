@@ -1,10 +1,13 @@
 import copy
+import ast
+import base64
 import hashlib
 import importlib.util
 import io
 import json
 from pathlib import Path
 import unittest
+import zlib
 from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
@@ -54,6 +57,7 @@ class PilotTests(unittest.TestCase):
         self.pilot = p.Pilot(self.clients, self.env, clock=lambda: self.now, sleep=Mock())
         self.clients['s3'].get_object.side_effect = lambda **kw: {'Body': io.BytesIO(self.raw)}
         self.pilot.get = Mock(return_value=None)
+        self.pilot.rows = Mock(return_value=[])
         self.pilot.notify = Mock()
 
     def event(self, name):
@@ -150,7 +154,7 @@ class PilotTests(unittest.TestCase):
             'test_id':self.plan['morning_test_id'],'occurrence':self.plan['morning_occurrence'],
             'task_definition':self.plan['morning_task_definition'],'worker_attempt_key':key,
             'checked_at':(at+timedelta(minutes=2)).isoformat(),'baseline_digest':p.digest([])}
-        self.pilot.get.return_value=proof
+        self.pilot.get.side_effect=lambda key,optional=False: proof if key==self.plan['morning_result_key'] else None
         self.clients['dynamodb'].get_item.return_value={'Item':{'status':{'S':'COMPLETED'},'owner':{'S':'a'*32},
             'started_at':{'S':at.isoformat()},'finished_at':{'S':(at+timedelta(seconds=5)).isoformat()}}}
         return proof,key
@@ -230,6 +234,80 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(run['Resource'],{'Ref':'PilotTask'})
         self.assertLess(len(json.dumps(policy,separators=(',',':'))),6144)
         self.assertFalse(any(r['Type'] in ('AWS::EC2::Instance','AWS::EC2::EIP','AWS::ECS::Service') for r in template['Resources'].values()))
+
+    def test_inline_package_is_exact_reviewed_plaintext_and_deterministic(self):
+        wrapper=builder.inline_source()
+        tree=ast.parse(wrapper)
+        assignments=[n for n in tree.body if isinstance(n,ast.Assign)]
+        encoded=ast.literal_eval(assignments[0].value)
+        self.assertEqual(zlib.decompress(base64.b64decode(encoded)).decode(),(ROOT/'infra/paper_pilot.py').read_text(encoding='utf-8'))
+        self.assertEqual(wrapper,builder.inline_source())
+
+    def test_manual_stop_blocks_gate_start_and_worker_without_blocking_cleanup(self):
+        self.pilot.get.return_value={'status':'STOPPED'}
+        with self.assertRaisesRegex(ValueError,'MANUALLY_STOPPED'):self.pilot.readiness(self.plan)
+        with self.assertRaisesRegex(ValueError,'MANUALLY_STOPPED'):self.pilot.require_ready(self.plan)
+        self.clients['ecs'].run_task.assert_not_called();self.clients['lambda'].invoke.assert_not_called()
+
+    def test_optional_object_uses_scoped_list_without_hiding_access_denied(self):
+        del self.pilot.get
+        self.clients['s3'].list_objects_v2.return_value={'Contents':[]}
+        self.assertIsNone(self.pilot.get('validation/pilot/approved/STOP.json',optional=True))
+        self.clients['s3'].get_object.assert_not_called()
+        self.clients['s3'].list_objects_v2.side_effect=RuntimeError('denied')
+        with self.assertRaisesRegex(RuntimeError,'denied'):self.pilot.get('validation/pilot/approved/STOP.json',optional=True)
+
+    def test_report_does_not_claim_a_buy_without_matching_ledger(self):
+        self.plan['decision_key']='runs/approved/decision.json'
+        self.pilot.get.side_effect=lambda key,optional=False: {'idempotency_key':'decision','decision':'BUY'} if key==self.plan['decision_key'] else {'status':'COMPLETED'}
+        self.clients['dynamodb'].get_item.return_value={'Item':{}}
+        self.clients['ec2'].describe_instances.return_value={'Reservations':[{'Instances':[{'State':{'Name':'stopped'}}]}]}
+        self.clients['ecs'].describe_clusters.return_value={'clusters':[{'runningTasksCount':0,'pendingTasksCount':0}]}
+        self.pilot.report('REPORT_PM',self.plan)
+        self.assertEqual(self.pilot.report_detail['decision'],'NO_RECORD')
+
+    def test_readiness_check_before_gate_is_read_only(self):
+        self.now-=timedelta(hours=1)
+        self.pilot.readiness=Mock(return_value={})
+        result=self.pilot.handle({'action':'READINESS_CHECK','pilot_id':self.env['PILOT_ID']})
+        self.assertEqual(result,{'status':'READINESS_VERIFIED','paper_only':True,'mutations':False})
+        self.clients['s3'].put_object.assert_not_called();self.clients['ecs'].run_task.assert_not_called()
+        self.clients['lambda'].invoke.assert_not_called();self.pilot.notify.assert_not_called()
+        self.now=p.stamp(self.plan['events']['GATE']['dispatch_at'])
+        with self.assertRaisesRegex(ValueError,'WINDOW_CLOSED'):
+            self.pilot.handle({'action':'READINESS_CHECK','pilot_id':self.env['PILOT_ID']})
+
+    def test_calendar_requires_the_actual_next_trading_day(self):
+        self.plan['approved_calendar']={'year':2026,'automatic_schedule_eligible':True,
+            'reviewed_through':'2026-12-31','holidays':[],'special_session_review_dates':[]}
+        p.validate_calendar(self.plan)
+        self.plan.update(entry_date='2026-10-23',exit_date='2026-10-26')
+        p.validate_calendar(self.plan)
+        self.plan['exit_date']='2026-10-27'
+        with self.assertRaisesRegex(ValueError,'NEXT_SESSION'):p.validate_calendar(self.plan)
+        self.plan['exit_date']='2026-10-26';self.plan['approved_calendar']['automatic_schedule_eligible']=False
+        with self.assertRaisesRegex(ValueError,'CALENDAR'):p.validate_calendar(self.plan)
+
+    def test_historical_reviewed_lease_is_allowed_without_admitting_business_rows(self):
+        proof,key=self.proof()
+        historical=p.stamp(self.plan['morning_occurrence'])-timedelta(days=1)
+        prior='CONTROL#RUN#EXIT_0905#'+historical.isoformat()
+        row={'pk':{'S':prior},'status':{'S':'COMPLETED'},'owner':{'S':'b'*32},
+            'started_at':{'S':historical.isoformat()},'finished_at':{'S':(historical+timedelta(seconds=5)).isoformat()}}
+        proof['baseline_digest']=p.digest([row]);self.plan['prior_attempt_keys']=[prior]
+        self.pilot.configuration=Mock();self.pilot.rows.return_value=[row]
+        self.clients['ec2'].describe_instances.return_value={'Reservations':[{'Instances':[{'State':{'Name':'stopped'}}]}]}
+        self.clients['ecs'].describe_clusters.return_value={'clusters':[{'runningTasksCount':0,'pendingTasksCount':0}]}
+        self.assertEqual(self.pilot.readiness(self.plan),proof)
+        row['status']={'S':'RUNNING'}
+        with self.assertRaisesRegex(ValueError,'HISTORICAL'):self.pilot.readiness(self.plan)
+
+    def test_entry_blocks_when_a_position_or_pending_record_exists(self):
+        self.pilot.get.return_value={'status':'COMPLETED'}
+        self.clients['ecs'].describe_clusters.return_value={'clusters':[{'runningTasksCount':0,'pendingTasksCount':0}]}
+        self.pilot.rows.return_value=[{'pk':{'S':'OPEN#CLOSING_BET#KRX_1520'}}]
+        with self.assertRaisesRegex(ValueError,'EXISTING_POSITION'):self.pilot.run('ENTRY_1520',self.plan['events']['ENTRY_1520'],self.plan)
+        self.clients['ecs'].run_task.assert_not_called()
 
 
 if __name__ == '__main__':
