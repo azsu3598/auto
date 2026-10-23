@@ -279,6 +279,17 @@ python -m compileall -q src tests
 
 ## 10. 세션 전달 기록
 
+### 2026-10-23 09:37 KST — PC-D / batch 검사 누락·실제 날짜 검증 보완·commit/push 승인
+
+- 요청/권한: 앞선 두 검증 공백을 코드로 수정하고 테스트·인수인계 후 commit/push까지 사용자 명시 승인. 기존 로컬 작업/안전장치를 보존하며 AWS 배포·예약·실거래 활성화는 요청 범위가 아니다.
+- 변경 파일: stock-automation/tools/paper_batch_checks.py(신규), tools/validate_paper_infrastructure.py, tools/build_paper_batch_template.py, infra/paper-five-session-batch.yaml, tests/test_paper_batch.py, tests/test_paper_batch_checks.py(신규), docs/운영 검증/2026-10-23_검사보완_PC-C_적용가이드.md(신규), 본 최신 기록. 생략된 tools/infra/tests 접두사는 모두 stock-automation/ 아래다.
+- 구현: 기본 validator에 batch를 넣어10개 템플릿 검사. batch의15개 기간 제한 예약/기본DISABLED/독립 정지/권한/컨테이너 안전 검사 추가. 네 날짜 매개변수 AllowedPattern 및 builder/저장 생성물 일치 유지. 실제 runtime 계획을 읽는 오프라인 CLI로 UTC밀리초·실제 날짜·기간 순서·승인KST날짜·기동/보고/독립정지 포함을 검사하며 기존 batch 모의전용/5회/달력 검증을 재사용한다. Secret/계좌/계획 원문은 출력하지 않고 AWS 호출·파일 변경을 하지 않는다.
+- 테스트: 신규14개와 기존 고정 예시 날짜 테스트 교체. 전체 Python **375개 실행/373통과/Docker opt-in2개 skip/실패·오류0**, worker/pilot/batch/operations/새checks 집중 **93개 통과**(전체에 포함), Node인증4개 및 JS문법 통과. 기본 **10개 템플릿 schema/IAM/안전 검사 통과**, batch 생성물 일치·Python구문·의도한 변경공백 검사 수행. AWS 메타데이터/기존 자격증명 접근을 차단한 로컬 검증이며 Docker 실제 실행·PC-C runtime 계획·AWS 온라인 상태는 이번 미검증이다.
+- 보존/커밋 범위: 원래 PC-D 투자 CSV/XLSX·AGENTS·단독 인수인계 변경·과거 시장보고서와 양쪽 인수인계 기록은 작업 폴더에 그대로 보존한다. 이번 코드6개/적용가이드/본 최신 기록만 선별 stage하며 기존 변경과 archives/stash/runtime/자격증명은 섞지 않는다. main 기준7a1e8e5, push 전 원격 main 동일 확인. 이 기록을 포함한 커밋·전송 결과는 실제 Git 결과로 사용자에게 보고한다.
+- 다음 PC-C: clean 확인→pull --ff-only→AGENTS/단독/공동 재검토→적용가이드의 전체테스트·10템플릿검사→실제 batch 계획 파일이 있을 때 paper_batch_checks.py --plan으로 오프라인 검증→기존 paper_operations.py status로 현재 AWS 상태 별도 조회. 계획 파일이 없거나 실패하면 만들거나 날짜/해시를 고쳐 우회하지 않는다. batch 배포/arming 증거와 현재 pilot GATE/단계 결과를 먼저 대조해 기록한다. Git 수신만으로 AWS를 재배포/활성화하지 않는다.
+- 남은 위험: PC-C 실제 runtime 자료/원격 스택/예약/서버·5회 arming 상태를 이 PC에서 확인하지 못했다. 기존 AWS 실패 이력은 보존하며 테스트 성공을 실운용 성공으로 확대하지 않는다. 앞선09:29 점검의 두 검증 공백은 이번 코드에서 보완했고 원격 증거 확인은 별도다.
+- 실거래: LIVE_ORDER_ENABLED=0·기존 주문/계좌/포지션/kill-switch 보호 유지, 실계좌 Secret/실주문·비상정지 해제·AWS 배포/예약 변경 없음. LIVE CODE SAFETY 완성·실거래 통합검증/배포 성공을 선언하지 않는다. 실제 kill switch 상태는 미조회다.
+
 ### 2026-10-22 20:04 KST — PC-C / 실제 역할 준비 검사·1회 모의 예약15개 ON·모바일 새 로그인 확인 완료
 
 - 관리자 콘솔에서 처음 리소스 가져오기 절차로 진입해22개 자원의 DeletionPolicy 오류가 반복됐다. 가져오기용 정책을 추가하지 않고 표준 새 리소스 생성 경로로 안내했다. 생성 완료 응답 뒤 실제 **stock-automation-paper-pilot CREATE_COMPLETE**, 원격 템플릿/매개변수·Lambda 실제 ZIP wrapper/canonical source SHA·환경/자원 제한·정확한15개 예약 시각/대상/역할/재전송 제한을 대조했다. 이전 새 스택 AccessDenied를 스택 없음으로 판단하지 않았다.

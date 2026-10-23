@@ -5,6 +5,7 @@ does not call AWS, create resources, download schemas or submit package metadata
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 import sys
@@ -16,12 +17,16 @@ from botocore.validate import validate_parameters
 
 
 INFRA = Path(__file__).resolve().parents[1] / "infra"
+TEMPLATE_NAMES = (
+    "cloudformation.yaml", "paper-fixed-egress.yaml", "paper-network-iam-bootstrap.yaml",
+    "paper-app-iam-bootstrap.yaml", "paper-control.yaml", "paper-timer-verification.yaml",
+    "paper-web-dashboard.yaml", "paper-worker-verification.yaml", "paper-one-session-pilot.yaml",
+    "paper-five-session-batch.yaml",
+)
 
 
 def validate() -> None:
-    names = ["cloudformation.yaml", "paper-fixed-egress.yaml", "paper-network-iam-bootstrap.yaml",
-             "paper-app-iam-bootstrap.yaml", "paper-control.yaml", "paper-timer-verification.yaml",
-             "paper-web-dashboard.yaml", "paper-worker-verification.yaml", "paper-one-session-pilot.yaml"]
+    names = TEMPLATE_NAMES
     saved_args = sys.argv
     try:
         sys.argv = ["cfn-lint", "-r", "ap-northeast-2", "-t", *(str(INFRA / n) for n in names)]
@@ -37,6 +42,10 @@ def validate() -> None:
         template, errors = decode(str(INFRA / name))
         assert not errors, name
         templates[name] = template
+    spec = importlib.util.spec_from_file_location("paper_batch_checks", Path(__file__).with_name("paper_batch_checks.py"))
+    checks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checks)
+    checks.validate_batch_template(templates["paper-five-session-batch.yaml"])
     app = templates[names[0]]
     nat = templates[names[1]]
     iam = templates[names[2]]
@@ -148,6 +157,7 @@ def validate() -> None:
             assert size < 10240
     print("CFN_SCHEMA_AND_IAM_LINT: PASS")
     print("PAPER_NETWORK_AND_CONTAINER_SAFETY: PASS")
+    print(f"TEMPLATES_VALIDATED: {len(names)}; BATCH_BOUNDS_AND_PAPER_SAFETY: PASS")
     print("NO_AWS_CALLS; NO_RESOURCES_CREATED")
 
 

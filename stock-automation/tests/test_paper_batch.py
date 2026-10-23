@@ -279,7 +279,12 @@ class BatchTemplateTests(unittest.TestCase):
     def test_schedule_bounds_use_eventbridge_scheduler_millisecond_utc_format(self):
         import re
         for name in ('PmStart', 'PmEnd', 'AmStart', 'AmEnd'):
-            self.assertRegex('2026-10-22T00:00:00.000Z', r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$')
+            parameter = self.template['Parameters'][name]
+            self.assertEqual(parameter['Type'], 'String')
+            pattern = parameter['AllowedPattern']
+            self.assertIsNotNone(re.fullmatch(pattern, '2026-10-22T00:00:00.000Z'))
+            for invalid in ('2026-10-22T00:00:00Z', '2026-10-22T00:00:00.000+09:00', 'invalid'):
+                self.assertIsNone(re.fullmatch(pattern, invalid))
 
     def test_packaged_sources_are_exact_plaintext_and_no_ledger_or_schedule_writes(self):
         source = self.template['Resources']['Pilot']['Properties']['Code']['ZipFile']

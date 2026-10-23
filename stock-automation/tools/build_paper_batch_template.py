@@ -35,8 +35,11 @@ def build():
     for name in list(parameters):
         if name.endswith('ScheduleAt'):
             del parameters[name]
-    for name in ('PmStart', 'PmEnd', 'AmStart', 'AmEnd', 'ParentPrefix', 'ParentPlanKey'):
+    for name in ('ParentPrefix', 'ParentPlanKey'):
         parameters[name] = {'Type': 'String'}
+    for name in ('PmStart', 'PmEnd', 'AmStart', 'AmEnd'):
+        parameters[name] = {'Type': 'String', 'AllowedPattern':
+            r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z'}
     resources['Pilot']['Properties']['Code']['ZipFile'] = packed_source()
     resources['Pilot']['Properties']['Description'] = 'Five dated paper sessions; predecessor gate, permanent failure halt, no real orders'
     resources['PilotRole']['Properties']['Policies'][0]['PolicyName'] = 'five-dated-paper-sessions'
