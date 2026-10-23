@@ -169,9 +169,11 @@ Do not select a stock primarily because it appears undervalued.
 
 ## 4. Stock Eligibility and Preferred Characteristics
 
-Final recommendations must be limited to stocks whose trading session ends with the KRX regular market at 15:30 KST.
+Effective 2026-10-20, the user permits both KRX-only stocks and NXT-eligible stocks in conversational stock analysis and recommendations. NXT eligibility alone is no longer a reason to exclude a stock. All other evidence, liquidity, and risk requirements remain in force.
 
-**Exclude every stock eligible for the NXT after-market session. This is a mandatory rule, not a preference.**
+Identify the quote venue, trading session, and cutoff time. Do not mix a KRX regular-market quote or close with an NXT quote without labeling the difference. If eligibility or venue is unverified, state that uncertainty.
+
+This permission changes the conversational analysis universe only. Do not automatically change the program's existing NXT filters, strategy universes, KRX 15:20/09:10 simulation workflow, schedules, or order safeguards. Such implementation changes require a separate user request and appropriate tests; live ordering still requires separate explicit approval.
 
 Among eligible stocks, prefer stocks that meet the following conditions:
 
