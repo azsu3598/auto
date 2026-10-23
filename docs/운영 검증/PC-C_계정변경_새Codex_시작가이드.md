@@ -62,7 +62,8 @@ API 키·토큰·계좌번호·공인 IP·ARN·원본 로그를 채팅이나 Git
 PC-C_단독진행_전체인수인계.md 상단의 최신 보완 체크리스트 1~4를 우선해라.
 코드 변경 시 테스트를 추가하고 전체 stock-automation 테스트를 실행해라.
 매 작업 후 공동 인수인계의 '10. 세션 전달 기록' 맨 위에 PC-C 결과를 추가하고
-기존 기록은 고치거나 삭제하지 마라. commit/push는 별도 사용자 요청이 있을 때만 해라.
+저장소 루트에서 python stock-automation/tools/handoff_archive.py rotate로 6번째 이후 기록을
+보관 파일로 원문 그대로 옮겨라. 기존 기록은 고치거나 삭제하지 마라. commit/push는 별도 사용자 요청이 있을 때만 해라.
 ```
 
 ## 3. 프로젝트를 이해하기 위한 최소 배경
@@ -146,6 +147,8 @@ Docker opt-in 검사는 `STOCK_AUTOMATION_TEST_IMAGE`와 로컬 Docker가 있어
 
 공동 인수인계 10절 최상단에 PC-C/시각/기준 커밋/요청/변경 파일/실행 명령/테스트 수/
 미확인·실패/남은 위험/실거래 상태/다음 작업을 추가한다. 과거 기록은 보존한다.
+추가 후 저장소 루트에서 `python stock-automation/tools/handoff_archive.py rotate`를 실행해
+6번째 이후 기록을 보관 파일로 원문 그대로 옮기고 `PASSED`를 확인한다.
 비밀값 대신 성공 여부와 검증 범위만 남기고, 원본 증빙은 Git 제외 runtime에 둔다.
 
 계정 변경 자체를 위해 자격증명을 복사하거나 재발급할 필요가 있다고 단정하지 않는다.

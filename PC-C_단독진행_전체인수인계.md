@@ -218,6 +218,8 @@ LIVE_ORDER_ENABLED=1 설정, 비상정지 해제, 실제 주문, 실계좌 Secre
 그다음 이 문서의 'PC-C에서 바로 진행할 순서'를 따라 미완성 작업을 이어가줘.
 모든 코드·문서 작업 후에는 Codex_세션간_공동_인수인계.md의 최신 기록 위에
 PC-C 작업 결과, 변경 파일, 테스트, 미확인 사항, 실거래 상태를 추가해줘.
+추가 후 저장소 루트에서 python stock-automation/tools/handoff_archive.py rotate를 실행해
+10절 6번째 이후 기록을 보관 파일로 원문 그대로 옮기고 PASSED를 확인해줘.
 비밀키·토큰·계좌번호는 대화, 코드, Markdown, Git, 로그에 출력하지 마.
 ```
 
@@ -716,6 +718,9 @@ KILL SWITCH: 기본 ON 설계 / 실제 테이블 상태 확인 필요
 ## 16. 매 작업 종료 시 인수인계 형식
 
 `C:/Test/Codex_세션간_공동_인수인계.md`의 세션 전달 기록 맨 위에 추가한다.
+추가 후 저장소 루트에서 `python stock-automation/tools/handoff_archive.py rotate`를 실행해
+6번째 이후 기록을 `docs/운영 검증/공동_인수인계_세션기록_보관.md`로 원문 그대로 옮기고
+`PASSED`를 확인한다. 이동은 같은 commit에 포함한다.
 
 ```text
 작업 PC alias: PC-C

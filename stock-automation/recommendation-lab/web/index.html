@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="recommendation-csrf" content="__CSRF_TOKEN__">
+  <title>SABU 종목 추천 개발 모듈</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="banner">개발용 · 미배포 · 주문 기능 없음 · 독립 검증 전</div>
+  <main>
+    <header><p class="eyebrow">SABU / RESEARCH LAB</p><h1>종목 추천</h1><p>버튼을 누를 때만 분석합니다. 기존 자동매매와 연결되지 않습니다.</p></header>
+    <section class="panel" aria-labelledby="request-heading">
+      <h2 id="request-heading">분석 요청</h2>
+      <p>서버에서 지정한 연구 자료만 읽습니다. 자료가 없거나 오래되면 차단합니다.</p>
+      <div class="actions"><button id="run" type="button">종목 추천 요청</button><button id="cancel" type="button" hidden>화면 대기 취소</button></div>
+      <p class="small">자동 시작·반복 조회·계좌 연결·모의체결·실주문 없음</p>
+    </section>
+    <section id="result" class="panel" aria-busy="false" aria-labelledby="result-heading">
+      <h2 id="result-heading">결과 대기</h2>
+      <p id="status" role="status" aria-live="polite">요청 버튼을 누르기 전에는 분석하지 않습니다.</p>
+      <p id="meta" class="small"></p>
+      <div id="summary"></div><div id="cards"></div>
+    </section>
+    <footer>실험적 선별 규칙이며 투자 성과는 검증되지 않았습니다. 현재 실시간 시세·뉴스·AI 수집기는 연결하지 않았습니다. 파일 입력의 검증 표시 자체가 사실 확인의 증거는 아닙니다.</footer>
+  </main>
+</body>
+</html>

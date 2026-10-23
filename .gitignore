@@ -34,6 +34,10 @@ runtime/
 /ToPC*.zip
 /archives/
 
+# Unique atomic-write temporaries; recovery backups remain under archives/.
+/.handoff-*.tmp
+/docs/운영 검증/.handoff-*.tmp
+
 # Visual Studio and .NET build output
 .vs/
 bin/

@@ -12,6 +12,7 @@
   `Sabu/` for chart education, and `Sabu/교재/` for textbook editions.
 * Store dashboard screenshots in `docs/assets/dashboard/` and update current
   references when moving them. Do not rewrite historical handoff records.
+  Verbatim archiving under rule 4 of "Before every push" is allowed.
 * `archives/` contains local recovery backups and retired artifacts and is ignored
   by Git. Do not stage archives, credentials, runtime data, or raw logs.
 * The user removed `GorapaduckPet` from this workspace. Do not recreate its project
@@ -36,6 +37,10 @@ Before changing code, read these files in order:
 1. `AGENTS.md`
 2. `PC-C_단독진행_전체인수인계.md`
 3. `Codex_세션간_공동_인수인계.md`
+
+Section `10. 세션 전달 기록` keeps only the five most recent records. Open
+`docs/운영 검증/공동_인수인계_세션기록_보관.md` only when a recent record refers
+to older work, when verifying a past claim, or when the user asks for history.
 
 Then compare the handoff claims with the actual Git status, source code, and tests.
 Do not assume that a document or a previous chat is current. Preserve uncommitted
@@ -72,12 +77,29 @@ conflict, stop and report the exact files instead of discarding changes.
 3. Run syntax or fixture validation required by the changed file types and run
    `git diff --check` on the intended changes.
 4. Add a new record at the top of section `10. 세션 전달 기록` in
-   `Codex_세션간_공동_인수인계.md`. Never delete or rewrite older records.
+   `Codex_세션간_공동_인수인계.md`. Keep only the five most recent records
+   (by position) there; move any older record verbatim to the top of the
+   `보관 기록` section in `docs/운영 검증/공동_인수인계_세션기록_보관.md` in the
+   same commit by running `python stock-automation/tools/handoff_archive.py rotate`
+   from the repository root and confirming `PASSED`. Moving a record verbatim is
+   not deletion. Never edit, reorder,
+   summarize, or delete a record's content in either file.
 5. Record the PC alias, files changed, test count and result, failed or unverified
    work, remaining risks, live-order state, and the next Codex action.
 6. Recheck the staged diff for secrets and confirm that live ordering remains
    disabled.
 7. Push only when the user has requested or approved the push.
+
+The handoff tool supports LF, CRLF, and mixed LF/CRLF without rewriting record
+bytes. Its OS process lock, transaction journal, and retained before/after backups
+are under Git-ignored `archives/handoff-archive/`; never stage those files. On
+`ARCHIVE_BUSY`, wait for the other tool process; do not delete `process.lock`.
+On `RECOVERY_REQUIRED`, inspect the document state, then use
+`python stock-automation/tools/handoff_archive.py recover` to finish the recorded
+transaction. If recovery reports a conflict or corrupted backup, stop and preserve
+all versions for manual review; never force an overwrite or remove `pending.json`.
+The lock serializes tool processes, not arbitrary editor saves; do not edit either
+document while rotating/recovering. PC-C and Claude use Windows, not WSL.
 
 After a successful push, report the branch and commit identifier without exposing
 credentials. The receiving PC must pull, repeat the three-file review, and verify the

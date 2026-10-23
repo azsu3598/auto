@@ -1,0 +1,6 @@
+# The repository ignores build directories globally. This hand-authored offline
+# preview must travel with Git; do not copy it into the operational deployment.
+!dist/
+!dist/index.html
+!dist/preview.css
+!dist/preview.js

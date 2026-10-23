@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file:; connect-src 'none'; img-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>SABU 종목 추천 · 오프라인 화면 샘플</title>
+  <link rel="stylesheet" href="./preview.css">
+  <script src="./preview.js" defer></script>
+</head>
+<body>
+  <div class="sample-strip">OFFLINE PREVIEW <span>가상 종목 · 가상 가격 · 실제 추천이 아닙니다</span></div>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">S</span><div><strong>SABU</strong><span>Trading Console / Design Lab</span></div></div>
+      <span class="pill">운영 프로그램과 분리</span>
+    </header>
+    <main>
+      <div class="page-heading"><div><p class="eyebrow">ON-DEMAND RESEARCH</p><h1>종목 추천</h1><p class="muted">누를 때만 분석하고, 근거까지 확인하는 추천 화면.</p></div><span class="read-only">주문 기능 없음</span></div>
+      <section class="workspace" aria-label="추천 화면 미리보기">
+        <div class="main-column">
+          <section class="panel request-panel" aria-labelledby="request-title">
+            <div class="panel-heading"><div><p class="eyebrow">MANUAL REQUEST</p><h2 id="request-title">필요할 때, 한 번만.</h2></div><span id="state-badge" class="pill">대기 중</span></div>
+            <p class="description">이 샘플은 버튼을 눌러야 가상 결과가 나타납니다. 최신 시세나 뉴스를 조회하지 않습니다.</p>
+            <div class="setting-row"><div><span class="setting-label">실행 방식</span><strong>버튼 클릭 시 1회</strong></div><div><span class="setting-label">결과</span><strong>0~3종목 또는 매수 없음</strong></div></div>
+            <div class="scenario-field"><label for="scenario">화면 확인용 시나리오</label><select id="scenario">
+              <option value="candidates">가상 후보 2종목</option>
+              <option value="no_trade">매수 없음 · NO_TRADE</option>
+              <option value="stale">자료 만료 · 추천 차단</option>
+              <option value="timeout">시간 초과</option>
+              <option value="error">조회 실패</option>
+            </select></div>
+            <div class="button-row"><button id="run" class="primary-button" type="button">종목 추천 · 샘플 실행 <span aria-hidden="true">↗</span></button><button id="cancel" class="secondary-button" type="button" hidden>샘플 중단</button></div>
+            <p class="microcopy">실제 API 호출 0 · 자동 반복 없음 · 브라우저 저장 없음</p>
+          </section>
+          <section id="progress" class="panel progress-panel" aria-label="가상 분석 진행" hidden>
+            <div class="panel-heading"><h2>화면 전환 확인 중</h2><span class="spinner" aria-hidden="true"></span></div>
+            <p>실제 분석이 아니라 약 1초짜리 화면 시연입니다.</p>
+          </section>
+          <section id="result-panel" class="panel result-panel" aria-labelledby="result-title" aria-busy="false">
+            <div class="panel-heading"><div><p class="eyebrow">RESEARCH RESULT</p><h2 id="result-title">분석 전</h2></div><span id="result-count" class="pill">0종목</span></div>
+            <p id="status" role="status" aria-live="polite" class="muted">시나리오를 선택하고 샘플 실행 버튼을 눌러주세요.</p>
+            <p id="viewed-at" class="microcopy">시연 실행 시각 없음 · 실제 시세 기준 시각 없음</p>
+            <div id="summary" class="summary" hidden></div>
+            <div id="cards" class="cards"></div>
+            <div id="empty" class="empty-state"><span aria-hidden="true">⌁</span><h3>기다리는 것도 하나의 판단</h3><p>근거가 부족하면 종목을 억지로 채우지 않습니다.</p></div>
+          </section>
+        </div>
+        <aside class="side-column">
+          <section class="panel boundary-panel" aria-labelledby="boundary-title"><p class="eyebrow">ISOLATED BY DESIGN</p><h2 id="boundary-title">여기서는 추천 화면만.</h2><p class="muted">운영 중인 모의매매와 연결되지 않은 별도 정적 파일입니다.</p><dl class="boundaries"><div><dt>키움 · AI · 뉴스 API</dt><dd>연결 안 됨</dd></div><div><dt>AWS · Telegram</dt><dd>연결 안 됨</dd></div><div><dt>매매 원장 · 주문</dt><dd>읽기·쓰기 없음</dd></div><div><dt>상시 감시 · 자동 재시도</dt><dd>없음</dd></div></dl></section>
+          <section class="panel guide-panel" aria-labelledby="guide-title"><p class="eyebrow">FUTURE EXPERIENCE</p><h2 id="guide-title">추후 실제 기능의 순서</h2><ol class="steps"><li><span>01</span><div><strong>직접 요청</strong><p>로그인한 사용자가 버튼을 누릅니다.</p></div></li><li><span>02</span><div><strong>자료부터 검증</strong><p>시각·시장·뉴스 출처를 확인합니다.</p></div></li><li><span>03</span><div><strong>근거와 위험 확인</strong><p>후보 또는 NO_TRADE를 표시합니다.</p></div></li></ol><p class="microcopy">위 과정은 설계안입니다. 이 샘플에는 실제 분석 엔진이 없습니다.</p></section>
+          <div class="notice"><strong>샘플을 투자 판단에 쓰지 마세요.</strong><p>모든 종목명·가격·비중은 화면 확인용 가상 값입니다. 표시된 시연 시각은 시세의 최신성을 의미하지 않습니다.</p></div>
+        </aside>
+      </section>
+    </main>
+    <footer><span>SABU / RECOMMENDATION PREVIEW</span><span>LOCAL ONLY · NOT DEPLOYED</span></footer>
+  </div>
+  <noscript><p>화면 시연에는 JavaScript가 필요합니다. 이 페이지는 실제 추천이나 주문을 하지 않습니다.</p></noscript>
+</body>
+</html>
