@@ -593,6 +593,7 @@ _REASON_LABELS = {
     "CATALYST_CONFIRMED": "당일 촉매 확인",
     "RSI_HEALTHY_MOMENTUM": "RSI 과열 전 상승",
     "NO_QUALIFYING_CANDIDATE": "종가배팅 기준 충족 종목 없음",
+    "MARKET_DATA_UNAVAILABLE": "검증 가능한 시세 자료 없음",
     "NO_QUALIFYING_DAY_TRADE_CANDIDATE": "단타 기준 충족 종목 없음",
     "NO_QUALIFYING_MEDIUM_TERM_CANDIDATE": "중기 기준 충족 종목 없음",
     "TARGET1_REACHED": "1차 목표가 도달",

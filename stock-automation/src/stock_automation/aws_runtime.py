@@ -1823,7 +1823,11 @@ def _run_worker() -> int:
     wallet_key = f"WALLET#CLOSING_BET#{session.value}"
     available_cash = _load_or_create_wallet(ddb, table, wallet_key, cash, now)
     costs = _runtime_costs()
-    decision = ClosingBetEngine(active_config).evaluate(snapshot, cash=available_cash)
+    decision = ClosingBetEngine(active_config).evaluate(
+        snapshot,
+        cash=available_cash,
+        prior_screen_empty=(phase == "ENTRY_1520" and candidate_codes == ()),
+    )
     with tempfile.TemporaryDirectory() as directory:
         report = write_markdown_report(directory, snapshot, decision)
         s3.put_object(

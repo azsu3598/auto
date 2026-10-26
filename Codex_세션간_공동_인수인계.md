@@ -287,52 +287,49 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
-### 2026-10-23 16:49 KST — PC-D / 미커밋 개발·문서35파일 커밋 요청·PC-C 실제 모의운영 우선
+### 2026-10-26 20:52 KST — PC-C → PC-C / NO_TRADE 사유 오분류 수정
 
-- 사용자 요청: 작성된 파일을 로컬 commit하고 현재 PC-C에서 매매 프로그램을 위해 할 일을 안내. push는 요청하지 않았다. 의미 있는 수정8개와 신규27개(독립 추천 개발분·샘플·테스트·보관 도구·관련 문서·오늘 분석/추천4이벤트·Claude 참고)를 선별한다. 줄바꿈만 다른 기존 파일과 archives/runtime/자격증명은 포함하지 않으며 기존 작업은 보존한다.
-- 이번 커밋은 개발분 전달이며 검증 완료·배포·운영 연결 승인이 아니다. 사용자 지시대로 집중24개·전체 앱 회귀·추천 개발분37개·Node23개·브라우저/통합 테스트는 이번 재실행하지 않는다. 과거381개 결과를 새 코드 성공으로 사용하지 않는다. Git diff/파일 목록·비밀정보 패턴·원문 기록 보존은 읽기 전용으로 확인한다. 실제 커밋 ID/성공 여부는 Git 결과로 사용자에게 보고한다.
-- 본문 최근5개 유지를 위해11:29 기록1건은 이전 보완과 같이 원문 그대로 보관 파일 맨 위로 수동 이동한다. 새 보관 도구 check/rotate/recover 실행과 PASSED 확인은 PC-C 검증에 남긴다. 원문을 요약하거나 기록 순서를 바꾸지 않는다.
-- PC-C 우선순위: clean 확인 후 사용자 push 수신→필수3문서 재검토→기존 paper_operations.py status로10/23 모의단계/REPORT_PM·서버정지·작업 잔류·열린 가상수량 확인→집중/전체 회귀→10/26 09:05위험확인·09:10청산·09:40보고 준비/결과 대조→1회 운용을 확인한 뒤 별도 승인된5거래일 모의 검증 계획. 미완료/실패를 매매 성공으로 간주하거나 기존 예약을 재실행·재배포하지 않는다. 새 추천 기능은 운영 안정화 뒤 별도 체크리스트로 검증한다.
-- 안전/미확인: AWS/키움 원격 조회·실계좌Secret·실주문·kill switch·운영 예약·매매 원장·주문 엔진 변경 없음. 실제 원격 성공/정지/잔고는 이 PC에서 확인하지 않았다. 기존 프로그램의 내부 가상 모의와 증권사 주문을 혼동하지 않는다. 실거래에는 별도 안전 검증과 명시적 승인이 필요하다. 현재 요청은 commit만이며 push 없음.
+- 사용자 요청: `MARKET_DATA_UNAVAILABLE`와 필터 통과 후보 없음의 구분을 수정하고 커밋. 다른 PC에서는 실행하지 않고 수정만 하며 테스트·적용은 현 PC에서 진행한다고 확인했다.
+- 10/26 저장 결과 확인: 14:50·15:10 KRX 조회 각 36건, 15:10 shortlist 0건, 15:20 entry 입력 quotes 0건. 따라서 실제 결과는 데이터 수신 실패가 아니라 후보 필터 통과 종목 없음이다. 기존 엔진은 빈 entry quotes만 보고 `MARKET_DATA_UNAVAILABLE`를 기록했다.
+- 수정: `ClosingBetEngine.evaluate`에 선행 후보선별이 완료된 빈 shortlist 문맥을 전달하고, 해당 경우 `NO_QUALIFYING_CANDIDATE` 및 한국어 설명을 남긴다. 일반적인 시세 미수신은 계속 `MARKET_DATA_UNAVAILABLE`이며 기존 필터·모의 진입 및 안전 기준은 그대로다.
+- 변경 파일: `stock-automation/src/stock_automation/engine.py`, `stock-automation/src/stock_automation/aws_runtime.py`, `stock-automation/src/stock_automation/dashboard.py`, `stock-automation/tests/test_engine.py`, `stock-automation/tests/test_dashboard.py`, `docs/운영 검증/2026-10-23_5거래일_완료후_실거래준비_작업계획.md`, 본 인수인계, 보관 인수인계.
+- 검증: 집중 엔진 테스트 16개와 대시보드 테스트 12개 통과. 저장소 `.venv` Python 3.13.16에서 전체 테스트 402개 통과, 2개 skip. 기본 Python 3.14는 AWS SDK/의존성이 없어 사용하지 않았다. 템플릿의 이미지 참조와 연동 상태는 아직 적용 전이며 AWS에서 새 이미지를 사용한 검증은 미실행.
+- 실패·미확인: 현재 ECS 템플릿은 기존 ECR 이미지 digest를 고정 참조한다. 이 소스 수정은 아직 해당 이미지에 포함되지 않았으므로 새 이미지 빌드·게시 후 해당 digest를 템플릿 `ImageUri`에 넣는 적용이 남았다.
+- 안전: 이 작업에서는 AWS 배포, 스케줄 변경, 실계좌 연결, 실주문 없음. 기존 모의·실거래 분리와 모든 주문 안전장치는 유지.
+- 다음: PC-C에서 새 앱 이미지를 별도 검토·빌드·게시하고, 정확한 digest를 사용하는 템플릿을 검증한 다음 기존 스택의 이미지 갱신만 진행한다. 테스트/적용은 PC-C에서 하고 PC-D에서는 실행하지 않는다.
+- 실거래 상태: 비활성; 실제 주문 없음. 커밋은 본 기록·보관 회전 및 diff 점검 뒤 수행.
 
-### 2026-10-23 16:43 KST — PC-D / 보관 도구 줄바꿈·잠금·중단 복구 보완·Windows 검증 이관
+### 2026-10-26 PC-C / Korean explanations required in final five-session report
 
-- 사용자 요청: 문서 정리 검토에서 발견한 LF/CRLF 미지원과 동시 실행/중단 위험을 수정. PC-C와 Claude는 Windows로 실행하며 WSL 안내는 필요 없다. 앞선 테스트 실행 PC-C 위임을 유지해 이번에도 테스트/새 도구 실행을 하지 않는다.
-- 변경: stock-automation/tools/handoff_archive.py, tests/test_handoff_archive.py, AGENTS.md, CLAUDE.md, .gitignore, 공동 인수인계와 보관 파일. LF·CRLF·혼합 줄바꿈을 원바이트 유지하고 bare CR/충돌 표시/잘못된 keep/섹션 오류는 거부하도록 수정했다. Git 제외 archives/handoff-archive/에 OS 프로세스 잠금·고유 트랜잭션 백업·pending journal을 두고 임시파일도 고유 이름으로 만든다.
-- 복구: 원본/결과 SHA-256과 백업을 먼저 보존하고 보관 파일→본문 순으로 교체한다. 중단되면 check/rotate는 RECOVERY_REQUIRED로 멈추고 recover 명령으로 기록된 작업만 이어간다. 수동 수정·백업 손상·메타데이터 불일치 시 덮어쓰지 않고 실패한다. 성공 뒤에도 원본/결과 백업은 보존한다. 잠금은 협력하는 도구끼리의 동시 실행을 막으며 일반 편집기의 저장이나 하드웨어 장애까지 완전한 두 파일 원자성으로 보장하지 않는다.
-- **테스트 미실행**: 집중 테스트는 기존6개를 보완하고18개를 추가해24개 정의했다. LF/CRLF 혼합·원문 보존·비정상 keep·프로세스 경쟁/비정상 종료·부분 교체·복구 충돌·백업 손상·반복 실행을 포함한다. PC-D에서는 테스트/compileall/보관 도구 check·rotate·recover/전체 회귀를 실행하지 않았으며 이전381개 결과를 이번 수정의 성공으로 사용하지 않는다.
-- 문서 보존: 신규 도구 실행을 PC-C 검증 전까지 미루기 위해 이번11:03 기록1건은 apply_patch로 원문 그대로 보관 파일 맨 위로 이동했다. 본문은 최근5개를 유지하고 과거149개 기록의 본문/순서/중복 여부를 읽기 전용 해시 대조로 확인한다. 이동 도구 PASSED를 얻었다고 주장하지 않는다. 백업·잠금·임시파일은 Git에 올리지 않는다.
-- 다음 PC-C CMD: 저장소 루트에서 `.venv\Scripts\python.exe -m unittest discover -s stock-automation\tests -p test_handoff_archive.py -v`로 집중24개를 실행한 뒤 전체 앱 회귀와 새 추천 기능의 별도 테스트를 진행한다. 성공 후 `.venv\Scripts\python.exe stock-automation\tools\handoff_archive.py check`로 현재 문서를 검사한다. ARCHIVE_BUSY면 잠금 파일을 삭제하지 말고 다른 프로세스를 기다린다. RECOVERY_REQUIRED면 문서 상태를 먼저 확인하고 같은 도구의 recover를 사용하며, 충돌이면 모든 버전/백업을 보존하고 수동 검토한다.
-- 안전: 기존 미커밋 변경 보존, 매매 엔진/추천 모듈/주문/원장/계좌/Secret/kill switch/AWS/예약 변경 없음. 실제 원격 상태 미조회, 실주문·서버 실행·배포·commit/push 없음.
+- User requested that, after current run completes normally, next report explain in Korean why each action/outcome occurred.
+- Updated `docs/?? ??/2026-10-23_5???_???_?????_????.md`: report each BUY/SELL/NO_TRADE/HALT and other relevant action with Korean reason grounded in logs, decision inputs, quotes and ledger evidence; mark missing reason as `?? ?? ??`, never infer.
+- No AWS or schedule changes and no source change. Report is due only after actual five-session completion. No test run required for this documentation clarification.
+- Live order state unchanged; no commit/push.
 
-### 2026-10-23 16:29 KST — PC-D / Claude / 공동 인수인계 10절 최근 5개 유지·보관 파일 분리·이동 도구
+### 2026-10-23 PC-C / Five-session completion and live preparation work plan
 
-- 요청: 10절을 최근 기록 5개만 남기고 과거 기록은 docs/ 보관 파일로 분리, CLAUDE.md·AGENTS.md 읽기 규칙 수정, 이후 보완(이동 도구·PC-C 문서·충돌 규칙·5절 안내). 사용자가 현재 작업 트리가 최신이라고 확인해 pull 없이 진행했다. 같은 세션의 미커밋 본인 기록 1건을 이 기록으로 합쳤다.
-- 변경: 신규 `docs/운영 검증/공동_인수인계_세션기록_보관.md`(분리 전 10절 148건 중 6번째 이후 143건 + 이후 밀려난 09:41 기록 1건, 원문·순서·CRLF 그대로). 신규 `stock-automation/tools/handoff_archive.py`(`check`/`rotate`, Markdown 두 파일만 읽고 씀, bare LF·충돌 표시·섹션 누락 시 이동 거부)와 `tests/test_handoff_archive.py` 6개. 본 파일 1절 보관 규칙, 5절 "2026-10-12 이후 미갱신" 안내, 9절 양식 안내, 10절 안내, 13절 7번 충돌 후 재이동 규칙. `AGENTS.md`·`CLAUDE.md` 읽기 범위와 기록 규칙, `PC-C_단독진행_전체인수인계.md` 시작 프롬프트·16절, `docs/운영 검증/Claude_프로젝트_상세_인수인계.md`·`PC-C_계정변경_새Codex_시작가이드.md`의 기록 규칙에 rotate 실행을 추가.
-- 기준: "최근 5개"는 시각이 아니라 파일 위치 기준이다. 기존 기록에 시각 역순이 아닌 구간과 시각 없는 기록이 있어 재정렬하지 않았다. 5절 내용 자체는 실제 상태를 재확인하지 않아 갱신하지 않았다.
-- 검증: 분리 직후 분리 전 사본과 대조해 `남은 5건 + 보관 143건 = 원본 10절` 바이트 일치, 11~14절 무변경. 전체 회귀는 PC-D 시스템 Python에 boto3/botocore/keyring/truststore가 없어 316개 실행·2 failures·7 errors(모듈 import 실패)였고, scratchpad 임시 venv에 `tools/requirements.txt` 설치 후 `PYTHONPATH=src python -m unittest discover -s tests` 381개 OK(skipped 2), `compileall -q src tests tools` 통과. 신규 6개 포함. Node 테스트(web_auth.test.cjs)는 변경 무관으로 실행하지 않았다. `handoff_archive.py check` PASSED, bare LF 0, `git diff --check` 경고 없음.
-- 미확인: 상세 인수인계·PC-C 전체 인수인계 등 필수 문서는 사용자 지시로 전부 읽지 않았고 수정한 줄 주변만 읽었다. PC-C가 이 변경 전 AGENTS.md로 10절에 기록을 추가하면 pull 시 충돌 가능성이 있다.
-- 안전: 실거래·실계좌 Secret·kill switch·AWS·예약·주문 변경 없음. commit/push 없음.
-- 다음: PC-C는 pull 후 새 AGENTS.md를 다시 읽고, 기록 추가 후 저장소 루트에서 `python stock-automation/tools/handoff_archive.py rotate`로 PASSED를 확인한다. PC-D 시스템 Python에도 의존성이 없으면 전체 회귀가 316개로 줄어 실패하므로 venv 사용 여부를 정한다.
+- User supplied admin CloudShell output DEPLOYMENT_VERIFIED and FIVE_SESSION_BATCH_ARMED;15/15 verified. This is user-run administrator evidence, not operator-side requery. Parent one-time validation remains required; no claim of actual completed trades.
+- User requested next-work checklist based on five-session completion. Added dated2026-10-23 work plan under docs operations validation, covering evidence-based completion, NO_TRADE handling, final wallet/position/server reconciliation, failure branches, current live code review and separately approved live integration/order stages.
+- Plan clarifies: one10/26 validation plus five follow-on entries10/27 through11/02, final exit/report11/03; all-NO_TRADE does not prove operational fill paths; internal ledger simulation is not broker order verification. Batch-aware status/review access remains a handoff concern.
+- Inspected live_cli/live_execution/live_broker entry points; existing implementations must be audited instead of assumed absent. No new source-code tests run for this documentation-only task; previous399 test result is historical. No AWS calls, schedule changes, real orders, credentials, commit or push in this task.
+- Next: follow the new work plan to collect five-session results; prepare live code/tests/templates while leaving live enablement and real-account secrets subject to separate explicit approval. No guaranteed live start date.
 
-### 2026-10-23 16:20 KST — PC-D / 버튼형 종목 추천 분리 개발·테스트 실행은 PC-C 이관
+### 2026-10-23 PC-C / User reports batch-v3 CREATE_COMPLETE; operator review denied
 
-- 사용자 최신 승인: 처음에는 설계·샘플 UI까지만 요청했으나 이후 **배포 이전까지 가능한 개발 진행**, **테스트 등 실행은 PC-C에서 진행**하도록 범위를 변경했다. 버튼을 누를 때만 종목 추천을 받고 기존 자동매매에 영향이 없어야 한다. 이번 승인은 AWS 배포·실거래 활성화·기존 예약 변경·commit/push 승인이 아니다.
-- 신규 `stock-automation/recommendation-lab/`: 분석 전용 순수 코어, 입력 JSON 읽기 소스, 동시 실행/중복 ID/쿨다운/유효기한 제한 서비스, localhost 전용 POST API와 모바일 화면, 가상 입력 생성기, 검토 ZIP 생성기, 테스트 파일을 작성했다. 기존 stock_automation·키움·AWS SDK·주문·지갑·원장을 import/호출하지 않는다. 기본은 수집기 미연결 BLOCKED이며 브라우저 입력으로 계좌·실거래·파일 경로를 받지 않는다. 실제 주문/체결 기록이 아닌 연구 제안 타입이다.
-- 신규 `docs/prototypes/recommendation-preview/`: 가상 종목만 쓰는 오프라인 HTML/CSS/JS와 Node 가상 DOM 테스트를 작성했다. 기본 Git dist 무시 규칙에 샘플 파일이 빠지지 않도록 이 폴더의 .gitignore에 한정된 예외를 둔다. 외부 요청은 CSP로 차단하며 자동 시작/반복/브라우저 저장/운영 메뉴 연결 없음. 가상 결과를 추천 CSV나 실제/모의 원장에 쓰지 않는다.
-- 문서: `docs/프로그램 설계/버튼형_종목추천_설계와_PC-C_작업지침.md`, `버튼형_종목추천_PC-C_검증체크리스트.md`. 최신 체크리스트가 초기 샘플 승인 범위보다 우선한다. 실제 데이터/뉴스 자동 검증·AI·Cognito·AWS 실행 통합은 아직 미구현이며 현재 상태를 배포만 남은 완제품으로 보고하지 않는다. 초기 선별 수치와 점수는 미검증 실험값이다.
-- 보존 확인: 작업 시작 때 기존 추적파일360개의 SHA-256을 메모리에 보관했고 본 기록 추가 직전 재비교에서 기존 파일 변경0개였다. 따라서 기존 미커밋 앱/인프라/전략/대시보드 변경을 그대로 보존했다. 이후 기존 파일 수정은 본 기록 추가뿐이다. 실제 AWS 상태·금일 모의운용 성공 여부는 새로 조회하지 않았다.
-- **테스트 결과: 미실행.** 사용자 지정에 따라 Python37개·실제 개발 UI Node8개·오프라인 UI Node15개(반복 정의 포함) 테스트 코드를 준비했으나 실행하지 않았다. 기존 전체375개 회귀, JS 문법/브라우저·모바일·패키지 생성·서버 실행도 하지 않았다. 테스트 통과나 무영향을 실행 증거로 보장하지 않는다. 파일 내용/분리 경로/기존 파일 해시 대조는 테스트 실행과 구별한다.
-- 남은 위험: 신뢰된 시장 수집기와 원시 캔들/호가단위/뉴스 출처 검증 어댑터, 인증/TLS, 다중 인스턴스 원자 잠금/비용 상한, 실제 성과 검증·배포 통합이 필요하다. 현재 API는 localhost 개발용이며 인터넷 공개 금지. 가상 입력의 최신 시각을 실제 시장 관측으로 취급하지 않는다. 화면 취소는 서버/자동매매 중지 기능이 아니다.
-- 적용 스킬: Sites의 로컬 전용·무배포 경로와 문서 작성 스킬의 범위/미검증 구분을 적용했다. 다음 PC-C는 3문서와 최신 검증 체크리스트를 읽고 기존 전체 회귀→신규 Python/Node→가상 입력/브라우저 검증 순서로 실제 결과를 기록한다. 실패 시 기존 안전장치를 약화하지 않고 수정 범위부터 검토한다. 배포/운영 연결/실주문/실계좌Secret/kill switch/AWS/commit/push 변경 없음.
+- User reports CREATE_COMPLETE for batch-v3. Operator DescribeStacks attempt returned AccessDenied; remote creation result is not independently verified, and batch remains NOT confirmed armed.
+- Prepared ignored runtime/paper_batch_v3_admin.py, a self-contained administrator CloudShell script embedding the exact follow-on template/plan. Helper files runtime/batch_admin_core.py and batch-admin-payload.json are also ignored. No credentials or secret values embedded; infrastructure references remain local runtime only.
+- Script validates account/stack/template/parameters, deployed Lambda package/config/environment, all15 disabled schedule targets/retries/bounds; conditionally publishes the immutable plan and invokes DEPLOYMENT_CHECK. --arm explicitly enables stops first, entries last; reads back every update and rolls schedules back to DISABLED on failure. Parent completion/HALT checks remain in deployed code. Default invocation performs review and plan registration only.
+- Validation: script py_compile and embedded payload/default check PASS. Actual administrator execution and rollback integration are untested. Existing full399 regression result predates this new operational script; no new full suite run claimed. No remote changes made in this turn. Await admin CloudShell upload/run; do not claim batch activated.
+- One-time pilot remains previously ARMED_IN_AWS. No live orders/activation or commit/push. Existing handoff modifications preserved.
 
-### 2026-10-23 15:54 KST — PC-D / 정규장 종료 후 신규 추천 검토와 추천 전용 프로그램 상담
+### 2026-10-23 PC-C / Authorized one-time activation and five-session preparation
 
-- 새 양시장 상승상위40개씩 조회 후 ETF·ETN을 뺀53종목 검토. 지수15:52:46 KST 코스피+0.30%·코스닥-1.62%, KRX분봉15:30 삼성E&A59800원·SK증권2100원·카카오게임즈11550원을 대조했다. 삼성E&A 공식 실적·자사주 취득/소각 계획은 확인했지만 이틀 급등 추격과 현재 수급/시간외 호가 미검증으로 최종0종목·NO_TRADE다. 열린 장중AI모의0개·현금601400원, 신규0주·투자금0원. 사용자 실제 보유 매도나15:20소급체결은 없다.
-- 변경: docs/실시간 데이터 확인/2026-10-23_1554_korean-stock-analysis.md 신설, 추천_이벤트_현재본.csv 4이벤트 추가, 본기록 추가. 문서 작성 스킬로 확인 사실·미확인 시세/수급·제외 근거를 구분했다. 기존 미커밋 변경과 claude 참고.md를 보존하고 Git pull/commit/push는 하지 않는다.
-- 사용자 최종 의사: 별도 프로그램 신설이 아니라 **추후 기존 매매 프로그램 안에 종목 추천 기능을 추가**하고 싶다. 지금 구현 요청은 아니다. 추천 조회/알림과 실제 주문을 분리하고, 최신 시세/뉴스 수집→규칙 선별→상위 소수에 한해AI설명→가격/출처 검증→대시보드·Telegram 표시와 사후평가 구상을 설명한다. AI가 실시간 자료 없이 판단하거나 기존 점수만으로 검증된 추천 성능을 보장하지 않는다. 현시점 코드/새 설계 문서 작성이나AWS 자원 생성 승인이 아니다.
-- 검증: 추천 CSV126이벤트·28열·고유ID·기존122행 보존·추가4행·NO_TRADE 체결 공란과0수량·보고서 필수 내용 검사를 통과했다. 기본git diff --check는 기존CRLF를 공백으로 해석해 경고했고 CRLF인식 재검사에서는 기존4행의Markdown 두칸 줄바꿈만 남았다. 기존 본문/줄바꿈을 일괄 수정하지 않았으며 신규 추가 내용은 별도 공백 검사한다. 앱/전략규칙 변경이 없어 전체375개 앱회귀는 이번 재실행하지 않으며 이전 결과를 새 성공으로 표시하지 않는다. NXT당일자격·시간외호가·현재기관/프로그램수급·일봉정밀대조는 미완료다.
-- 안전/다음: 실거래·실계좌Secret·kill switch·AWS 예약·실제 주문 변경 없음. 원격 실거래 상태를 새로 확인했다고 주장하지 않는다. 다음 추천 전에는 시장과 열린AI모의 원장을 다시 확인한다. 기존 프로그램 추천 기능은 사용자가 별도 착수를 요청할 때 범위/데이터 이용조건/검증 기준을 먼저 확정한다. 현재의 종가 분석 우선·단기 예약 실행 범위를 유지하며 연속 장중 감시는 별도 승인 없이 추가하지 않는다.
+- User authorized activation and requested five days. arm_paper_pilot_20261026_update.py succeeded: READINESS_VERIFIED and ARMED_IN_AWS; all15 events enabled/readback verified, independent stops first. Entry10/26 15:20 KST, exit10/27 09:10. No manual task/server start or real orders. Evidence runtime/paper-pilot-armed-20261026.json.
+- Prepared five follow-on sessions, conditional on completed parent: entries10/27,10/28,10/29,10/30,11/02; final exit11/03. This interpretation means validation plus five additional sessions. Counting not explicitly confirmed by user.
+- Ignored runtime outputs: prepare_paper_batch_20261026.py, paper-batch-console-20261026-followon.yaml, paper-batch-plan-20261026-followon.json, paper-batch-immutable-plan-20261026-followon.json. Candidate NEW stack stock-automation-paper-batch-v3. NEVER apply batch template to pilot. Fixed batch names retained; latest remote name conflicts unverified. No user-attached managed policy added.
+- Local batch safety/calendar/date bounds/hash/default checks PASS. Template hash compares normalized UTF8 text, consistent with preparation tool; first byte-hash assertion failed due to Windows CRLF, corrected verification only. Immutable plan byte hash passes. No source or safeguards changed. Prior regression399 OK(skipped=2).
+- Batch NOT deployed or activated. Remaining: admin creates separate batch-v3 with PilotState DISABLED; verify remote resources and DEPLOYMENT_CHECK; register immutable plan and bounded schedules only after review. Operator lacks batch access and may need administrator help; do not repeat oversized review policy update or bypass predecessor/HALT. Existing pilot one-time activation is complete; five-day operation is not yet complete.
+- No live enablement, real orders, tracked source changes, commit or push. Remote kill switch not independently reverified.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 

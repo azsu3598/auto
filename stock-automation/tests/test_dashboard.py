@@ -145,6 +145,20 @@ class DashboardTests(unittest.TestCase):
             reasons,
         )
 
+    def test_no_trade_reasons_are_translated(self):
+        with patch.dict(os.environ, {}, clear=True):
+            result = dashboard_payload([{
+                "pk": "2026-10-12:KRX_1520:CLOSING_BET",
+                "decided_at": "2026-10-12T15:20:00+09:00",
+                "decision": "NO_TRADE",
+                "reason_codes": ["NO_QUALIFYING_CANDIDATE"],
+                "payload_json": json.dumps({"decision": "NO_TRADE"}),
+            }], now=datetime(2026, 10, 12, 16, 0, tzinfo=KST))
+        self.assertEqual(
+            ["종가배팅 기준 충족 종목 없음"],
+            result["recent_events"][0]["reasons"],
+        )
+
     def test_labels_day_trade_wallet_position_and_event_separately(self):
         items = [{
             "pk": "WALLET#DAY_TRADE",

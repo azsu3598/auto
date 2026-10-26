@@ -77,6 +77,33 @@ class ClosingBetEngineTests(unittest.TestCase):
         decision = ClosingBetEngine().evaluate(snapshot, cash=600_000)
         self.assertEqual(DecisionType.NO_TRADE, decision.decision)
         self.assertEqual(("MARKET_DATA_UNAVAILABLE",), decision.reason_codes)
+        self.assertIn("시세 자료", decision.notes)
+
+    def test_empty_prior_screen_is_not_reported_as_missing_market_data(self):
+        current = datetime(2026, 10, 7, 15, 20, tzinfo=KST)
+        empty = MarketSnapshot(
+            captured_at=current,
+            session=Session.KRX_1520,
+            kospi_change_pct=0.0,
+            kosdaq_change_pct=0.0,
+            quotes=(),
+            source="KIWOOM_REST",
+            delayed=False,
+        )
+        decision = ClosingBetEngine().evaluate(
+            empty, cash=600_000, prior_screen_empty=True
+        )
+        self.assertEqual(DecisionType.NO_TRADE, decision.decision)
+        self.assertEqual(("NO_QUALIFYING_CANDIDATE",), decision.reason_codes)
+        self.assertIn("후보 선별", decision.notes)
+
+    def test_quotes_filtered_out_are_reported_as_no_qualifying_candidate(self):
+        decision = ClosingBetEngine().evaluate(
+            snapshot(quote(catalyst_verified=False)), cash=600_000
+        )
+        self.assertEqual(DecisionType.NO_TRADE, decision.decision)
+        self.assertEqual(("NO_QUALIFYING_CANDIDATE",), decision.reason_codes)
+        self.assertIn("선별·위험 기준", decision.notes)
 
     def test_selects_one_paper_position_with_bounded_risk(self):
         decision = ClosingBetEngine().evaluate(snapshot(quote()), cash=600_000)

@@ -27,7 +27,13 @@ class ClosingBetEngine:
     def __init__(self, config: StrategyConfig | None = None) -> None:
         self.config = config or StrategyConfig()
 
-    def evaluate(self, snapshot: MarketSnapshot, *, cash: int) -> Decision:
+    def evaluate(
+        self,
+        snapshot: MarketSnapshot,
+        *,
+        cash: int,
+        prior_screen_empty: bool = False,
+    ) -> Decision:
         self._validate_snapshot(snapshot)
         final = list(self.rank_candidates(snapshot))[: self.config.max_final_candidates]
         idempotency_key = (
@@ -37,7 +43,18 @@ class ClosingBetEngine:
         event_id = f"SIM-{snapshot.captured_at:%Y%m%d}-{snapshot.session.value}-{stable_suffix}"
 
         if not final or final[0].score < self.config.minimum_score:
-            reason = "MARKET_DATA_UNAVAILABLE" if not snapshot.quotes else "NO_QUALIFYING_CANDIDATE"
+            no_quotes = not snapshot.quotes
+            reason = (
+                "NO_QUALIFYING_CANDIDATE"
+                if not no_quotes or prior_screen_empty
+                else "MARKET_DATA_UNAVAILABLE"
+            )
+            if no_quotes and prior_screen_empty:
+                notes = "앞선 후보 선별은 완료됐지만 통과한 종목이 없어 모의매수를 진행하지 않았습니다."
+            elif no_quotes:
+                notes = "검증 가능한 시세 자료가 없어 모의매수를 진행하지 않았습니다."
+            else:
+                notes = "수신 시세가 필수 선별·위험 기준을 통과하지 못해 모의매수를 진행하지 않았습니다."
             return Decision(
                 event_id=event_id,
                 idempotency_key=idempotency_key,
@@ -50,7 +67,7 @@ class ClosingBetEngine:
                 position=None,
                 candidates=tuple(final),
                 reason_codes=(reason,),
-                notes="Selection threshold or mandatory risk filters were not satisfied.",
+                notes=notes,
             )
 
         selected = final[0]
