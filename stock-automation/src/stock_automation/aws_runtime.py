@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from collections import Counter
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1805,12 +1806,16 @@ def _run_worker() -> int:
     )
     if phase == "SHORTLIST_1510":
         shortlist_limit = int(os.getenv("SHORTLIST_LIMIT", "12"))
-        ranked = ClosingBetEngine(StrategyConfig(session=session)).rank_candidates(snapshot)
+        screen_engine = ClosingBetEngine(StrategyConfig(session=session))
+        ranked = screen_engine.rank_candidates(snapshot)
+        rejection_reasons = screen_engine.rejection_reasons(snapshot)
         shortlist_payload = {
             "captured_at": snapshot.captured_at.isoformat(),
             "session": session.value,
             "codes": [candidate.quote.code for candidate in ranked[:shortlist_limit]],
             "quotes": len(snapshot.quotes),
+            "rejection_reasons": rejection_reasons,
+            "rejection_counts": dict(sorted(Counter(rejection_reasons.values()).items())),
             "scores": {
                 candidate.quote.code: candidate.score for candidate in ranked[:shortlist_limit]
             },

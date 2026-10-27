@@ -150,42 +150,62 @@ class ClosingBetEngine:
                 results.append(candidate)
         return sorted(results, key=lambda item: item.score, reverse=True)
 
-    def _score_quote(self, snapshot: MarketSnapshot, q: Quote) -> Candidate | None:
+    def rejection_reason(self, snapshot: MarketSnapshot, q: Quote) -> str | None:
+        """Return the first hard filter that rejects ``q``, or None when it passes.
+
+        The check order is the scoring gate order, so the code names the first
+        condition a stock failed rather than every condition it failed.
+        """
         cfg = self.config
         age = _age_seconds(snapshot.captured_at, q.observed_at)
         if age < -5 or age > cfg.max_quote_age_seconds:
-            return None
+            return "STALE_QUOTE"
         if cfg.excludes_nxt and q.nxt_eligible:
-            return None
+            return "NXT_ELIGIBLE_EXCLUDED"
         if q.price <= 0 or q.price > cfg.hard_max_price:
-            return None
+            return "PRICE_OUT_OF_RANGE"
         if q.trading_value < cfg.minimum_trading_value:
-            return None
+            return "LOW_TRADING_VALUE"
         if q.volume_ratio < cfg.minimum_volume_ratio:
-            return None
+            return "LOW_VOLUME_RATIO"
         if q.close_strength < cfg.minimum_close_strength:
-            return None
+            return "WEAK_CLOSE_STRENGTH"
         if q.day_change_pct > cfg.maximum_day_gain_pct or q.day_change_pct < -5.0:
-            return None
+            return "DAY_CHANGE_OUT_OF_RANGE"
         if q.price < q.five_min_ma20 or q.five_min_ma20_slope <= 0:
-            return None
+            return "BELOW_5M_MA20_OR_FALLING"
         if q.support_price <= 0 or q.support_price >= q.price:
-            return None
+            return "INVALID_SUPPORT"
         ma5_distance = ((q.price / q.ma5) - 1) * 100 if q.ma5 > 0 else 999
         if ma5_distance > cfg.maximum_ma5_distance_pct:
-            return None
-
+            return "EXTENDED_FROM_MA5"
         vwap = q.vwap if q.vwap is not None else q.five_min_ma20
         if q.price < vwap:
-            return None
+            return "BELOW_VWAP"
         if q.rsi14 is not None and (q.rsi14 < 38.0 or q.rsi14 > 82.0):
-            return None
+            return "RSI_OUT_OF_RANGE"
         if not q.catalyst_verified or not q.catalyst.strip():
-            return None
+            return "CATALYST_NOT_VERIFIED"
+        if self._market_change(snapshot, q) <= cfg.maximum_market_decline_pct:
+            return "MARKET_DECLINE_GATE"
+        return None
 
-        market_change = self._market_change(snapshot, q)
-        if market_change <= cfg.maximum_market_decline_pct:
+    def rejection_reasons(self, snapshot: MarketSnapshot) -> dict[str, str]:
+        """Map each rejected stock code to its first failed hard filter."""
+        self._validate_snapshot(snapshot)
+        reasons: dict[str, str] = {}
+        for quote in snapshot.quotes:
+            reason = self.rejection_reason(snapshot, quote)
+            if reason is not None:
+                reasons[quote.code] = reason
+        return reasons
+
+    def _score_quote(self, snapshot: MarketSnapshot, q: Quote) -> Candidate | None:
+        cfg = self.config
+        if self.rejection_reason(snapshot, q) is not None:
             return None
+        ma5_distance = ((q.price / q.ma5) - 1) * 100 if q.ma5 > 0 else 999
+        market_change = self._market_change(snapshot, q)
 
         # Normalized 100-point suitability score.  It is a rule-fit score, not
         # a probability of profit.

@@ -144,6 +144,44 @@ class ClosingBetEngineTests(unittest.TestCase):
         decision = ClosingBetEngine().evaluate(snapshot(old), cash=600_000)
         self.assertEqual(DecisionType.NO_TRADE, decision.decision)
 
+    def test_rejection_reasons_name_first_failed_filter_per_code(self):
+        engine = ClosingBetEngine()
+        snap = snapshot(
+            quote(code="000001"),
+            quote(code="000002", trading_value=1_000_000_000),
+            quote(code="000003", catalyst_verified=False),
+            quote(code="000004", observed_at=datetime(2026, 10, 6, 15, 10, tzinfo=KST)),
+            quote(code="000005", nxt_eligible=True),
+            # Fails both volume ratio and catalyst; the earlier gate is reported.
+            quote(code="000006", volume=500_000, catalyst_verified=False),
+        )
+        self.assertEqual(
+            {
+                "000002": "LOW_TRADING_VALUE",
+                "000003": "CATALYST_NOT_VERIFIED",
+                "000004": "STALE_QUOTE",
+                "000005": "NXT_ELIGIBLE_EXCLUDED",
+                "000006": "LOW_VOLUME_RATIO",
+            },
+            engine.rejection_reasons(snap),
+        )
+
+    def test_rejection_reasons_match_ranking_membership(self):
+        engine = ClosingBetEngine()
+        snap = snapshot(
+            quote(code="000001", theme="a"),
+            quote(code="000002", theme="b", rsi14=86.0, vwap=19_700),
+        )
+        rejected = engine.rejection_reasons(snap)
+        ranked = {c.quote.code for c in engine.rank_candidates(snap)}
+        self.assertEqual({"000002"}, set(rejected))
+        self.assertEqual({"000001"}, ranked)
+        self.assertEqual("RSI_OUT_OF_RANGE", rejected["000002"])
+
+    def test_rejection_reasons_fail_closed_on_delayed_snapshot(self):
+        with self.assertRaisesRegex(ValueError, "delayed"):
+            ClosingBetEngine().rejection_reasons(snapshot(quote(), delayed=True))
+
     def test_keeps_only_one_candidate_per_theme(self):
         first = quote(code="111111", name="A", theme="battery")
         second = quote(code="222222", name="B", theme="battery", trading_value=30_000_000_000)
