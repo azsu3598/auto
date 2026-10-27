@@ -99,7 +99,7 @@ class ClosingBetEngineTests(unittest.TestCase):
 
     def test_quotes_filtered_out_are_reported_as_no_qualifying_candidate(self):
         decision = ClosingBetEngine().evaluate(
-            snapshot(quote(catalyst_verified=False)), cash=600_000
+            snapshot(quote(trading_value=1_000_000_000)), cash=600_000
         )
         self.assertEqual(DecisionType.NO_TRADE, decision.decision)
         self.assertEqual(("NO_QUALIFYING_CANDIDATE",), decision.reason_codes)
@@ -149,16 +149,16 @@ class ClosingBetEngineTests(unittest.TestCase):
         snap = snapshot(
             quote(code="000001"),
             quote(code="000002", trading_value=1_000_000_000),
+            # An unverified catalyst only lowers the score; it is not a rejection.
             quote(code="000003", catalyst_verified=False),
             quote(code="000004", observed_at=datetime(2026, 10, 6, 15, 10, tzinfo=KST)),
             quote(code="000005", nxt_eligible=True),
-            # Fails both volume ratio and catalyst; the earlier gate is reported.
-            quote(code="000006", volume=500_000, catalyst_verified=False),
+            # Fails both volume ratio and RSI; the earlier gate is reported.
+            quote(code="000006", volume=500_000, rsi14=86.0),
         )
         self.assertEqual(
             {
                 "000002": "LOW_TRADING_VALUE",
-                "000003": "CATALYST_NOT_VERIFIED",
                 "000004": "STALE_QUOTE",
                 "000005": "NXT_ELIGIBLE_EXCLUDED",
                 "000006": "LOW_VOLUME_RATIO",
@@ -207,15 +207,20 @@ class ClosingBetEngineTests(unittest.TestCase):
         )
         self.assertEqual(DecisionType.NO_TRADE, decision.decision)
 
-    def test_unverified_or_missing_catalyst_is_rejected(self):
-        unverified = ClosingBetEngine().evaluate(
-            snapshot(quote(catalyst_verified=False)), cash=600_000
-        )
-        missing = ClosingBetEngine().evaluate(
-            snapshot(quote(catalyst="", catalyst_score=0.0)), cash=600_000
-        )
-        self.assertEqual(DecisionType.NO_TRADE, unverified.decision)
-        self.assertEqual(DecisionType.NO_TRADE, missing.decision)
+    def test_catalyst_is_scored_not_required(self):
+        engine = ClosingBetEngine()
+        verified = engine.rank_candidates(snapshot(quote()))[0]
+        unverified = engine.rank_candidates(snapshot(quote(catalyst_verified=False)))[0]
+        missing = engine.rank_candidates(snapshot(quote(catalyst="", catalyst_score=0.0)))[0]
+        # Verified: 0.8 * 6 + 4; unverified keeps only the theme score; none adds nothing.
+        self.assertAlmostEqual(4.0, verified.score - unverified.score)
+        self.assertAlmostEqual(4.8, unverified.score - missing.score)
+        self.assertIn("CATALYST_CONFIRMED", verified.reasons)
+        self.assertNotIn("CATALYST_CONFIRMED", unverified.reasons)
+        self.assertIn("CATALYST_UNKNOWN", unverified.risks)
+        self.assertIn("CATALYST_UNKNOWN", missing.risks)
+        decision = engine.evaluate(snapshot(quote(catalyst="", catalyst_score=0.0)), cash=600_000)
+        self.assertEqual(DecisionType.BUY, decision.decision)
 
     def test_score_is_normalized_to_one_hundred(self):
         strong = quote(

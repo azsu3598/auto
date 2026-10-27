@@ -8,7 +8,7 @@ from .models import Session
 @dataclass(frozen=True, slots=True)
 class StrategyConfig:
     session: Session = Session.KRX_1520
-    rule_version: str = "closing-v0.2"
+    rule_version: str = "closing-v0.3"
     max_quote_age_seconds: int = 180
     minimum_trading_value: int = 10_000_000_000
     minimum_volume_ratio: float = 1.10

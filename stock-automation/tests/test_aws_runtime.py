@@ -8,6 +8,8 @@ from io import BytesIO
 from types import SimpleNamespace
 
 from stock_automation.aws_runtime import (
+    _apply_dart_catalysts,
+    _closing_bet_dart,
     _archive_replay_case,
     _automatic_disclosure_overlays,
     _deliver_outbox,
@@ -234,6 +236,61 @@ class AwsRuntimeTests(unittest.TestCase):
 
         self.assertEqual({"VALID"}, set(result))
         self.assertTrue(result["VALID"].verified)
+
+    def test_closing_bet_runs_without_dart_when_key_is_missing(self):
+        with patch.dict("os.environ", {"DART_API_KEY": ""}):
+            self.assertEqual((None, {}), _closing_bet_dart(None, "bucket", datetime.now(KST)))
+
+    def test_same_day_dart_disclosure_becomes_verified_catalyst(self):
+        from stock_automation.dart import DartDisclosure, DartError, DartOverlay
+
+        now = datetime(2026, 10, 6, 15, 20, 30, tzinfo=KST)
+
+        class FakeDart:
+            def __init__(self):
+                self.looked_up = []
+
+            def disclosure_overlay(self, *, stock_code, corp_code, checked_at, lookback_days):
+                self.looked_up.append((stock_code, corp_code, checked_at.date(), lookback_days))
+                if stock_code == "000004":
+                    raise DartError("OpenDART disclosure query failed: 020")
+                flags = ("DILUTION_EVENT",) if stock_code == "000002" else ()
+                rows = () if stock_code == "000003" else (
+                    DartDisclosure("1", "20261006", "단일판매ㆍ공급계약체결", "회사"),
+                )
+                return DartOverlay(now, flags, "단일판매ㆍ공급계약체결" if rows else "", rows)
+
+        unverified = dict(catalyst="", catalyst_score=0.0, catalyst_verified=False,
+                          warnings=("CATALYST_UNKNOWN",))
+        snap = snapshot(
+            quote(code="000001", **unverified),
+            quote(code="000002", **unverified),
+            quote(code="000003", **unverified),
+            quote(code="000004", **unverified),
+            quote(code="000005", trading_value=1, **unverified),  # rejected: not looked up
+            quote(code="000006", **unverified),  # no DART corporation code
+            quote(code="000007"),  # already verified by the S3 override
+        )
+        dart = FakeDart()
+        codes = {f"00000{i}": f"0000000{i}" for i in range(1, 6)} | {"000007": "00000007"}
+
+        result = {q.code: q for q in _apply_dart_catalysts(
+            snap, client=dart, corporation_codes=codes, now=now
+        ).quotes}
+
+        self.assertEqual(
+            ["000001", "000002", "000003", "000004"], [row[0] for row in dart.looked_up]
+        )
+        self.assertTrue(all(row[2:] == (now.date(), 0) for row in dart.looked_up))
+        self.assertTrue(result["000001"].catalyst_verified)
+        self.assertEqual(1.0, result["000001"].catalyst_score)
+        self.assertTrue(result["000001"].catalyst.startswith("DART 당일 공시"))
+        self.assertNotIn("CATALYST_UNKNOWN", result["000001"].warnings)
+        self.assertFalse(result["000002"].catalyst_verified)
+        self.assertIn("DART_DILUTION_EVENT", result["000002"].warnings)
+        for code in ("000003", "000004", "000005", "000006"):
+            self.assertEqual(snap.quotes[int(code) - 1], result[code])
+        self.assertEqual(snap.quotes[6], result["000007"])
 
     def test_five_minute_stop_confirmation_uses_two_closed_bars(self):
         confirmed, reclaimed = _five_min_stop_confirmation(

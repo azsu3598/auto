@@ -184,8 +184,7 @@ class ClosingBetEngine:
             return "BELOW_VWAP"
         if q.rsi14 is not None and (q.rsi14 < 38.0 or q.rsi14 > 82.0):
             return "RSI_OUT_OF_RANGE"
-        if not q.catalyst_verified or not q.catalyst.strip():
-            return "CATALYST_NOT_VERIFIED"
+        # A verified catalyst is scored, not required; see _score_quote.
         if self._market_change(snapshot, q) <= cfg.maximum_market_decline_pct:
             return "MARKET_DECLINE_GATE"
         return None
@@ -244,7 +243,10 @@ class ClosingBetEngine:
             elif resistance_room < 1.2:
                 score -= 8.0
 
-        score += 4.0 + min(6.0, max(0.0, q.catalyst_score) * 6.0)
+        catalyst_confirmed = q.catalyst_verified and bool(q.catalyst.strip())
+        score += min(6.0, max(0.0, q.catalyst_score) * 6.0)
+        if catalyst_confirmed:
+            score += 4.0
         if q.program_net is not None and q.program_net > 0:
             score += 1.5
         if q.institution_net is not None and q.institution_net > 0:
@@ -280,13 +282,13 @@ class ClosingBetEngine:
             reasons.append("BREAKOUT_HOLD")
         if q.rsi14 is not None and 52.0 <= q.rsi14 <= 72.0:
             reasons.append("RSI_HEALTHY_MOMENTUM")
-        if q.catalyst.strip():
+        if catalyst_confirmed:
             reasons.append("CATALYST_CONFIRMED")
         if q.day_change_pct >= 8.0:
             risks.append("LATE_ENTRY_RISK")
         if q.total_ask_size is None or q.total_bid_size is None:
             risks.append("ORDERBOOK_UNKNOWN")
-        if not q.catalyst.strip():
+        if not catalyst_confirmed:
             risks.append("CATALYST_UNKNOWN")
         if q.rsi14 is not None and q.rsi14 > 76.0:
             risks.append("RSI_OVERHEATED")

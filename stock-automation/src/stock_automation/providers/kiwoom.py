@@ -71,11 +71,35 @@ def _optional_datetime(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo is not None else None
 
 
+# Brand prefixes of Korean ETFs. Used as a fallback when the listed-company
+# code set (OpenDART) is unavailable; ETN names carry "ETN" themselves.
+_FUND_NAME_PREFIXES = (
+    "KODEX", "TIGER", "RISE", "KBSTAR", "SOL", "ACE", "HANARO", "ARIRANG",
+    "PLUS", "KOSEF", "KIWOOM", "TIMEFOLIO", "WOORI", "1Q", "BNK", "FOCUS",
+    "TRUSTON", "UNICORN", "HK", "KCGI", "KOACT", "WON", "ITF", "DAISHIN343",
+    "마이다스", "에셋플러스", "파워",
+)
+
+
+def is_exchange_traded_product(code: str, name: str, listed_codes: frozenset[str] | None) -> bool:
+    """Return True for ETFs/ETNs, which are funds rather than listed companies.
+
+    ``listed_codes`` holds the six-digit codes of listed companies (OpenDART).
+    A preferred share (last digit not 0) counts as listed when its common share is.
+    """
+    upper = name.strip().upper()
+    if "ETN" in upper or upper.startswith(_FUND_NAME_PREFIXES):
+        return True
+    if listed_codes is None:
+        return False
+    return code not in listed_codes and f"{code[:5]}0" not in listed_codes
+
+
 class KiwoomSnapshotBuilder:
     """Builds a fail-closed engine snapshot from documented Kiwoom REST endpoints.
 
     News/theme classification is intentionally injected. Missing catalyst evidence gets
-    score zero and will be rejected by the strategy engine.
+    score zero; a verified catalyst adds score but is not a hard filter.
     """
 
     def __init__(self, client: KiwoomClient, *, max_pages: int = 10) -> None:
@@ -92,6 +116,8 @@ class KiwoomSnapshotBuilder:
         kosdaq_change_pct: float,
         candidate_limit: int = 60,
         candidate_codes: tuple[str, ...] | None = None,
+        exclude_funds: bool = False,
+        listed_codes: frozenset[str] | None = None,
     ) -> MarketSnapshot:
         if captured_at.tzinfo is None:
             raise ValueError("captured_at must be timezone-aware")
@@ -103,6 +129,15 @@ class KiwoomSnapshotBuilder:
             ranked = [
                 row for row in ranked
                 if str(row.get("stk_cd", "")).replace("_NX", "").strip() in allowed_codes
+            ]
+        if exclude_funds:
+            ranked = [
+                row for row in ranked
+                if not is_exchange_traded_product(
+                    str(row.get("stk_cd", "")).replace("_NX", "").strip(),
+                    str(row.get("stk_nm", "")),
+                    listed_codes,
+                )
             ]
         ranked = ranked[:candidate_limit]
         institution_flow: dict[str, int] = {}

@@ -287,6 +287,27 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-27 21:30 KST — PC-C / Claude → 종가배팅 촉매 점수화·ETF 제외·DART 당일 공시 연결 (코드만, AWS 미반영)
+
+- 사용자 결정: ① 촉매는 필수 조건이 아니라 점수로 반영 ② 촉매 인정 기준은 DART 당일 공시 1건 이상(위험 공시 제외) ③ 후보에서 ETF·ETN 제외 ④ 이번 수정은 PC-D가 아니라 PC-C에서 진행(사용자 직접 요청). 운용 중단·새 운용 배포는 11/3(화) 저녁 이후로 미룸(5회차 진입 11/2, 마지막 청산·보고 11/3 09:40). 10/28·10/29 낮 중단은 사용자 일정상 불가.
+- 변경 `src/stock_automation/engine.py`: 하드 필터에서 `CATALYST_NOT_VERIFIED` 제거. 점수는 `catalyst_score*6`(최대 6) + 검증 촉매 4점. 검증 촉매가 아니면 `CATALYST_UNKNOWN` 위험 표시, `CATALYST_CONFIRMED`는 검증 촉매일 때만. `config.py` `rule_version` `closing-v0.3`. 최소 점수 60 등 다른 조건은 그대로.
+- 변경 `providers/kiwoom.py`: `build(exclude_funds, listed_codes)` 추가. 시세 요청 전에 ETF·ETN을 후보에서 뺀다. 판단: 이름에 `ETN` 또는 ETF 브랜드 접두어(KODEX·TIGER 등) → 제외, DART 상장회사 코드가 있으면 코드에 없는 종목도 제외(우선주는 보통주 코드로 인정). 기본값은 기존 동작.
+- 변경 `aws_runtime.py`: 종가배팅 경로에서 `_closing_bet_dart`(DART 키·회사코드 로드, 실패하면 DART 없이 진행)와 `_apply_dart_catalysts`(하드 필터 통과 종목만 최대 12건 당일 공시 조회, 위험 공시는 촉매 아님+`DART_<flag>` 경고, 조회 오류는 해당 종목만 건너뜀) 연결. DART 키는 batch 템플릿에 이미 연결돼 있다. 회사코드 S3 캐시(`config/dart/corp-code-map.json`) 쓰기 권한은 확인하지 못했으며 실패 시 매번 DART에서 직접 받는다.
+- 테스트: 변경 반영 `test_engine.py`(촉매 점수화), `test_rejection_report.py`, 추가 `test_kiwoom_provider.py` 2개, `test_aws_runtime.py` 2개. 집중 57개 OK, 전체 441개 OK(skip 2), `compileall -q src tests tools infra` 통과, `git diff --check` 통과.
+- 10/27 스냅샷 재적용(로컬): 이름 규칙으로 ETF 23종목 제외 후 13종목, 하드 필터 통과 0(NXT 8, 가격 2, 종가 강도 2, 거래량 1). 실제 운용에서는 ETF가 빠진 자리를 다음 순위 종목이 채우므로 결과가 다를 수 있다. 이 수정으로 매수가 나온다고 보장하지 않는다.
+- 미확인: 실제 DART 응답·요청 시간, 태스크 역할의 S3 쓰기 권한, 키움 종목 마스터의 ETF 구분값. 새 이미지 배포 후 첫 15:10 `shortlist.json`의 `rejection_counts`로 확인한다.
+- 실거래: AWS·이미지·예약 변경 없음, 실주문 없음. commit/push는 사용자 승인 대기.
+
+### 2026-10-27 19:49 KST — PC-C / Codex → 10/27 탈락 사유 집계 완료, 운용 중단 대기
+
+- 절차 확인: `CLAUDE.md`, `AGENTS.md`, PC-C 전체 인수인계, 공동 인수인계, 2026-10-27 작업지시서와 일정 문서를 읽었다. `git pull`은 `Already up to date`; 작업 시작 시 worktree clean이었다.
+- 검증: 지정 집중 테스트 143개 통과, 전체 unittest 437개 통과(기존 skip 2), `compileall -q src tests tools infra` 통과. 집중 테스트의 첫 시도는 `tests` import 경로 누락으로 3개 모듈 로드 오류가 있었으며 `PYTHONPATH=src;tests`로 재실행해 통과했다.
+- S3 읽기(사용자 승인, 2026-10-27만): 저장소 밖 임시 폴더에 `scan_1450`, `shortlist_1510`, `entry_1520` snapshot 3/3 다운로드. 로컬 집계는 시세 72건, 하드 필터 통과 0건; 거래량 증가 부족 25건(34.7%), NXT 대상 종목 16건(22.2%), 종가 강도 부족 16건(22.2%), 가격 범위 초과 10건(13.9%), 등락률 범위 초과 3건(4.2%), 5분봉 20이평 조건 1건(1.4%), 촉매 미확인 1건(1.4%). 15:20 entry 시세는 0건. 집계는 첫 탈락 사유 기준이며 테마 중복·점수 미달은 제외된다.
+- AWS 조회 한계: 로그인 후에도 `cloudformation:ListStacks`와 `s3:ListAllMyBuckets`가 AccessDenied였다. 사용자가 연 batch 설정의 기존 artifact 버킷 참조를 사용해 승인된 날짜 한정 GetObject를 마쳤다. 10/28 운용 상태는 아직 조회하지 않았다.
+- 파일: 이 handoff 기록만 추가. 코드/템플릿/런타임 파일 수정 없음. S3 결과는 `%TEMP%`에 보관하고 Git에 추가하지 않는다.
+- 실거래: 이번 세션에서 AWS 리소스·예약·실거래 설정을 변경하지 않았고 실주문 없음. live-order의 실제 배포 상태는 권한 부족으로 독립 조회하지 못했으며 기존 설정은 변경하지 않았다.
+- 다음 작업: 2026-10-28 09:41 이후 14:30 이전, 사용자 승인 후 `paper_operations.py status`로 10/27 `REPORT_AM=REPORTED`, `HALT=NO_RECORD` 확인. 조건이 맞지 않으면 중단하고 보고한다. 조건 확인 후 stop 및 이후 각 AWS 단계의 별도 승인을 받는다. 10/27 S3 이외 날짜는 조회하지 않는다.
+
 ### 2026-10-27 17:02 KST — PC-D / Claude → PC-C / 운용 중단·재시작 일정 협의 문서 추가
 
 - 추가 `docs/운영 검증/2026-10-27_PC-C_협의사항_운용중단_재시작_일정.md`: 사용자와 PC-C가 협의할 일정(10/28 09:41~14:30 중단, 10/29 15:20 첫 매수 판단), 자동/수동 구분, 오늘 중단하거나 10/28에 시작할 수 없는 이유, 미리 등록할 때의 제약, 상세 메시지 반영 위치 3곳, S3 확인 범위를 정리했다. 실행 절차 원본은 바로 아래 16:56 기록의 작업지시서다.
@@ -315,30 +336,6 @@ python -m compileall -q src tests
 - 정정(바로 아래 16:43 기록): "기존 금지 사항은 그대로다"는 사용자 확인에 따라 **"이번 작업 범위가 아니며 사용자 별도 승인이 필요한 일"** 로 읽는다. 대상은 같다: AWS 배포·이미지 교체·스케줄 변경, 실거래 활성화, kill switch 해제, 실계좌 Secret 연결, 실주문.
 - 이유: AWS 이미지 교체는 진행 중인 5회 운용(11/03 종료 예정)의 준비 검사를 깨뜨려 HALT될 수 있어 종료 후 승인 대상이다. 실거래는 체결·부분체결 원장과 기존 보유종목 보호가 미완성(README)이고 `AGENTS.md`가 별도 명시 승인을 요구한다.
 - 실거래 상태: 변경 없음, 실제 주문 없음.
-
-### 2026-10-27 16:43 KST — PC-D / Claude → PC-C / PC-C 수정 범위 정정: 금지가 아니라 최소화
-
-- 정정(아래 15:40·15:30·15:50 기록): 사용자 지시는 "PC-C 코드 수정은 **최소한**으로, 수정은 가능한 PC-D가 한다"였다. 아래 기록의 "코드 수정 없음", "실패하면 코드를 고치지 말고 기록만"은 지시보다 강하게 적은 것이다. 아래 기준으로 대체한다.
-- 기본: 테스트 실행·스냅샷 다운로드·집계·기록이 PC-C의 주 작업이다. 수정 없이 끝나면 수정하지 않는다.
-- PC-C가 수정할 수 있는 경우: PC-C 실행 중 실패·오류가 PC-D 변경 또는 PC-C 환경(Windows 경로, `.venv`, AWS 응답 형식, 권한 오류 처리 등)에서 비롯되고, PC-C에서만 재현·검증할 수 있을 때. 이때 원인을 먼저 확인하고 필요한 최소 범위만 고친다.
-- 수정 시 지킬 것: ① 수정 전 실패 원문을 기록 ② 안전장치·주문·실거래 관련 검사를 완화하지 않으며, 테스트를 통과시키려고 테스트 자체를 지우거나 기대값만 바꾸지 않는다 ③ 수정 후 집중 테스트와 전체 테스트를 다시 실행 ④ 변경 파일·이유·전후 결과를 이 절에 기록 ⑤ commit/push는 사용자 승인 후. 원인이 불명확하거나 설계 변경이 필요하면 고치지 말고 원문과 함께 PC-D로 넘긴다.
-- 기존 금지 사항은 그대로다: AWS 배포·이미지 교체·스케줄 변경, 실거래 활성화, kill switch 해제, 실계좌 Secret 연결, 실주문.
-- 실거래 상태: 변경 없음, 실제 주문 없음.
-
-### 2026-10-27 15:40 KST — PC-D / Claude → PC-C / 스냅샷 다운로드 도구 추가 및 버킷 정보 정정 (PC-C는 실행·기록만)
-
-- 정정(아래 15:30 기록): "버킷 이름은 PC-C 인수인계의 값을 쓴다"는 틀렸다. 그 문서에는 버킷 이름이 없다. 코드·인프라에서 확인한 사실: 모의 버킷은 `stock-automation-paper-<AWS계정ID>-<리전>` 형식(`infra/paper-app-iam-bootstrap.yaml` 경계 정책 기준)이며, 실행 문서(`다른_PC_프로그램_실행방법.md`, `AWS_자동매매_실행가이드.md`)는 CloudFormation 스택 출력 `ArtifactBucketName`으로 조회한다. 리전·스택 이름은 저장소에서 확인하지 못했다(문서는 `$Region`·`$Stack` 변수로만 표기).
-- 추가 `stock-automation/tools/fetch_snapshots.py`: 지정한 날짜의 스냅샷 3개만 `GetObject`로 내려받는다. 키는 `runs/YYYY/MM/DD/KRX_1520/{scan_1450,shortlist_1510,entry_1520}-snapshot.json`(`aws_runtime.py`의 `date_prefix`·`phase.lower()` 규칙과 대조). 업로드·삭제·목록 조회·DynamoDB·ECS·주문·Secret 호출이 없다. 저장소 안쪽 출력 폴더와 기존 파일 덮어쓰기를 거부하고, 오류는 코드 그대로 출력하며 재시도·권한 확대를 하지 않는다. 버킷은 `--bucket` 또는 `PAPER_BUCKET`, 리전은 `--region` 또는 `AWS_REGION`/`AWS_DEFAULT_REGION`.
-- 추가 테스트 `stock-automation/tests/test_fetch_snapshots.py` 6개(키 규칙, 다운로드·없음·권한오류 보고, 덮어쓰기 거부, 저장소 내부 출력 거부, 인자 검증, 아무것도 못 받으면 종료코드 1). 가짜 S3 클라이언트를 쓰며 PC-D에서 통과. **실제 S3 접근은 PC-D에서 검증하지 못했다.**
-- PC-D 전체 테스트: 364개 실행, 실패2·오류7~8·skip2. 고정 실패 9건은 이전 기록과 동일한 환경 요인(`boto3` 미설치 7, 텔레그램 TLS 모킹 2)이며 새 실패는 없다.
-- **PC-C 실행 순서(코드 수정 없음)**:
-  1. pull → 세 문서 재확인 → `C:\Test\.venv\Scripts\python.exe`로 전체 테스트·compileall 실행, 결과 그대로 기록(15:50 기록 순서).
-  2. 사용자 승인 후 버킷 이름을 읽기 명령으로 확인한다(예: 스택 출력 `ArtifactBucketName`을 `aws cloudformation describe-stacks`로 조회). 스택 이름·리전은 PC-C가 쓰던 값을 사용한다.
-  3. 저장소 밖 폴더(예: `C:\Users\<사용자>\snapshots-tmp`)로 내려받는다: `"C:\Test\.venv\Scripts\python.exe" stock-automation\tools\fetch_snapshots.py --bucket <버킷> --region <리전> --date 2026-10-27 --out <저장소 밖 폴더>`. 날짜는 `--date`를 반복해 10/26 등을 추가할 수 있다. `AccessDenied`가 나오면 오류 원문만 기록하고 권한을 바꾸거나 다른 계정을 쓰지 않는다(`NOT_FOUND`는 해당 시각 스냅샷이 없다는 뜻).
-  4. `"C:\Test\.venv\Scripts\python.exe" stock-automation\tools\rejection_report.py --dir <같은 폴더>`를 실행하고 출력 표를 기록·사용자에게 전달한다. 탈락 사유를 보려면 `scan_1450`·`shortlist_1510`이 의미 있다. 15:10 통과가 0건이면 `entry_1520`의 시세는 0건으로 저장되므로 집계에서 `시세 0건`으로 보인다.
-  5. 내려받은 스냅샷은 Git에 올리지 않는다(시세 원본). 기록에는 표와 요약만 남긴다.
-- 알려진 한계: 스냅샷이 오늘 이전 회차에 모두 남아 있는지, PC-C 계정이 `runs/` 객체 읽기 권한을 갖는지는 미확인이다. 이 도구는 AWS 이미지 반영 없이 쓸 수 있다.
-- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 

@@ -5,7 +5,11 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from stock_automation.models import Session
-from stock_automation.providers.kiwoom import Catalyst, KiwoomSnapshotBuilder
+from stock_automation.providers.kiwoom import (
+    Catalyst,
+    KiwoomSnapshotBuilder,
+    is_exchange_traded_product,
+)
 
 KST = timezone(timedelta(hours=9))
 
@@ -201,6 +205,34 @@ class KiwoomProviderTests(unittest.TestCase):
             kosdaq_change_pct=0.5,
         )
         self.assertEqual(datetime(2026, 10, 6, 15, 21, tzinfo=KST), snapshot.captured_at)
+
+    def test_exchange_traded_products_are_recognized(self):
+        listed = frozenset({"005930", "000660"})
+        self.assertTrue(is_exchange_traded_product("069500", "KODEX 200", None))
+        self.assertTrue(is_exchange_traded_product("0167A0", "SOL AI반도체TOP2플러스", None))
+        self.assertTrue(is_exchange_traded_product("500001", "삼성 레버리지 WTI원유 선물 ETN", None))
+        self.assertTrue(is_exchange_traded_product("999999", "이름만 있는 펀드", listed))
+        self.assertFalse(is_exchange_traded_product("005930", "삼성전자", listed))
+        # A preferred share is listed through its common share.
+        self.assertFalse(is_exchange_traded_product("005935", "삼성전자우", listed))
+        self.assertFalse(is_exchange_traded_product("123456", "테스트", None))
+
+    def test_fund_exclusion_skips_non_listed_codes_before_quote_requests(self):
+        common = dict(
+            captured_at=datetime(2026, 10, 6, 15, 20, 30, tzinfo=KST),
+            session=Session.KRX_1520,
+            catalysts={},
+            kospi_change_pct=0.2,
+            kosdaq_change_pct=0.5,
+        )
+        kept = KiwoomSnapshotBuilder(FakeClient()).build(
+            **common, exclude_funds=True, listed_codes=frozenset({"123456"})
+        )
+        dropped = KiwoomSnapshotBuilder(FakeClient()).build(
+            **common, exclude_funds=True, listed_codes=frozenset({"654321"})
+        )
+        self.assertEqual(["123456"], [q.code for q in kept.quotes])
+        self.assertEqual((), dropped.quotes)
 
     def test_medium_term_candidate_codes_are_pre_filtered_for_nxt(self):
         codes = KiwoomSnapshotBuilder(FakeClient()).medium_term_candidate_codes(40)

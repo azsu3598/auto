@@ -40,7 +40,7 @@ class RejectionReportTests(unittest.TestCase):
             _write(
                 root,
                 "b-snapshot.json",
-                quote(code="000003", catalyst_verified=False),
+                quote(code="000003", nxt_eligible=True),
                 quote(code="000004", trading_value=1),
             )
             rows, skipped = report.collect(sorted(root.glob("*-snapshot.json")))
@@ -49,7 +49,7 @@ class RejectionReportTests(unittest.TestCase):
             self.assertEqual([1, 0], [row["passed_hard_filters"] for row in rows])
             text = report.render(rows, skipped)
             self.assertIn("거래대금 부족 (`LOW_TRADING_VALUE`) | 2 | 66.7%", text)
-            self.assertIn("촉매 미확인 (`CATALYST_NOT_VERIFIED`) | 1 | 33.3%", text)
+            self.assertIn("NXT 대상 종목(KRX 전략 제외) (`NXT_ELIGIBLE_EXCLUDED`) | 1 | 33.3%", text)
 
     def test_unreadable_or_delayed_files_are_reported_not_fatal(self):
         with tempfile.TemporaryDirectory() as directory:

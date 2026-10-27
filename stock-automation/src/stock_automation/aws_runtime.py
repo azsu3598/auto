@@ -4,14 +4,14 @@ import json
 import os
 import tempfile
 from collections import Counter
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from .calendar import TradingCalendar
 from .config import StrategyConfig
-from .dart import DartClient
+from .dart import DartClient, DartError
 from .engine import ClosingBetEngine
 from .exit_engine import review_position
 from .models import (
@@ -194,6 +194,79 @@ def _automatic_disclosure_overlays(
         ContentType="application/json; charset=utf-8",
     )
     return overlays
+
+
+def _closing_bet_dart(s3, bucket: str, now: datetime) -> tuple[DartClient | None, dict[str, str]]:
+    """Return an OpenDART client and listed-company codes, or (None, {}) on any failure.
+
+    DART is optional for the closing bet: without it candidates are only
+    unscored for catalyst and ETFs fall back to the name rule.
+    """
+    try:
+        client = DartClient(_require("DART_API_KEY"))
+    except (RuntimeError, ValueError):
+        return None, {}
+    try:
+        return client, _dart_corporation_codes(s3, bucket, client, now)
+    except Exception:
+        pass
+    try:
+        # The S3 cache may be unwritable for this task role; use the live map.
+        return client, client.corporation_codes()
+    except Exception:
+        return None, {}
+
+
+def _apply_dart_catalysts(
+    snapshot: MarketSnapshot,
+    *,
+    client: DartClient,
+    corporation_codes: dict[str, str],
+    now: datetime,
+    max_lookups: int = 12,
+) -> MarketSnapshot:
+    """Mark same-day OpenDART disclosures as verified catalysts.
+
+    Only quotes that pass the hard filters are looked up, since the catalyst
+    changes the score and not eligibility. A risk disclosure (dilution,
+    delisting, audit, ...) is never a catalyst and is added as a warning.
+    """
+    engine = ClosingBetEngine(StrategyConfig(session=snapshot.session))
+    lookups = 0
+    quotes = []
+    for quote in snapshot.quotes:
+        corp_code = corporation_codes.get(quote.code) or corporation_codes.get(f"{quote.code[:5]}0")
+        if (
+            quote.catalyst_verified
+            or not corp_code
+            or lookups >= max_lookups
+            or engine.rejection_reason(snapshot, quote) is not None
+        ):
+            quotes.append(quote)
+            continue
+        lookups += 1
+        try:
+            overlay = client.disclosure_overlay(
+                stock_code=quote.code, corp_code=corp_code, checked_at=now.astimezone(KST), lookback_days=0
+            )
+        except (DartError, OSError, ValueError):
+            quotes.append(quote)
+            continue
+        if overlay.risk_flags:
+            quotes.append(replace(quote, warnings=tuple(dict.fromkeys(
+                (*quote.warnings, *(f"DART_{flag}" for flag in overlay.risk_flags))
+            ))))
+        elif overlay.disclosures:
+            quotes.append(replace(
+                quote,
+                catalyst=f"DART 당일 공시: {overlay.catalyst}",
+                catalyst_score=1.0,
+                catalyst_verified=True,
+                warnings=tuple(w for w in quote.warnings if w != "CATALYST_UNKNOWN"),
+            ))
+        else:
+            quotes.append(quote)
+    return replace(snapshot, quotes=tuple(quotes))
 
 
 def _market_change(client, market: str, index_code: str) -> float:
@@ -1789,6 +1862,7 @@ def _run_worker() -> int:
                 candidate_limit, int(os.getenv("ENTRY_FALLBACK_CANDIDATE_LIMIT", "12"))
             )
 
+    dart_client, corporation_codes = _closing_bet_dart(s3, bucket, now)
     snapshot = builder.build(
         captured_at=now,
         session=session,
@@ -1797,7 +1871,13 @@ def _run_worker() -> int:
         kosdaq_change_pct=_market_change(client, "1", "101"),
         candidate_limit=effective_candidate_limit,
         candidate_codes=candidate_codes,
+        exclude_funds=True,
+        listed_codes=frozenset(corporation_codes) if corporation_codes else None,
     )
+    if dart_client is not None:
+        snapshot = _apply_dart_catalysts(
+            snapshot, client=dart_client, corporation_codes=corporation_codes, now=now
+        )
     s3.put_object(
         Bucket=bucket,
         Key=f"{date_prefix}/{phase.lower()}-snapshot.json",
