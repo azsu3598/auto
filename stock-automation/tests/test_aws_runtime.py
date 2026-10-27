@@ -23,6 +23,7 @@ from stock_automation.aws_runtime import (
     _save_decision,
     _save_medium_entry,
     _save_medium_signal,
+    _shortlist_screened_empty,
     _verified_catalyst_overrides,
 )
 from stock_automation.backtest import TradingCosts
@@ -192,6 +193,19 @@ class FakeStopConfirmationClient:
 
 
 class AwsRuntimeTests(unittest.TestCase):
+    def test_empty_shortlist_is_screened_only_when_1510_quotes_were_received(self):
+        self.assertTrue(_shortlist_screened_empty({"codes": [], "quotes": 36}))
+        for shortlist in (
+            {"codes": [], "quotes": 0},
+            {"codes": []},
+            {"codes": [], "quotes": True},
+            {"codes": [], "quotes": "36"},
+            {"codes": ["123456"], "quotes": 36},
+            {},
+        ):
+            with self.subTest(shortlist=shortlist):
+                self.assertFalse(_shortlist_screened_empty(shortlist))
+
     def test_catalyst_override_requires_source_flag_and_same_day_verification(self):
         now = datetime(2026, 10, 8, 15, 20, tzinfo=KST)
         common = {

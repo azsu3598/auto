@@ -126,5 +126,16 @@ class PaperControlTests(unittest.TestCase):
         result=self.c.handle({'source':'aws.ecs','detail':{'clusterArn':'paper-cluster','lastStatus':'STOPPED','containers':[{'exitCode':2}]}})
         self.assertEqual(result['state'],'DUPLICATE_BLOCKED');self.c.notify.assert_not_called()
 
+    def test_alert_text_keeps_code_and_explains_meaning_in_korean(self):
+        notifier=control.Controller(clients=self.clients,env=self.env,clock=lambda:NOW,sleep=Mock())
+        self.clients['secretsmanager'].get_secret_value.return_value={'SecretString':json.dumps({'chat_id':'1','bot_token':'t'})}
+        for code,expected in (('NETWORK_CONTROL_FAILED','중계 서버'),('TASK_CLEANUP_RECONCILE_REQUIRED','대사'),
+                ('ECS_TASK_FAILED_RECONCILE_REQUIRED','오류로 종료'),('UNLISTED_CODE','분류되지 않은')):
+            with self.subTest(code=code),patch.object(control.urllib.request,'urlopen') as urlopen:
+                urlopen.return_value.__enter__.return_value=io.BytesIO(b'{"ok":true}')
+                notifier.notify(code)
+                text=json.loads(urlopen.call_args.args[0].data)['text']
+                self.assertIn(code,text);self.assertIn(expected,text);self.assertIn('실제 계좌 주문과 무관',text)
+
 
 if __name__=='__main__':unittest.main()

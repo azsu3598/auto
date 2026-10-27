@@ -60,6 +60,27 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("매수가: 10,000", fields["text"])
         self.assertEqual("true", fields["protect_content"])
         self.assertEqual({}, headers)
+        self.assertIn("실제 계좌 주문이 아닙니다", fields["text"])
+
+    def test_telegram_explains_exit_action_and_reasons_in_korean(self):
+        secrets = FakeSecrets({"bot_token": "123:secret", "chat_id": "998877"})
+        transport = FakeTransport([{"ok": True}])
+        TelegramNotifier(secrets, "telegram-secret", transport=transport).send(
+            "[모의매매] 테스트 SCHEDULED_EXIT",
+            {
+                "action": "SCHEDULED_EXIT",
+                "execution_price": 10_200,
+                "execution_quantity": 20,
+                "realized_pnl": 3_573,
+                "reason_codes": ["NEXT_SESSION_0910", "UNMAPPED_CODE"],
+            },
+        )
+        text = transport.calls[0][1]["text"]
+        self.assertTrue(text.startswith("[모의매매] 테스트 예정 시각 청산(가상매도)"))
+        self.assertIn("구분: 예정 시각 청산(가상매도)", text)
+        self.assertIn("사유: 다음 거래일 09:10 청산, UNMAPPED_CODE", text)
+        self.assertIn("손익: 3,573", text)
+        self.assertNotIn("SCHEDULED_EXIT", text)
 
     def test_telegram_rejects_incomplete_secret(self):
         notifier = TelegramNotifier(

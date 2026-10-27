@@ -299,5 +299,67 @@ class BatchTemplateTests(unittest.TestCase):
         self.assertEqual(self.template['Resources']['PilotTask']['Properties']['Family'], 'stock-automation-paper-batch')
 
 
+class BatchNotificationExplanationTests(unittest.TestCase):
+    def test_report_message_keeps_codes_and_adds_korean_meaning(self):
+        message = 'REPORT_PM: decision=NO_TRADE; entry_worker=COMPLETED; exit_worker=NO_RECORD; open_positions=0.'
+        text = b.explain(message, (2, '2026-10-27'), '종가배팅 기준을 충족한 종목 없음')
+        self.assertIn('회차: 2/5 (진입일 2026-10-27)', text)
+        self.assertIn('16:15 오후 결과 보고', text)
+        self.assertIn('NO_TRADE', text)
+        self.assertIn('정상 결과', text)
+        self.assertIn('판단 사유: 종가배팅 기준을 충족한 종목 없음', text)
+        self.assertIn('15:20 판단 작업: 정상 종료', text)
+        self.assertIn('다음 거래일 오전 예정', text)
+        self.assertIn('열린 가상 포지션: 없음', text)
+
+    def test_failure_and_reconciliation_explain_halt_and_cause(self):
+        failed = b.explain('2026-10-27 ENTRY_1520: BLOCKED_OR_FAILED. PREREQUISITE_NOT_COMPLETED')
+        self.assertIn('15:20 가상매수 판단', failed)
+        self.assertIn('자동 중지(HALT)', failed)
+        self.assertIn('15:10 후보', failed)
+        unknown = b.explain('2026-10-27 STOP_PM: BLOCKED_OR_FAILED. ClientError')
+        self.assertIn('ClientError (AWS 호출 또는 미분류 오류', unknown)
+        reconcile = b.explain('REPORT_AM: decision=BUY; entry_worker=COMPLETED; exit_worker=COMPLETED; '
+                              'open_positions=1. RECONCILIATION_REQUIRED.')
+        self.assertIn('열린 가상 포지션: 1개', reconcile)
+        self.assertIn('확인 필요', reconcile)
+        self.assertNotIn('준비 완료', b.explain('GATE: BLOCKED_OR_FAILED. PILOT_NOT_READY'))
+
+    def make(self, artifact):
+        batch = b.Batch({}, {})
+        batch.batch = build_plan()
+        batch.index = 1
+        batch.current_plan = b.session_plan(batch.batch, 1)
+        batch.get = Mock(return_value=artifact)
+        return batch
+
+    def test_notify_appends_explanation_and_reads_only_decision_reason(self):
+        batch = self.make({'reason_codes': ['NO_QUALIFYING_CANDIDATE'],
+                           'notes': '앞선 후보 선별은 완료됐지만 통과한 종목이 없어 모의매수를 진행하지 않았습니다.'})
+        with unittest.mock.patch.object(p.Pilot, 'notify') as parent:
+            batch.notify('REPORT_PM: decision=NO_TRADE; entry_worker=COMPLETED; exit_worker=NO_RECORD; open_positions=0.')
+        text = parent.call_args.args[0]
+        self.assertTrue(text.startswith('REPORT_PM: decision=NO_TRADE;'))
+        self.assertIn('회차: 2/5 (진입일 2026-10-27)', text)
+        self.assertIn('판단 사유: 종가배팅 기준을 충족한 종목 없음 — 앞선 후보 선별은 완료', text)
+        batch.get.assert_called_once_with(batch.current_plan['decision_key'], optional=True)
+
+    def test_explanation_failures_still_send_original_message(self):
+        batch = self.make({})
+        batch.get.side_effect = RuntimeError('read failed')
+        with unittest.mock.patch.object(p.Pilot, 'notify') as parent:
+            batch.notify('REPORT_PM: decision=BUY; entry_worker=COMPLETED; exit_worker=NO_RECORD; open_positions=1.')
+        self.assertNotIn('판단 사유', parent.call_args.args[0])
+        with unittest.mock.patch.object(b, 'explain', side_effect=ValueError('boom')), \
+                unittest.mock.patch.object(p.Pilot, 'notify') as parent:
+            batch.notify('GATE: READY. Bounded five-session paper batch.')
+        parent.assert_called_once_with('GATE: READY. Bounded five-session paper batch.')
+
+    def test_english_legacy_notes_are_not_shown_as_reason(self):
+        batch = self.make({'reason_codes': ['MARKET_DATA_UNAVAILABLE'],
+                           'notes': 'Selection threshold or mandatory risk filters were not satisfied.'})
+        self.assertEqual(batch.decision_reason(), '검증 가능한 시세 자료 없음')
+
+
 if __name__ == '__main__':
     unittest.main()

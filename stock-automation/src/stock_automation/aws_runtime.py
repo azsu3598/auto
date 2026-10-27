@@ -91,6 +91,21 @@ def _load_optional_json(s3, bucket: str, key: str) -> dict[str, Any]:
         raise
 
 
+def _shortlist_screened_empty(shortlist: dict[str, Any]) -> bool:
+    """An empty 15:10 shortlist means "no candidate" only if quotes were received.
+
+    Shortlists written before the quote count was recorded, or a 15:10 scan with
+    zero quotes, stay classified as unavailable market data.
+    """
+    quotes = shortlist.get("quotes")
+    return (
+        shortlist.get("codes") == []
+        and isinstance(quotes, int)
+        and not isinstance(quotes, bool)
+        and quotes > 0
+    )
+
+
 def _verified_catalyst_overrides(
     raw: dict[str, Any], *, now: datetime
 ) -> dict[str, Catalyst]:
@@ -1758,6 +1773,7 @@ def _run_worker() -> int:
 
     date_prefix = f"runs/{now:%Y/%m/%d}/{session.value}"
     candidate_codes = None
+    prior_screen_empty = False
     effective_candidate_limit = candidate_limit
     if phase == "ENTRY_1520":
         shortlist = _load_optional_json(s3, bucket, f"{date_prefix}/shortlist.json")
@@ -1765,6 +1781,7 @@ def _run_worker() -> int:
         if isinstance(raw_codes, list):
             candidate_codes = tuple(str(code) for code in raw_codes)
             effective_candidate_limit = len(candidate_codes)
+            prior_screen_empty = _shortlist_screened_empty(shortlist)
         else:
             # A missed 15:10 task must not trigger a large burst at 15:20.
             effective_candidate_limit = min(
@@ -1793,6 +1810,7 @@ def _run_worker() -> int:
             "captured_at": snapshot.captured_at.isoformat(),
             "session": session.value,
             "codes": [candidate.quote.code for candidate in ranked[:shortlist_limit]],
+            "quotes": len(snapshot.quotes),
             "scores": {
                 candidate.quote.code: candidate.score for candidate in ranked[:shortlist_limit]
             },
@@ -1826,7 +1844,7 @@ def _run_worker() -> int:
     decision = ClosingBetEngine(active_config).evaluate(
         snapshot,
         cash=available_cash,
-        prior_screen_empty=(phase == "ENTRY_1520" and candidate_codes == ()),
+        prior_screen_empty=prior_screen_empty,
     )
     with tempfile.TemporaryDirectory() as directory:
         report = write_markdown_report(directory, snapshot, decision)

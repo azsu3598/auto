@@ -237,6 +237,23 @@ def build_notifier(
     raise RuntimeError(f"unsupported notification channel: {channel}")
 
 
+_ACTION_LABELS = {
+    "PARTIAL_PROFIT": "부분 익절(일부 가상매도)",
+    "FULL_PROFIT": "전량 익절(전체 가상매도)",
+    "STOP_LOSS": "손절(가상매도)",
+    "SCHEDULED_EXIT": "예정 시각 청산(가상매도)",
+    "THESIS_STOP": "중기 투자근거 이탈 손절(가상매도)",
+    "MAX_HOLD_EXIT": "최대 보유기간 도달 청산(가상매도)",
+    "ENTER": "가상매수",
+    "CANCEL": "진입 취소",
+}
+_SIMULATION_NOTE = "※ 프로그램 내부 모의매매(가상 장부) 기록이며 실제 계좌 주문이 아닙니다."
+
+
+def _korean_action(value: str) -> str:
+    return _ACTION_LABELS.get(value, value)
+
+
 def _render_trade_message(
     subject: str,
     payload: dict[str, Any],
@@ -260,7 +277,9 @@ def _render_trade_message(
         ("decided_at", "시각"),
         ("observed_at", "시각"),
     )
-    lines = [subject.strip()]
+    # 제목의 영문 동작 코드(예: SCHEDULED_EXIT)를 사용자가 읽을 수 있게 바꾼다.
+    title = " ".join(_korean_action(word) for word in subject.strip().split(" "))
+    lines = [title]
     used_labels: set[str] = set()
     for key, label in labels:
         value = payload.get(key)
@@ -268,9 +287,19 @@ def _render_trade_message(
             continue
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             rendered = f"{value:,}"
+        elif key == "action":
+            rendered = _korean_action(str(value))
         else:
             rendered = str(value)
         lines.append(f"{label}: {rendered}")
         used_labels.add(label)
+    reasons = payload.get("reason_codes")
+    if isinstance(reasons, (list, tuple)) and reasons:
+        from .dashboard import _REASON_LABELS
+
+        explained = [_REASON_LABELS.get(str(code), str(code)) for code in reasons]
+        lines.append("사유: " + ", ".join(explained))
+    if "모의" in subject or payload.get("simulation") is True:
+        lines.append(_SIMULATION_NOTE)
     text = "\n".join(lines)
     return text[:maximum_characters]

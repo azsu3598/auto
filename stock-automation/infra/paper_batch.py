@@ -20,6 +20,106 @@ EXPECTED = {'GATE': 'READY', 'START_PM': 'READY', 'START_AM': 'READY',
             **{name: 'COMPLETED' for name in p.PHASE_TIMES}}
 
 
+# Telegram explanations. The first message line keeps the original codes for log
+# matching; these lines only translate them and never change any decision.
+PHASE_KO = {'GATE': '09:45 준비 검사(직전 회차 정상 종료·설정 변경 여부 확인)',
+    'START_PM': '14:40 서버·네트워크 켜기', 'STOP_PM': '16:10 작업 정리·서버 끄기',
+    'REPORT_PM': '16:15 오후 결과 보고', 'START_AM': '08:55 다음 날 서버 켜기',
+    'STOP_AM': '09:25 다음 날 작업 정리·서버 끄기', 'REPORT_AM': '09:40 회차 최종 결과 보고',
+    'SCAN_1450': '14:50 시장 스캔', 'SHORTLIST_1510': '15:10 후보 축소',
+    'ENTRY_1520': '15:20 가상매수 판단', 'EQUITY_SNAPSHOT_1550': '15:50 모의 총자산 집계',
+    'EXIT_0905': '09:05 손절·목표 점검', 'EXIT_0910': '09:10 남은 가상수량 청산'}
+STATUS_KO = {
+    'READY': '준비 완료. 이번 회차의 예약된 모의 단계를 진행합니다.',
+    'RECONCILIATION_REQUIRED': '확인 필요: 서버·작업이 정리되지 않았거나 최종 보고 시점에 열린 가상 포지션이 남아 있습니다. '
+        '다음 회차 신규 진입은 자동 중지(HALT)됩니다. 재실행하지 말고 status 명령으로 상태를 확인하세요.',
+    'BLOCKED_OR_FAILED': '이 단계가 안전 검사로 차단되었거나 실패했습니다. 다음 회차 신규 진입은 자동 중지(HALT)되며, '
+        '이미 있는 가상 포지션의 손절·청산과 서버 정리 예약은 계속 동작합니다. 재실행하지 말고 status 명령으로 확인하세요.'}
+DECISION_KO = {
+    'BUY': '가상매수 1건이 기록되었습니다. 다음 거래일 09:10 전후에 가상 청산합니다.',
+    'NO_TRADE': '가상매수를 하지 않았습니다(NO_TRADE). 조건이 약하면 매수하지 않는 것이 정상 결과입니다.',
+    'NO_RECORD': '판단 기록을 확인하지 못했습니다(기록 없음 또는 장부와 불일치). 매수 여부를 단정하지 않습니다.',
+    'UNKNOWN': '판단 기록의 결과 값을 읽지 못했습니다. status로 확인이 필요합니다.'}
+WORKER_KO = {'COMPLETED': '정상 종료', 'NO_RECORD': '실행 기록 없음',
+    'BLOCKED_OR_FAILED': '차단 또는 실패', 'RUNNING': '종료 기록 없음(실행 중이었거나 중단됨)'}
+DECISION_REASON_KO = {'NO_QUALIFYING_CANDIDATE': '종가배팅 기준을 충족한 종목 없음',
+    'MARKET_DATA_UNAVAILABLE': '검증 가능한 시세 자료 없음', 'TOP_SCORE_SELECTED': '종합점수 1위 종목 선택'}
+REASON_KO = {
+    'BATCH_MANUALLY_STOPPED': '사용자가 stop 명령으로 운용을 중지했습니다.',
+    'BATCH_NEW_ENTRIES_HALTED': '이전 단계 실패로 신규 진입이 이미 중지(HALT)된 상태입니다.',
+    'BATCH_NOT_ARMED': '5회 운용 예약이 활성화(ARMED) 기록과 일치하지 않습니다.',
+    'PREDECESSOR_MANUALLY_STOPPED': '직전 회차가 수동 중지되어 이번 회차를 시작하지 않았습니다.',
+    'PREDECESSOR_NOT_COMPLETED': '직전 회차의 단계가 모두 정상 완료되지 않았습니다.',
+    'PREDECESSOR_TIME_INVALID': '직전 회차 단계의 실행 시각이 허용 범위를 벗어났습니다.',
+    'PREDECESSOR_REAL_LEASE_NOT_VERIFIED': '직전 회차 작업의 실제 실행 기록을 확인하지 못했습니다.',
+    'PREDECESSOR_DECISION_MISSING': '직전 회차의 15:20 판단 기록이 없습니다.',
+    'PREDECESSOR_DECISION_LEDGER_DIFFERS': '직전 회차 판단 기록과 가상 장부가 다릅니다.',
+    'PREDECESSOR_FINAL_REPORT_NOT_CLEAN': '직전 회차 최종 보고에 열린 포지션이나 미정리 서버가 있었습니다.',
+    'LEDGER_CHANGED_AFTER_REPORT': '직전 회차 보고 뒤 가상 장부가 바뀌었습니다.',
+    'UNRECONCILED_OPEN_OR_PENDING_STATE': '정리되지 않은 가상 포지션 또는 대기 상태가 남아 있습니다.',
+    'ISOLATED_PAPER_WALLET_REQUIRED': '종가배팅 전용 모의 지갑을 하나로 확인하지 못했습니다.',
+    'PAPER_WALLET_NOT_RECONCILED': '모의 지갑 금액이 예상 형식과 맞지 않습니다.',
+    'PREVIOUS_CLEANUP_NOT_CURRENT': '이전 작업 뒤 서버가 꺼져 있지 않거나 실행 중 작업이 남아 있습니다.',
+    'MORNING_PASS_NOT_VERIFIED': '사전 정상 시간 검증(PASS) 기록을 확인하지 못했습니다.',
+    'MORNING_ATTEMPT_NOT_VERIFIED': '사전 검증 작업의 실행 기록을 확인하지 못했습니다.',
+    'CALENDAR_CHANGED': '승인된 거래일 달력이 바뀌었습니다.',
+    'STACK_NOT_STABLE': 'AWS 스택이 정상 완료 상태가 아닙니다.',
+    'APP_CONFIGURATION_CHANGED': '앱 스택 설정값이 승인된 값과 다릅니다.',
+    'REGULAR_SCHEDULE_NOT_DISABLED': '꺼져 있어야 할 정기 예약이 켜져 있습니다.',
+    'PRODUCTION_TASK_CHANGED': '앱 작업 정의(이미지 등)가 승인 당시와 다릅니다.',
+    'PILOT_ISOLATION_CHANGED': '모의운용 작업의 권한·자원 구성이 원본과 다릅니다.',
+    'PAPER_CONTAINER_CHANGED': '모의운용 컨테이너 설정이 승인된 값과 다릅니다(모의 모드·실주문 OFF 확인 포함).',
+    'PILOT_MANUALLY_STOPPED': '사용자가 stop 명령으로 운용을 중지했습니다.',
+    'PILOT_NOT_READY': '09:45 준비 검사가 통과하지 않아 이후 단계를 진행하지 않았습니다.',
+    'CONTROLLER_NOT_CONFIRMED': '서버 켜기·끄기 결과를 제어 기능에서 확인하지 못했습니다.',
+    'EXISTING_TASK_PRESENT': '다른 작업이 이미 실행 중이라 중복 실행을 막았습니다.',
+    'PREREQUISITE_NOT_COMPLETED': '앞 단계(14:50 스캔 또는 15:10 후보)가 정상 완료되지 않았습니다.',
+    'EXISTING_POSITION_OR_PENDING_STATE': '이미 열린 가상 포지션이 있어 새 가상매수를 막았습니다.',
+    'TASK_LAUNCH_NOT_CONFIRMED': '분석 작업 시작을 확인하지 못했습니다.',
+    'TASK_INSPECTION_FAILED': '분석 작업 상태를 조회하지 못했습니다.',
+    'TASK_BOUND_EXCEEDED': '분석 작업이 허용 시간 안에 끝나지 않아 중지했습니다.',
+    'PAPER_WORKER_NOT_SUCCESSFUL': '분석 작업이 오류로 종료되었습니다.',
+    'REAL_ATTEMPT_NOT_COMPLETED': '분석 작업의 완료 기록을 확인하지 못했습니다.',
+    'LEDGER_SCAN_INCOMPLETE': '가상 장부 전체를 읽지 못했습니다.',
+    'OUTSIDE_DISPATCH_WINDOW': '예약 허용 시각을 벗어나 실행하지 않았습니다.',
+    'NOTIFICATION_REJECTED': '텔레그램 전송이 거부되었습니다.'}
+
+
+def explain(message, session=None, decision_reason=None):
+    """Return Korean lines for a controller message without changing it."""
+    lines = ['[쉬운 설명] 실제 계좌 주문 없는 모의운용 알림입니다.']
+    if session:
+        lines.append('회차: %d/5 (진입일 %s)' % session)
+    phase = next((name for name in re.findall('[A-Z][A-Z0-9_]+', message) if name in PHASE_KO), None)
+    if phase:
+        lines.append('단계: ' + PHASE_KO[phase])
+    values = dict(re.findall(r'(\w+)=([A-Z0-9_]+)', message))
+    if 'decision' in values:
+        lines.append('판단: ' + DECISION_KO.get(values['decision'], values['decision']))
+        if decision_reason:
+            lines.append('판단 사유: ' + decision_reason)
+    if 'entry_worker' in values:
+        lines.append('15:20 판단 작업: ' + WORKER_KO.get(values['entry_worker'], values['entry_worker']))
+    if 'exit_worker' in values:
+        worker = values['exit_worker']
+        if phase == 'REPORT_PM' and worker == 'NO_RECORD':
+            lines.append('09:10 청산 작업: 다음 거래일 오전 예정이라 아직 기록이 없는 것이 정상입니다.')
+        else:
+            lines.append('09:10 청산 작업: ' + WORKER_KO.get(worker, worker))
+    if 'open_positions' in values:
+        count = int(values['open_positions'])
+        lines.append('열린 가상 포지션: ' + ('없음' if not count else '%d개' % count))
+    for status, text in STATUS_KO.items():
+        if re.search(r'\b' + status + r'\b', message):
+            lines.append('상태: ' + text)
+            break
+    failed = re.search(r'BLOCKED_OR_FAILED\. ([A-Za-z0-9_]+)', message)
+    if failed:
+        code = failed.group(1)
+        lines.append('원인: ' + REASON_KO.get(code, code + ' (AWS 호출 또는 미분류 오류. status와 로그로 확인 필요)'))
+    return '\n'.join(lines)
+
+
 def session_plan(batch, index):
     result = copy.deepcopy(batch['template'])
     entry, exit_day = batch['sessions'][index]['entry_date'], batch['sessions'][index]['exit_date']
@@ -205,6 +305,30 @@ class Batch(p.Pilot):
             raise ValueError('BATCH_MANUALLY_STOPPED')
         super().require_ready(plan)
 
+    def decision_reason(self):
+        # Best effort only: a failed read must never fail a report or a gate.
+        try:
+            artifact = self.get(self.current_plan['decision_key'], optional=True) or {}
+            codes = [DECISION_REASON_KO.get(c, c) for c in artifact.get('reason_codes', []) if isinstance(c, str)]
+            notes = artifact.get('notes')
+            text = ', '.join(codes)
+            if isinstance(notes, str) and notes and not notes.isascii():
+                text += (' — ' if text else '') + notes[:200]
+            return text or None
+        except Exception:
+            return None
+
+    def notify(self, message):
+        # An explanation error must not turn a clean report into a failure/HALT.
+        try:
+            index = getattr(self, 'index', None)
+            session = None if index is None else (index + 1, self.batch['sessions'][index]['entry_date'])
+            reason = self.decision_reason() if re.search(r'decision=(BUY|NO_TRADE)\b', message) else None
+            text = message + '\n\n' + explain(message, session, reason)
+        except Exception:
+            text = message
+        super().notify(text)
+
     def run(self, name, item, plan):
         original = self.clients['ecs']
         self.clients['ecs'] = DatedECS(original, plan)
@@ -247,6 +371,7 @@ class Batch(p.Pilot):
         if not occurrence <= self.clock() <= occurrence+timedelta(seconds=60):
             raise ValueError('OUTSIDE_DISPATCH_WINDOW')
         self.index, plan = matches[0]
+        self.current_plan = plan
         self.action = name
         slot = batch['sessions'][self.index]
         self.env = dict(self.env, PILOT_ID=slot['pilot_id'],

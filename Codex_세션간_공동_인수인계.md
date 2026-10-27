@@ -287,6 +287,23 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-27 11:16 KST — PC-D / Claude → PC-C / 15:10 시세 0건 오분류 보완·텔레그램 한국어 설명 (코드만, 테스트 미실행)
+
+- 요청: pull 확인 중 발견한 오분류 가능성 보완과, 모의운용 텔레그램 알림의 의미를 알 수 있게 수정. 사용자 지시로 PC-D에서는 **코드만 작성**했고 테스트·템플릿 재생성·실행·커밋·AWS 반영은 하지 않았다. 테스트와 적용은 PC-C가 진행한다.
+- pull 확인 결과(수정 전): 작업 트리 clean, `origin/main`=`9d08d91`. `handoff_archive.py check` PASSED, `fd5e829→c12ab43→9d08d91` 기록 누락·변경0·순서 유지. PC-D 임시 venv에서 전체402개 OK(skipped2)·compileall·recommendation-lab37개·Node 4+8+15개 통과(수정 전 코드 기준이며 이번 수정 결과가 아니다).
+- 수정1 `stock-automation/src/stock_automation/aws_runtime.py`: 9d08d91은 15:10 shortlist가 빈 목록이면 `NO_QUALIFYING_CANDIDATE`로 분류해 15:10 시세 0건(데이터 장애)도 "기준 충족 종목 없음"으로 기록될 수 있었다. shortlist.json에 `quotes`(15:10 수신 시세 수)를 추가하고, `_shortlist_screened_empty()`가 빈 목록이면서 `quotes`>0인 경우만 선별 완료로 본다. `quotes` 없는 기존 파일·0건은 `MARKET_DATA_UNAVAILABLE` 유지. 필터·진입·안전 기준 변경 없음.
+- 수정2 텔레그램(판단 로직 변경 없음, 문구만):
+  - `stock-automation/infra/paper_batch.py`: 기존 코드 줄은 그대로 두고 아래에 한국어 설명(회차 n/5·진입일, 단계, 판단 BUY/NO_TRADE/NO_RECORD 의미, decision.json의 reason_codes·한국어 notes, 15:20/09:10 작업 상태, 열린 가상 포지션, RECONCILIATION_REQUIRED/BLOCKED_OR_FAILED와 HALT 안내, 실패 원인 코드 약40종)을 붙인다. 설명 생성이나 decision.json 읽기 실패 시 원래 메시지만 보내 보고가 실패/HALT로 바뀌지 않게 했다. `paper_pilot.py`(완료된 단회 pilot, 평문 인라인 템플릿)는 변경하지 않았다.
+  - `stock-automation/src/stock_automation/notifications.py`: 청산 등 동작 코드(`SCHEDULED_EXIT` 등)를 한국어로 바꾸고 `사유:` 줄(대시보드 `_REASON_LABELS` 재사용)과 "실제 계좌 주문이 아닙니다" 안내를 추가.
+  - `stock-automation/infra/paper_control.py`: 제어 오류 코드3종(`NETWORK_CONTROL_FAILED`, `TASK_CLEANUP_RECONCILE_REQUIRED`, `ECS_TASK_FAILED_RECONCILE_REQUIRED`) 의미 한 줄과 미분류 안내 추가.
+- 추가 테스트(미실행): `stock-automation/tests/test_aws_runtime.py`, `test_notifications.py`, `test_paper_batch.py`, `test_paper_control.py`.
+- **PC-C 순서**: ① `cd /d C:\Test\stock-automation` 후 `".venv\Scripts\python.exe" tools\build_paper_batch_template.py --output infra\paper-five-session-batch.yaml`로 템플릿 재생성(안 하면 `test_saved_template_matches_builder_exactly` 실패) ② 집중 테스트와 전체 테스트·compileall 실행, 실패 시 결과 그대로 기록 ③ 앱 이미지(aws_runtime·notifications, 9d08d91 수정 포함), batch Lambda(paper_batch), control Lambda 패키지(paper_control)는 각각 별도 반영 대상.
+- 위험: 진행 중 5회 운용은 준비 검사에서 승인 당시 작업 정의·컨테이너 설정·plan hash를 대조한다. 운용 도중 이미지·Lambda를 바꾸면 `PRODUCTION_TASK_CHANGED`/`PAPER_CONTAINER_CHANGED`로 GATE가 막혀 HALT되거나, 반대로 batch가 승인된 이전 이미지를 계속 써서 수정이 적용되지 않을 수 있다(실제 대조 대상은 PC-C에서 확인 필요). 현재 5회 운용 종료(11/03) 후 또는 새로 승인된 계획으로 적용을 권장한다. 적용 전 알림은 기존 영문 형식 그대로다.
+- 한글 깨짐 복원: 아래 `2026-10-26 PC-C / Korean explanations required in final five-session report` 기록의 `??` 두 곳을 사용자 요청으로 복원했다. 근거는 같은 커밋 `9d08d91`의 작업계획 문서이며, 경로 `docs/운영 검증/2026-10-23_5거래일_완료후_실거래준비_작업계획.md`와 문구 `근거 기록 없음`(문서 34행)이 깨진 글자 수와 정확히 일치한다. 그 외 기록 내용은 바꾸지 않았다. 깨지기 전 원문 바이트는 Git 이력에 없으므로 이 복원은 원본 문서 대조 결과다.
+- 사용자 확인 사항: 10/27 09:40 REPORT_AM(`NO_TRADE`, 두 작업 COMPLETED, 열린 포지션0)과 09:45 `2026-10-27 GATE: READY`는 정상 결과로 설명했다. 10/26 NO_TRADE는 오류가 아니라 기준 통과 종목0(PC-C 10/26 기록 기준)이다.
+- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음. commit/push 없음.
+- 다음: PC-C는 pull 후 세 문서를 다시 읽고 위 순서대로 템플릿 재생성→테스트를 실행해 실제 결과를 기록한다. 적용 시점은 사용자와 별도 확인한다.
+
 ### 2026-10-26 20:52 KST — PC-C → PC-C / NO_TRADE 사유 오분류 수정
 
 - 사용자 요청: `MARKET_DATA_UNAVAILABLE`와 필터 통과 후보 없음의 구분을 수정하고 커밋. 다른 PC에서는 실행하지 않고 수정만 하며 테스트·적용은 현 PC에서 진행한다고 확인했다.
@@ -302,7 +319,7 @@ python -m compileall -q src tests
 ### 2026-10-26 PC-C / Korean explanations required in final five-session report
 
 - User requested that, after current run completes normally, next report explain in Korean why each action/outcome occurred.
-- Updated `docs/?? ??/2026-10-23_5???_???_?????_????.md`: report each BUY/SELL/NO_TRADE/HALT and other relevant action with Korean reason grounded in logs, decision inputs, quotes and ledger evidence; mark missing reason as `?? ?? ??`, never infer.
+- Updated `docs/운영 검증/2026-10-23_5거래일_완료후_실거래준비_작업계획.md`: report each BUY/SELL/NO_TRADE/HALT and other relevant action with Korean reason grounded in logs, decision inputs, quotes and ledger evidence; mark missing reason as `근거 기록 없음`, never infer.
 - No AWS or schedule changes and no source change. Report is due only after actual five-session completion. No test run required for this documentation clarification.
 - Live order state unchanged; no commit/push.
 
@@ -321,15 +338,6 @@ python -m compileall -q src tests
 - Script validates account/stack/template/parameters, deployed Lambda package/config/environment, all15 disabled schedule targets/retries/bounds; conditionally publishes the immutable plan and invokes DEPLOYMENT_CHECK. --arm explicitly enables stops first, entries last; reads back every update and rolls schedules back to DISABLED on failure. Parent completion/HALT checks remain in deployed code. Default invocation performs review and plan registration only.
 - Validation: script py_compile and embedded payload/default check PASS. Actual administrator execution and rollback integration are untested. Existing full399 regression result predates this new operational script; no new full suite run claimed. No remote changes made in this turn. Await admin CloudShell upload/run; do not claim batch activated.
 - One-time pilot remains previously ARMED_IN_AWS. No live orders/activation or commit/push. Existing handoff modifications preserved.
-
-### 2026-10-23 PC-C / Authorized one-time activation and five-session preparation
-
-- User authorized activation and requested five days. arm_paper_pilot_20261026_update.py succeeded: READINESS_VERIFIED and ARMED_IN_AWS; all15 events enabled/readback verified, independent stops first. Entry10/26 15:20 KST, exit10/27 09:10. No manual task/server start or real orders. Evidence runtime/paper-pilot-armed-20261026.json.
-- Prepared five follow-on sessions, conditional on completed parent: entries10/27,10/28,10/29,10/30,11/02; final exit11/03. This interpretation means validation plus five additional sessions. Counting not explicitly confirmed by user.
-- Ignored runtime outputs: prepare_paper_batch_20261026.py, paper-batch-console-20261026-followon.yaml, paper-batch-plan-20261026-followon.json, paper-batch-immutable-plan-20261026-followon.json. Candidate NEW stack stock-automation-paper-batch-v3. NEVER apply batch template to pilot. Fixed batch names retained; latest remote name conflicts unverified. No user-attached managed policy added.
-- Local batch safety/calendar/date bounds/hash/default checks PASS. Template hash compares normalized UTF8 text, consistent with preparation tool; first byte-hash assertion failed due to Windows CRLF, corrected verification only. Immutable plan byte hash passes. No source or safeguards changed. Prior regression399 OK(skipped=2).
-- Batch NOT deployed or activated. Remaining: admin creates separate batch-v3 with PilotState DISABLED; verify remote resources and DEPLOYMENT_CHECK; register immutable plan and bounded schedules only after review. Operator lacks batch access and may need administrator help; do not repeat oversized review policy update or bypass predecessor/HALT. Existing pilot one-time activation is complete; five-day operation is not yet complete.
-- No live enablement, real orders, tracked source changes, commit or push. Remote kill switch not independently reverified.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 

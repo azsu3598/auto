@@ -13,6 +13,14 @@ from botocore.config import Config
 KST = timezone(timedelta(hours=9))
 WINDOWS = {"morning": ((8, 55), (9, 25)), "afternoon": ((14, 40), (16, 10)),
            "saturday": ((7, 50), (8, 40))}
+CODE_MEANINGS = {
+    "NETWORK_CONTROL_FAILED": "의미: 중계 서버(네트워크) 켜기·끄기를 확인하지 못했습니다. "
+        "서버가 켜진 채 남았는지 status 명령으로 확인하세요. 독립 정지 예약은 계속 동작합니다.",
+    "TASK_CLEANUP_RECONCILE_REQUIRED": "의미: 정해진 시간 안에 끝나지 않은 분석 작업을 강제로 정리했습니다. "
+        "가상 장부가 중간 상태일 수 있어 대사(장부 확인)가 필요합니다.",
+    "ECS_TASK_FAILED_RECONCILE_REQUIRED": "의미: 분석 작업이 오류로 종료되었습니다. "
+        "해당 단계 결과와 가상 장부를 확인하기 전에는 다시 실행하지 마세요.",
+}
 
 
 def validate_event(event, now):
@@ -72,7 +80,9 @@ class Controller:
         secret = self.clients["secretsmanager"].get_secret_value(SecretId=self.env["NOTIFICATION_SECRET_ARN"])
         credentials = json.loads(secret["SecretString"])
         payload = json.dumps({"chat_id": credentials["chat_id"],
-            "text": "[SABU 모의환경] 안전장치 알림: " + code + ". 원장 확인 전 재실행하지 마세요."}).encode()
+            "text": "[SABU 모의환경] 안전장치 알림: " + code + ". 원장 확인 전 재실행하지 마세요.\n"
+                + CODE_MEANINGS.get(code, "의미: 분류되지 않은 제어 오류입니다. status 명령으로 상태를 확인하세요.")
+                + "\n※ 실제 계좌 주문과 무관한 모의환경 서버 제어 알림입니다."}).encode()
         request = urllib.request.Request("https://api.telegram.org/bot" + credentials["bot_token"] + "/sendMessage",
             data=payload, headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(request, timeout=6) as response:
