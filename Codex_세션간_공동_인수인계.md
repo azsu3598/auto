@@ -287,6 +287,17 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-27 15:30 KST — PC-D / Claude → PC-C / 탈락 사유 집계 도구 추가 (기존 스냅샷 읽기 전용 분석)
+
+- 시각 정정: 바로 아래 기록 제목의 `15:50`은 작성 시 잘못 적은 시각이다. 실제 작성은 15:2x KST였다. 기록 원문은 규칙상 수정하지 않고 여기서 정정한다.
+- 요청: 운용 중인 스택을 건드리지 않고 과거 NO_TRADE의 탈락 사유를 바로 집계. PC-D에서 도구와 테스트를 작성했고 **PC-C는 코드 수정 없이 실행만** 한다.
+- 추가 `stock-automation/tools/rejection_report.py`: 이미 내려받은 `*-snapshot.json`을 읽어 `ClosingBetEngine.rejection_reasons`로 파일별·전체 탈락 사유를 표로 출력한다. 오프라인 전용이며 AWS 클라이언트·주문·파일 쓰기가 없다. `--snapshot <파일>`(반복 가능) 또는 `--dir <폴더>`(하위의 `*-snapshot.json` 재귀 검색), `--json` 지원. 읽지 못한 파일은 중단 없이 목록으로 보고하고, 처음 걸린 사유 하나만 센다. 기본 `StrategyConfig`를 쓰므로 챔피언 규칙 값은 반영되지 않는다.
+- 추가 테스트 `stock-automation/tests/test_rejection_report.py` 3개(여러 파일 집계·비율, 깨진/없는 파일 보고, 입력 필수·읽기 전용). PC-D에서 통과.
+- PC-D 전체 테스트: 358개 실행, 실패2·오류7~9(실행마다 달라짐)·skip2. 고정 실패 9건은 변경 전과 같은 환경 요인(`boto3` 미설치 7, 텔레그램 TLS 모킹 2)이고, 가끔 추가되는 1건은 `test_handoff_archive.HandoffTransactionTests.test_operating_system_releases_lock_after_process_exit`(프로세스 잠금, 변경과 무관해 보이나 원인 미조사)이다. 새 테스트는 모두 통과.
+- **PC-C 실행 순서(코드 수정 없음, 읽기 전용)**: ① 테스트(위 15:50 기록 순서)를 먼저 끝낸다 ② 사용자 승인 하에 AWS CLI **읽기 명령**으로 과거 실행의 스냅샷만 내려받는다. 대상은 `runs/<YYYY>/<MM>/<DD>/KRX_1520/` 아래 `scan_1450-snapshot.json`·`shortlist_1510-snapshot.json`·`entry_1520-snapshot.json`이며 버킷 이름은 PC-C 인수인계의 값을 쓴다. 쓰기·삭제·`--delete`를 쓰지 않고, 내려받은 폴더는 Git에 올리지 않는다(스냅샷은 시세 원본이므로 저장소 밖 임시 폴더 사용). ③ `"C:\Test\.venv\Scripts\python.exe" stock-automation\tools\rejection_report.py --dir <내려받은 폴더>`를 실행해 출력 표를 이 문서나 사용자 대화에 그대로 옮긴다. ④ 스냅샷에 계좌·키 정보는 없어야 하며, 의심되면 출력하지 말고 중단한다.
+- 한계: 1~5회 운용의 15:10/15:20 스냅샷이 모두 S3에 남아 있는지는 확인하지 못했다. 없거나 `delayed`인 파일은 도구가 "읽지 못한 파일"로 보고한다. 이 집계는 AWS 반영 전에도 가능하며 앱 이미지 변경이 필요 없다.
+- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음.
+
 ### 2026-10-27 15:50 KST — PC-D / Claude → PC-C / PC-C는 코드 수정 없이 테스트 실행·기록만 (템플릿 재생성 완료)
 
 - 사용자 지시: 코드 수정은 PC-D가 최대한 끝내고 **PC-C는 테스트 실행과 기록만** 한다. 아래 15:14 기록의 PC-C 순서 중 코드·산출물 수정이 필요한 부분을 PC-D에서 미리 처리했다.
@@ -338,18 +349,6 @@ python -m compileall -q src tests
 - 사용자 확인 사항: 10/27 09:40 REPORT_AM(`NO_TRADE`, 두 작업 COMPLETED, 열린 포지션0)과 09:45 `2026-10-27 GATE: READY`는 정상 결과로 설명했다. 10/26 NO_TRADE는 오류가 아니라 기준 통과 종목0(PC-C 10/26 기록 기준)이다.
 - 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음. commit/push 없음.
 - 다음: PC-C는 pull 후 세 문서를 다시 읽고 위 순서대로 템플릿 재생성→테스트를 실행해 실제 결과를 기록한다. 적용 시점은 사용자와 별도 확인한다.
-
-### 2026-10-26 20:52 KST — PC-C → PC-C / NO_TRADE 사유 오분류 수정
-
-- 사용자 요청: `MARKET_DATA_UNAVAILABLE`와 필터 통과 후보 없음의 구분을 수정하고 커밋. 다른 PC에서는 실행하지 않고 수정만 하며 테스트·적용은 현 PC에서 진행한다고 확인했다.
-- 10/26 저장 결과 확인: 14:50·15:10 KRX 조회 각 36건, 15:10 shortlist 0건, 15:20 entry 입력 quotes 0건. 따라서 실제 결과는 데이터 수신 실패가 아니라 후보 필터 통과 종목 없음이다. 기존 엔진은 빈 entry quotes만 보고 `MARKET_DATA_UNAVAILABLE`를 기록했다.
-- 수정: `ClosingBetEngine.evaluate`에 선행 후보선별이 완료된 빈 shortlist 문맥을 전달하고, 해당 경우 `NO_QUALIFYING_CANDIDATE` 및 한국어 설명을 남긴다. 일반적인 시세 미수신은 계속 `MARKET_DATA_UNAVAILABLE`이며 기존 필터·모의 진입 및 안전 기준은 그대로다.
-- 변경 파일: `stock-automation/src/stock_automation/engine.py`, `stock-automation/src/stock_automation/aws_runtime.py`, `stock-automation/src/stock_automation/dashboard.py`, `stock-automation/tests/test_engine.py`, `stock-automation/tests/test_dashboard.py`, `docs/운영 검증/2026-10-23_5거래일_완료후_실거래준비_작업계획.md`, 본 인수인계, 보관 인수인계.
-- 검증: 집중 엔진 테스트 16개와 대시보드 테스트 12개 통과. 저장소 `.venv` Python 3.13.16에서 전체 테스트 402개 통과, 2개 skip. 기본 Python 3.14는 AWS SDK/의존성이 없어 사용하지 않았다. 템플릿의 이미지 참조와 연동 상태는 아직 적용 전이며 AWS에서 새 이미지를 사용한 검증은 미실행.
-- 실패·미확인: 현재 ECS 템플릿은 기존 ECR 이미지 digest를 고정 참조한다. 이 소스 수정은 아직 해당 이미지에 포함되지 않았으므로 새 이미지 빌드·게시 후 해당 digest를 템플릿 `ImageUri`에 넣는 적용이 남았다.
-- 안전: 이 작업에서는 AWS 배포, 스케줄 변경, 실계좌 연결, 실주문 없음. 기존 모의·실거래 분리와 모든 주문 안전장치는 유지.
-- 다음: PC-C에서 새 앱 이미지를 별도 검토·빌드·게시하고, 정확한 digest를 사용하는 템플릿을 검증한 다음 기존 스택의 이미지 갱신만 진행한다. 테스트/적용은 PC-C에서 하고 PC-D에서는 실행하지 않는다.
-- 실거래 상태: 비활성; 실제 주문 없음. 커밋은 본 기록·보관 회전 및 diff 점검 뒤 수행.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 
