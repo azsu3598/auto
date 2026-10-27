@@ -369,6 +369,94 @@ class BatchSessionParentTests(unittest.TestCase):
                          ('validation/pilot/parent', False, None))
 
 
+class StoppedBatchRestartTests(unittest.TestCase):
+    """A new batch may restart after an operator stop of an earlier batch."""
+    STOP_AT = '2026-10-28T01:00:00+00:00'
+
+    def setUp(self):
+        self.previous = build_plan()
+        raw = json.dumps(self.previous).encode()
+        self.batch = copy.deepcopy(self.previous)
+        self.batch.update(batch_id='c'*32, sessions=[
+            {'entry_date': '2026-10-30', 'exit_date': '2026-11-02', 'pilot_id': '6'*32},
+            {'entry_date': '2026-11-02', 'exit_date': '2026-11-03', 'pilot_id': '7'*32}],
+            parent={'kind': 'stopped_batch_session', 'session_index': 1, 'prefix': 'validation/batch/prev',
+                    'plan_key': 'prev-plan.json', 'plan_sha256': hashlib.sha256(raw).hexdigest(),
+                    'batch_plan': self.previous})
+        self.items = {'validation/batch/prev/STOP.json': {'status': 'STOPPED_BY_OPERATOR', 'at': self.STOP_AT}}
+        self.worker = b.Batch({}, {})
+        self.worker.batch = self.batch
+        self.worker.get = Mock(side_effect=lambda key, optional=False: copy.deepcopy(self.items.get(key)))
+
+    def test_restart_follows_named_completed_session_and_allows_forward_gap(self):
+        b.validate_batch(self.batch)
+        reference = b.parent_reference(self.batch)
+        self.assertEqual(reference['session_prefix'], 'validation/batch/prev/sessions/2026-10-27')
+        self.assertEqual(reference['plan'], b.session_plan(self.previous, 1))
+        self.assertEqual(reference['fence_keys'], ['validation/batch/prev/sessions/2026-10-27/STOP.json'])
+        self.assertEqual(reference['required_stop_key'], 'validation/batch/prev/STOP.json')
+        self.assertEqual(reference['later_prefixes'], ['validation/batch/prev/sessions/' + day
+                                                       for day in ('2026-10-28', '2026-10-29', '2026-10-30')])
+        self.assertTrue(reference['require_digest'])
+        self.assertEqual(self.worker.predecessor(0), ('validation/batch/prev/sessions/2026-10-27', '2'*32,
+                                                      b.session_plan(self.previous, 1), True))
+
+    def test_restart_cannot_start_on_or_before_stopped_session_exit_or_break_later_contiguity(self):
+        for mutation in (lambda x: x['sessions'][0].update(entry_date='2026-10-28', exit_date='2026-10-29'),
+                         lambda x: x['sessions'][0].update(entry_date='2026-10-27', exit_date='2026-10-28'),
+                         lambda x: x['sessions'][1].update(entry_date='2026-11-03', exit_date='2026-11-04'),
+                         lambda x: x['sessions'][0].update(pilot_id='2'*32),
+                         lambda x: x.update(batch_id='b'*32)):
+            value = copy.deepcopy(self.batch)
+            mutation(value)
+            with self.assertRaises(ValueError):
+                b.validate_batch(value)
+
+    def test_session_index_must_be_a_real_index(self):
+        for index in (-1, 5, True, '1', None, 1.0):
+            value = copy.deepcopy(self.batch)
+            value['parent']['session_index'] = index
+            with self.assertRaisesRegex(ValueError, 'INVALID_STOPPED_SESSION_INDEX'):
+                b.parent_reference(value)
+
+    def test_operator_stop_is_required_not_rejected(self):
+        self.worker.predecessor(0)
+        for stop in (None, {'status': 'X', 'at': self.STOP_AT}, {'status': 'STOPPED_BY_OPERATOR'}):
+            self.items = {} if stop is None else {'validation/batch/prev/STOP.json': stop}
+            with self.assertRaisesRegex(ValueError, 'PREDECESSOR_OPERATOR_STOP_REQUIRED'):
+                self.worker.predecessor(0)
+
+    def test_only_a_halt_caused_by_the_stop_fence_is_tolerated(self):
+        halt = 'validation/batch/prev/HALT.json'
+        self.items[halt] = {'reason': 'BATCH_MANUALLY_STOPPED', 'at': '2026-10-28T05:40:00+00:00'}
+        self.worker.predecessor(0)
+        for value in ({'reason': 'PREVIOUS_CLEANUP_NOT_CURRENT', 'at': '2026-10-28T05:40:00+00:00'},
+                      {'reason': 'BATCH_MANUALLY_STOPPED', 'at': '2026-10-27T05:40:00+00:00'},
+                      {'reason': 'BATCH_MANUALLY_STOPPED'}, {'status': 'NEW_ENTRIES_HALTED'}):
+            self.items[halt] = value
+            with self.assertRaisesRegex(ValueError, 'PREDECESSOR_BATCH_HALTED'):
+                self.worker.predecessor(0)
+
+    def test_later_sessions_must_not_have_launched(self):
+        later = 'validation/batch/prev/sessions/2026-10-28/'
+        self.items[later + 'GATE.json'] = {'status': 'READY'}
+        self.items[later + 'START_PM.json'] = {'status': 'BLOCKED_OR_FAILED', 'reason': 'BATCH_MANUALLY_STOPPED'}
+        self.worker.predecessor(0)
+        for name, marker in (('ENTRY_1520', {'status': 'COMPLETED'}), ('START_PM', {'status': 'READY'}),
+                             ('SCAN_1450', {'status': 'RUNNING'}),
+                             ('EXIT_0910', {'status': 'BLOCKED_OR_FAILED', 'reason': 'PREVIOUS_CLEANUP_NOT_CURRENT'})):
+            items = copy.deepcopy(self.items)
+            self.items[later + name + '.json'] = marker
+            with self.assertRaisesRegex(ValueError, 'PREDECESSOR_LATER_SESSION_STARTED'):
+                self.worker.predecessor(0)
+            self.items = items
+
+    def test_parent_session_stop_marker_still_blocks(self):
+        self.items['validation/batch/prev/sessions/2026-10-27/STOP.json'] = {'status': 'X'}
+        with self.assertRaisesRegex(ValueError, 'PREDECESSOR_MANUALLY_STOPPED'):
+            self.worker.predecessor(0)
+
+
 class BatchNotificationExplanationTests(unittest.TestCase):
     def test_report_message_keeps_codes_and_adds_korean_meaning(self):
         message = 'REPORT_PM: decision=NO_TRADE; entry_worker=COMPLETED; exit_worker=NO_RECORD; open_positions=0.'

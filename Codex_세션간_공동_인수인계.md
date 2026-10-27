@@ -287,6 +287,23 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-27 16:56 KST — PC-D / Claude → PC-C / 현재 5회 운용 중단 후 새 5회 재시작용 코드·작업지시서 (소스만, 실행은 PC-C)
+
+- **PC-C 필독:** 실행 순서는 `docs/운영 검증/2026-10-27_PC-C_작업지시_운용중단_5회재시작.md`를 따른다. 사용자 결정: 진행 중인 5회 운용을 **2026-10-28 09:40 REPORT_AM 이후 14:30 이전**에 `tools\paper_operations.py stop`으로 중단하고, 지금까지의 변경(9d08d91, 11:16, 11:24, 653f87f, 이번 변경)으로 **새 5회 모의운용**을 시작한다. 촉매 자동수집은 포함하지 않는다. 사용자 지시로 PC-D는 소스만 작성했고, 중단·이미지 빌드·배포·시작은 PC-C가 사용자 승인 후 실행한다.
+- 막혀 있던 이유: 기존 parent 규칙은 직전 운용에 STOP이 있으면 거부하고(`PREDECESSOR_MANUALLY_STOPPED`), 직전 batch의 **마지막** 회차만 parent로 쓰며, 새 첫 진입일이 직전 청산일과 **같아야** 했다. 따라서 stop 후에는 어떤 새 운용도 시작할 수 없었다.
+- 변경 `stock-automation/infra/paper_batch.py`: parent 형식 `stopped_batch_session` 추가.
+  - `session_index`(정수, 범위 검사, bool·문자열·실수 거부)로 **정상 완료된 회차**를 지정한다. 그 회차의 기존 완료 검사(전 단계·lease·판단/장부 일치·최종 보고 깨끗함·ledger digest·서버 정지)는 그대로 적용한다.
+  - 루트 `STOP.json`은 거부가 아니라 **필수**(`status=STOPPED_BY_OPERATOR`, `at` 필요, 없으면 `PREDECESSOR_OPERATOR_STOP_REQUIRED`). parent 회차 폴더의 `STOP.json`은 계속 거부한다.
+  - 루트 `HALT.json`은 `reason=BATCH_MANUALLY_STOPPED`이고 STOP 시각 이후일 때만 허용한다(stop 직후 예약이 꺼지기 전 발동한 경우). 그 외는 `PREDECESSOR_BATCH_HALTED`.
+  - parent 회차 이후 회차에 서버·작업 시작 단계(`LAUNCH_PHASES` = START_PM·START_AM·SCAN_1450·SHORTLIST_1510·ENTRY_1520·EQUITY_SNAPSHOT_1550·EXIT_0905·EXIT_0910) 기록이 있으면 `PREDECESSOR_LATER_SESSION_STARTED`. `BATCH_MANUALLY_STOPPED`로 차단된 기록과 GATE는 허용한다.
+  - 새 첫 진입일은 parent 청산일보다 **뒤**여야 한다(같은 날 거부). 이후 회차의 연속성 규칙은 그대로다. 기존 `pilot`·`batch_session` 동작은 바꾸지 않았다.
+  - 한국어 사유 3종 추가: `PREDECESSOR_OPERATOR_STOP_REQUIRED`, `PREDECESSOR_LATER_SESSION_STARTED`, `INVALID_STOPPED_SESSION_INDEX`.
+- 재생성 `stock-automation/infra/paper-five-session-batch.yaml`: `paper_batch.py`가 템플릿에 포함되므로 빌더로 임시 경로에 생성해 교체했다. **PC-C는 다시 생성하지 않는다.**
+- 추가 테스트 `stock-automation/tests/test_paper_batch.py`의 `StoppedBatchRestartTests` 7개: parent 회차·이후 회차 경로, 앞으로만 허용되는 간격과 연속성, 회차 번호 검증, STOP 필수, stop이 만든 HALT만 허용, 이후 회차 실행 기록 거부, parent 회차 STOP 거부.
+- 검증(PC-D): `test_paper_batch*` 51개 OK, `py_compile paper_batch.py` 통과. 전체 371개 실행에서 실패 9건은 기존 환경 요인과 동일(`boto3` 미설치 7, `truststore` 미설치로 텔레그램 보안 컨텍스트 생성 실패 2, 외부 통신 없음)이고 새 실패는 없다. 사용자 요청으로 이후 PC-D에서 외부 통신 가능성이 있는 테스트는 실행하지 않는다.
+- 미확인: 이미지 빌드·Lambda 패키지·스택 갱신의 실제 명령, morning proof 값, 중단한 운용 계획의 실제 `session_index`, PC-C 계정의 S3·스택 권한. 작업지시서에 "추정하지 말고 실제 파일·스택에서 확인"으로 적었다.
+- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음. commit 있음/push는 사용자가 한다.
+
 ### 2026-10-27 16:50 KST — PC-D / Claude → PC-C / 표현 정정: "금지"가 아니라 "별도 승인 필요"
 
 - 정정(바로 아래 16:43 기록): "기존 금지 사항은 그대로다"는 사용자 확인에 따라 **"이번 작업 범위가 아니며 사용자 별도 승인이 필요한 일"** 로 읽는다. 대상은 같다: AWS 배포·이미지 교체·스케줄 변경, 실거래 활성화, kill switch 해제, 실계좌 Secret 연결, 실주문.
@@ -326,15 +343,6 @@ python -m compileall -q src tests
 - PC-D 전체 테스트: 358개 실행, 실패2·오류7~9(실행마다 달라짐)·skip2. 고정 실패 9건은 변경 전과 같은 환경 요인(`boto3` 미설치 7, 텔레그램 TLS 모킹 2)이고, 가끔 추가되는 1건은 `test_handoff_archive.HandoffTransactionTests.test_operating_system_releases_lock_after_process_exit`(프로세스 잠금, 변경과 무관해 보이나 원인 미조사)이다. 새 테스트는 모두 통과.
 - **PC-C 실행 순서(코드 수정 없음, 읽기 전용)**: ① 테스트(위 15:50 기록 순서)를 먼저 끝낸다 ② 사용자 승인 하에 AWS CLI **읽기 명령**으로 과거 실행의 스냅샷만 내려받는다. 대상은 `runs/<YYYY>/<MM>/<DD>/KRX_1520/` 아래 `scan_1450-snapshot.json`·`shortlist_1510-snapshot.json`·`entry_1520-snapshot.json`이며 버킷 이름은 PC-C 인수인계의 값을 쓴다. 쓰기·삭제·`--delete`를 쓰지 않고, 내려받은 폴더는 Git에 올리지 않는다(스냅샷은 시세 원본이므로 저장소 밖 임시 폴더 사용). ③ `"C:\Test\.venv\Scripts\python.exe" stock-automation\tools\rejection_report.py --dir <내려받은 폴더>`를 실행해 출력 표를 이 문서나 사용자 대화에 그대로 옮긴다. ④ 스냅샷에 계좌·키 정보는 없어야 하며, 의심되면 출력하지 말고 중단한다.
 - 한계: 1~5회 운용의 15:10/15:20 스냅샷이 모두 S3에 남아 있는지는 확인하지 못했다. 없거나 `delayed`인 파일은 도구가 "읽지 못한 파일"로 보고한다. 이 집계는 AWS 반영 전에도 가능하며 앱 이미지 변경이 필요 없다.
-- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음.
-
-### 2026-10-27 15:50 KST — PC-D / Claude → PC-C / PC-C는 코드 수정 없이 테스트 실행·기록만 (템플릿 재생성 완료)
-
-- 사용자 지시: 코드 수정은 PC-D가 최대한 끝내고 **PC-C는 테스트 실행과 기록만** 한다. 아래 15:14 기록의 PC-C 순서 중 코드·산출물 수정이 필요한 부분을 PC-D에서 미리 처리했다.
-- PC-D가 처리: 11:16 기록이 PC-C 몫으로 남긴 `stock-automation/infra/paper-five-session-batch.yaml` 재생성을 완료했다. 빌더는 기존 출력 파일을 덮어쓰지 않으므로(`Preserve existing output`) 임시 경로에 생성해 저장본과 비교한 뒤 교체했다(차이는 `Resources`뿐이며 11:16 paper_batch.py 텔레그램 문구 반영분). 따라서 PC-C는 **템플릿 재생성을 하지 않는다.** 재생성 후 `test_saved_template_matches_builder_exactly`는 통과한다.
-- PC-D 전체 테스트(시스템 Python 3.13, `unittest discover`): 355개 실행, 실패2·오류7·skip2. 변경 전 커밋 `49aec1c`를 같은 방법으로 돌린 결과와 비교해 **새로 생긴 실패 없음**(템플릿 실패1건은 재생성으로 해소). 남은 9건은 이 PC 환경 요인으로 변경 전에도 동일하다: `boto3`/`botocore` 미설치로 `test_paper_control`·`test_runtime_safety`·`test_scheduled_execution`·`test_worker_verifier`·`test_storage_contract_scope` 오류, 텔레그램 TLS 모킹 `test_telegram_setup` 3건. 이 PC에는 저장소 `.venv`가 없어 AWS 의존 테스트는 PC-D에서 검증하지 못했다.
-- **PC-C 할 일(코드 수정 없음)**: ① pull 후 세 문서 재확인 ② `C:\Test\.venv\Scripts\python.exe`로 전체 테스트와 compileall 실행(AWS 의존 테스트 포함) ③ 결과를 있는 그대로 기록하고 rotate ④ 이미지·Lambda 반영은 사용자 승인 후 11/03 이후. **테스트가 실패하면 코드를 고치지 말고 실패 테스트명과 오류 원문만 기록해 PC-D에 넘긴다.** 실패 테스트를 수정·삭제하거나 안전 검사를 완화하지 않는다.
-- 기대 결과: PC-D에서 `boto3` 때문에 못 돌린 테스트가 PC-C에서는 통과해야 한다. 만약 PC-C에서 위 9건 외의 실패가 나오면 PC-D 변경이 원인일 수 있으므로 원문을 기록한다.
 - 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트

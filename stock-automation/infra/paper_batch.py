@@ -20,6 +20,8 @@ EXPECTED = {'GATE': 'READY', 'START_PM': 'READY', 'START_AM': 'READY',
             'STOP_PM': 'STOP_REQUESTED', 'STOP_AM': 'STOP_REQUESTED',
             'REPORT_PM': 'REPORTED', 'REPORT_AM': 'REPORTED',
             **{name: 'COMPLETED' for name in p.PHASE_TIMES}}
+# Phases that start a host or a worker; GATE and reports only read state.
+LAUNCH_PHASES = ('START_PM', 'START_AM', *p.PHASE_TIMES)
 
 
 # Telegram explanations. The first message line keeps the original codes for log
@@ -53,6 +55,9 @@ REASON_KO = {
     'PREDECESSOR_MANUALLY_STOPPED': '직전 회차가 수동 중지되어 이번 회차를 시작하지 않았습니다.',
     'PREDECESSOR_BATCH_HALTED': '직전 운용이 신규 진입 중지(HALT) 상태로 끝나 이번 운용을 시작하지 않았습니다.',
     'UNSUPPORTED_PARENT_KIND': '직전 회차 지정 형식이 승인된 종류가 아닙니다.',
+    'PREDECESSOR_OPERATOR_STOP_REQUIRED': '이어 시작할 직전 운용에 운영자 stop 기록이 없어 새 운용을 시작하지 않았습니다.',
+    'PREDECESSOR_LATER_SESSION_STARTED': '직전 운용에서 지정 회차 이후 회차가 실행된 기록이 있어 새 운용을 시작하지 않았습니다.',
+    'INVALID_STOPPED_SESSION_INDEX': '직전 운용에서 이어 붙일 회차 번호가 올바르지 않습니다.',
     'APPROVED_PAPER_SESSION_COUNT_REQUIRED': '운용 회차 수가 승인된 값(2회 또는 5회)이 아닙니다.',
     'OUTSIDE_APPROVED_SESSIONS': '승인된 회차 날짜에 해당하지 않는 예약이라 실행하지 않았습니다.',
     'PREDECESSOR_NOT_COMPLETED': '직전 회차의 단계가 모두 정상 완료되지 않았습니다.',
@@ -156,7 +161,13 @@ def validate_batch(batch):
     previous = parent['exit_date']
     ids = reference['ids'] | {batch['batch_id']}
     for index, slot in enumerate(batch['sessions']):
-        if slot['entry_date'] != previous or slot['pilot_id'] in ids or not re.fullmatch('[a-f0-9]{32}', slot['pilot_id']):
+        # Only a restart after an operator-stopped batch may leave a gap, and
+        # then only forward: never the same day as the stopped session's exit.
+        if index == 0 and reference['allow_later_start']:
+            ordered = slot['entry_date'] > previous
+        else:
+            ordered = slot['entry_date'] == previous
+        if not ordered or slot['pilot_id'] in ids or not re.fullmatch('[a-f0-9]{32}', slot['pilot_id']):
             raise ValueError('NONCONTIGUOUS_OR_DUPLICATE_SESSION')
         ids.add(slot['pilot_id'])
         plan = session_plan(batch, index)
@@ -172,6 +183,10 @@ def parent_reference(batch):
     `pilot` (default) is the original one-session pilot. `batch_session` is the
     last session of an earlier approved batch whose full immutable plan is
     embedded, so the same completion, ledger digest and cleanup checks apply.
+    `stopped_batch_session` restarts after an operator `stop`: it follows the
+    named fully completed session of that batch. The batch-level STOP is then
+    required instead of rejected, later sessions must not have launched, and a
+    HALT is tolerated only when the stop fence itself caused it.
     """
     parent = batch['parent']
     kind = parent.get('kind', 'pilot')
@@ -182,20 +197,30 @@ def parent_reference(batch):
         return {'session_prefix': parent['prefix'], 'pilot_id': parent['pilot_id'], 'plan': plan,
                 'stored_plan': plan, 'armed_key': parent['prefix'] + '/ARMED.json',
                 'fence_keys': [parent['prefix'] + '/STOP.json'], 'halt_key': None,
-                'require_digest': False, 'ids': {parent['pilot_id']}}
-    if kind != 'batch_session':
+                'require_digest': False, 'ids': {parent['pilot_id']},
+                'required_stop_key': None, 'later_prefixes': [], 'allow_later_start': False}
+    if kind not in ('batch_session', 'stopped_batch_session'):
         raise ValueError('UNSUPPORTED_PARENT_KIND')
     previous = parent['batch_plan']
     validate_batch(previous)
-    index = len(previous['sessions']) - 1
-    slot = previous['sessions'][index]
     root = parent['prefix']
+    if kind == 'batch_session':
+        index = len(previous['sessions']) - 1
+    else:
+        index = parent.get('session_index')
+        if type(index) is not int or not 0 <= index < len(previous['sessions']):
+            raise ValueError('INVALID_STOPPED_SESSION_INDEX')
+    slot = previous['sessions'][index]
     session_prefix = root + '/sessions/' + slot['entry_date']
     ids = parent_reference(previous)['ids'] | {previous['batch_id']} | {s['pilot_id'] for s in previous['sessions']}
+    stopped = kind == 'stopped_batch_session'
     return {'session_prefix': session_prefix, 'pilot_id': slot['pilot_id'],
             'plan': session_plan(previous, index), 'stored_plan': previous, 'armed_key': root + '/ARMED.json',
-            'fence_keys': [root + '/STOP.json', session_prefix + '/STOP.json'], 'halt_key': root + '/HALT.json',
-            'require_digest': True, 'ids': ids}
+            'fence_keys': ([] if stopped else [root + '/STOP.json']) + [session_prefix + '/STOP.json'],
+            'halt_key': root + '/HALT.json', 'require_digest': True, 'ids': ids,
+            'required_stop_key': root + '/STOP.json' if stopped else None,
+            'later_prefixes': [root + '/sessions/' + s['entry_date'] for s in previous['sessions'][index+1:]] if stopped else [],
+            'allow_later_start': stopped}
 
 
 class DatedECS:
@@ -318,8 +343,25 @@ class Batch(p.Pilot):
     def parent_fences_clear(self, reference):
         if any(self.get(key, optional=True) is not None for key in reference['fence_keys']):
             raise ValueError('PREDECESSOR_MANUALLY_STOPPED')
-        if reference['halt_key'] and self.get(reference['halt_key'], optional=True) is not None:
+        halt = self.get(reference['halt_key'], optional=True) if reference['halt_key'] else None
+        if reference['required_stop_key'] is None:
+            if halt is not None:
+                raise ValueError('PREDECESSOR_BATCH_HALTED')
+            return
+        stop = self.get(reference['required_stop_key'], optional=True) or {}
+        if stop.get('status') != 'STOPPED_BY_OPERATOR' or not stop.get('at'):
+            raise ValueError('PREDECESSOR_OPERATOR_STOP_REQUIRED')
+        # A schedule that fired between the STOP marker and its disabling halts
+        # with this exact reason; any other HALT is a real failure.
+        if halt is not None and (halt.get('reason') != 'BATCH_MANUALLY_STOPPED' or not halt.get('at')
+                                 or p.stamp(halt['at']) < p.stamp(stop['at'])):
             raise ValueError('PREDECESSOR_BATCH_HALTED')
+        for prefix in reference['later_prefixes']:
+            for name in LAUNCH_PHASES:
+                marker = self.get(prefix + '/' + name + '.json', optional=True)
+                if marker is not None and (marker.get('status') != 'BLOCKED_OR_FAILED'
+                                           or marker.get('reason') != 'BATCH_MANUALLY_STOPPED'):
+                    raise ValueError('PREDECESSOR_LATER_SESSION_STARTED')
 
     def predecessor(self, index):
         if index == 0:
