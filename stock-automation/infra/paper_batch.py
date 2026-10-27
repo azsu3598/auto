@@ -14,6 +14,8 @@ import paper_pilot as p
 LIMITS = {'SCAN_1450': (240, 300), 'SHORTLIST_1510': (180, 180),
           'ENTRY_1520': (59, 60), 'EQUITY_SNAPSHOT_1550': (180, 180),
           'EXIT_0905': (120, 120), 'EXIT_0910': (120, 120)}
+# Only these reviewed run lengths are accepted; any other count fails closed.
+ALLOWED_SESSION_COUNTS = (2, 5)
 EXPECTED = {'GATE': 'READY', 'START_PM': 'READY', 'START_AM': 'READY',
             'STOP_PM': 'STOP_REQUESTED', 'STOP_AM': 'STOP_REQUESTED',
             'REPORT_PM': 'REPORTED', 'REPORT_AM': 'REPORTED',
@@ -49,6 +51,10 @@ REASON_KO = {
     'BATCH_NEW_ENTRIES_HALTED': '이전 단계 실패로 신규 진입이 이미 중지(HALT)된 상태입니다.',
     'BATCH_NOT_ARMED': '5회 운용 예약이 활성화(ARMED) 기록과 일치하지 않습니다.',
     'PREDECESSOR_MANUALLY_STOPPED': '직전 회차가 수동 중지되어 이번 회차를 시작하지 않았습니다.',
+    'PREDECESSOR_BATCH_HALTED': '직전 운용이 신규 진입 중지(HALT) 상태로 끝나 이번 운용을 시작하지 않았습니다.',
+    'UNSUPPORTED_PARENT_KIND': '직전 회차 지정 형식이 승인된 종류가 아닙니다.',
+    'APPROVED_PAPER_SESSION_COUNT_REQUIRED': '운용 회차 수가 승인된 값(2회 또는 5회)이 아닙니다.',
+    'OUTSIDE_APPROVED_SESSIONS': '승인된 회차 날짜에 해당하지 않는 예약이라 실행하지 않았습니다.',
     'PREDECESSOR_NOT_COMPLETED': '직전 회차의 단계가 모두 정상 완료되지 않았습니다.',
     'PREDECESSOR_TIME_INVALID': '직전 회차 단계의 실행 시각이 허용 범위를 벗어났습니다.',
     'PREDECESSOR_REAL_LEASE_NOT_VERIFIED': '직전 회차 작업의 실제 실행 기록을 확인하지 못했습니다.',
@@ -89,7 +95,7 @@ def explain(message, session=None, decision_reason=None):
     """Return Korean lines for a controller message without changing it."""
     lines = ['[쉬운 설명] 실제 계좌 주문 없는 모의운용 알림입니다.']
     if session:
-        lines.append('회차: %d/5 (진입일 %s)' % session)
+        lines.append('회차: %d/%d (진입일 %s)' % session)
     phase = next((name for name in re.findall('[A-Z][A-Z0-9_]+', message) if name in PHASE_KO), None)
     if phase:
         lines.append('단계: ' + PHASE_KO[phase])
@@ -140,13 +146,15 @@ def session_plan(batch, index):
 
 def validate_batch(batch):
     if (batch.get('paper_only') is not True or batch.get('starting_cash') != '600000'
-            or len(batch.get('sessions', [])) != 5 or not re.fullmatch('[a-f0-9]{32}', batch.get('batch_id', ''))):
-        raise ValueError('EXACT_FIVE_PAPER_SESSIONS_REQUIRED')
-    parent = batch['parent']['plan']
-    p.validate_plan(parent)
-    p.validate_calendar(parent)
+            or len(batch.get('sessions', [])) not in ALLOWED_SESSION_COUNTS
+            or not re.fullmatch('[a-f0-9]{32}', batch.get('batch_id', ''))):
+        raise ValueError('APPROVED_PAPER_SESSION_COUNT_REQUIRED')
+    reference = parent_reference(batch)
+    parent = reference['plan']
+    if batch['batch_id'] in reference['ids']:
+        raise ValueError('NONCONTIGUOUS_OR_DUPLICATE_SESSION')
     previous = parent['exit_date']
-    ids = {batch['parent']['pilot_id'], batch['batch_id']}
+    ids = reference['ids'] | {batch['batch_id']}
     for index, slot in enumerate(batch['sessions']):
         if slot['entry_date'] != previous or slot['pilot_id'] in ids or not re.fullmatch('[a-f0-9]{32}', slot['pilot_id']):
             raise ValueError('NONCONTIGUOUS_OR_DUPLICATE_SESSION')
@@ -156,6 +164,38 @@ def validate_batch(batch):
         previous = slot['exit_date']
     if batch['template']['approved_calendar'] != parent['approved_calendar']:
         raise ValueError('CALENDAR_IDENTITY_CHANGED')
+
+
+def parent_reference(batch):
+    """Describe the completed run the first session must follow.
+
+    `pilot` (default) is the original one-session pilot. `batch_session` is the
+    last session of an earlier approved batch whose full immutable plan is
+    embedded, so the same completion, ledger digest and cleanup checks apply.
+    """
+    parent = batch['parent']
+    kind = parent.get('kind', 'pilot')
+    if kind == 'pilot':
+        plan = parent['plan']
+        p.validate_plan(plan)
+        p.validate_calendar(plan)
+        return {'session_prefix': parent['prefix'], 'pilot_id': parent['pilot_id'], 'plan': plan,
+                'stored_plan': plan, 'armed_key': parent['prefix'] + '/ARMED.json',
+                'fence_keys': [parent['prefix'] + '/STOP.json'], 'halt_key': None,
+                'require_digest': False, 'ids': {parent['pilot_id']}}
+    if kind != 'batch_session':
+        raise ValueError('UNSUPPORTED_PARENT_KIND')
+    previous = parent['batch_plan']
+    validate_batch(previous)
+    index = len(previous['sessions']) - 1
+    slot = previous['sessions'][index]
+    root = parent['prefix']
+    session_prefix = root + '/sessions/' + slot['entry_date']
+    ids = parent_reference(previous)['ids'] | {previous['batch_id']} | {s['pilot_id'] for s in previous['sessions']}
+    return {'session_prefix': session_prefix, 'pilot_id': slot['pilot_id'],
+            'plan': session_plan(previous, index), 'stored_plan': previous, 'armed_key': root + '/ARMED.json',
+            'fence_keys': [root + '/STOP.json', session_prefix + '/STOP.json'], 'halt_key': root + '/HALT.json',
+            'require_digest': True, 'ids': ids}
 
 
 class DatedECS:
@@ -275,10 +315,18 @@ class Batch(p.Pilot):
             raise ValueError('LEDGER_CHANGED_AFTER_REPORT')
         self.idle()
 
+    def parent_fences_clear(self, reference):
+        if any(self.get(key, optional=True) is not None for key in reference['fence_keys']):
+            raise ValueError('PREDECESSOR_MANUALLY_STOPPED')
+        if reference['halt_key'] and self.get(reference['halt_key'], optional=True) is not None:
+            raise ValueError('PREDECESSOR_BATCH_HALTED')
+
     def predecessor(self, index):
         if index == 0:
-            parent = self.batch['parent']
-            return parent['prefix'], parent['pilot_id'], parent['plan'], False
+            reference = parent_reference(self.batch)
+            self.parent_fences_clear(reference)
+            return (reference['session_prefix'], reference['pilot_id'], reference['plan'],
+                    reference['require_digest'])
         slot = self.batch['sessions'][index-1]
         return (self.root_prefix+'/sessions/'+slot['entry_date'], slot['pilot_id'],
                 session_plan(self.batch, index-1), True)
@@ -322,7 +370,8 @@ class Batch(p.Pilot):
         # An explanation error must not turn a clean report into a failure/HALT.
         try:
             index = getattr(self, 'index', None)
-            session = None if index is None else (index + 1, self.batch['sessions'][index]['entry_date'])
+            sessions = self.batch['sessions']
+            session = None if index is None else (index + 1, len(sessions), sessions[index]['entry_date'])
             reason = self.decision_reason() if re.search(r'decision=(BUY|NO_TRADE)\b', message) else None
             text = message + '\n\n' + explain(message, session, reason)
         except Exception:
@@ -350,24 +399,24 @@ class Batch(p.Pilot):
             self.idle()
             self.get(self.root_key('ARMED'), optional=True)
             parent = batch['parent']
-            if self.get(parent['prefix']+'/STOP.json', optional=True) is not None:
-                raise ValueError('PREDECESSOR_MANUALLY_STOPPED')
+            reference = parent_reference(batch)
+            self.parent_fences_clear(reference)
             raw = self.clients['s3'].get_object(Bucket=self.env['PAPER_BUCKET'], Key=parent['plan_key'])['Body'].read()
-            if hashlib.sha256(raw).hexdigest() != parent['plan_sha256'] or json.loads(raw) != parent['plan']:
+            if hashlib.sha256(raw).hexdigest() != parent['plan_sha256'] or json.loads(raw) != reference['stored_plan']:
                 raise ValueError('PARENT_IMMUTABLE_PLAN_CHANGED')
-            if (self.get(parent['prefix']+'/ARMED.json') or {}).get('plan_sha256') != parent['plan_sha256']:
+            if (self.get(reference['armed_key']) or {}).get('plan_sha256') != parent['plan_sha256']:
                 raise ValueError('PARENT_NOT_ARMED')
-            self.get(parent['prefix']+'/REPORT_AM.json', optional=True)
+            self.get(reference['session_prefix']+'/REPORT_AM.json', optional=True)
             return {'status': 'DEPLOYMENT_VERIFIED', 'paper_only': True, 'mutations': False,
                     'predecessor_success': 'PENDING_REAL_EXECUTION'}
         if set(event) != {'action', 'batch_id', 'scheduled_at'} or event['batch_id'] != batch['batch_id'] or event['action'] not in EXPECTED:
             raise ValueError('WRONG_BATCH_EVENT')
         name = event['action']
         occurrence = p.stamp(event['scheduled_at'])
-        matches = [(i, session_plan(batch, i)) for i in range(5)
+        matches = [(i, session_plan(batch, i)) for i in range(len(batch['sessions']))
             if p.stamp(session_plan(batch, i)['events'][name]['dispatch_at']) == occurrence]
         if len(matches) != 1:
-            raise ValueError('OUTSIDE_APPROVED_FIVE_SESSIONS')
+            raise ValueError('OUTSIDE_APPROVED_SESSIONS')
         if not occurrence <= self.clock() <= occurrence+timedelta(seconds=60):
             raise ValueError('OUTSIDE_DISPATCH_WINDOW')
         self.index, plan = matches[0]
@@ -408,7 +457,8 @@ class Batch(p.Pilot):
         self.save(name, state)
         if name == 'GATE' or state['status'] in ('BLOCKED_OR_FAILED', 'RECONCILIATION_REQUIRED'):
             try:
-                self.notify(slot['entry_date']+' '+name+': '+state['status']+'. '+state.get('reason', 'Bounded five-session paper batch.'))
+                self.notify(slot['entry_date']+' '+name+': '+state['status']+'. '+state.get(
+                    'reason', 'Bounded %d-session paper batch.' % len(batch['sessions'])))
             except Exception:
                 pass
         return {'status': state['status'], 'phase': name, 'entry_date': slot['entry_date']}

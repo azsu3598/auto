@@ -287,6 +287,20 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-27 11:24 KST — PC-D / Claude → PC-C / 상세 알림 확인용 2회 모의운용 허용 (코드만, 테스트 미실행)
+
+- **PC-C 필독:** 이번 작업은 `docs/운영 검증/2026-10-27_PC-C_작업지시_알림개선_2회운용.md`의 순서만 따른다(pull → 템플릿 재생성 → 집중 테스트 → 전체 테스트 → 기록·rotate). AWS 변경, `stop`, 안전 검사 완화, 실패 테스트 수정·삭제는 금지이며, 실패하면 고치지 말고 오류 원문을 기록한다.
+- 정정: 아래 11:16 기록의 템플릿 재생성 명령은 `stock-automation` 안의 `.venv`를 가리켜 잘못됐다. 가상환경은 저장소 루트 `C:\Test\.venv`이므로 작업지시서의 절대경로 명령(`"C:\Test\.venv\Scripts\python.exe" ...`)을 사용한다.
+
+- 사용자 결정: 11:16 기록의 수정(15:10 시세0건 오분류 보완·텔레그램 한국어 설명)은 진행 중인 5회 운용에 반영하지 않고, 5회 운용 종료(11/03) 뒤 **별도 2회 모의운용**으로 확인한다. 목적은 더 상세한 알림을 실제로 받아 보는 것이다. PC-D에서는 코드만 작성했고 테스트·실행·AWS 변경은 없다.
+- 변경: `stock-automation/infra/paper_batch.py`에 `ALLOWED_SESSION_COUNTS = (2, 5)`를 두고 회차 수 검사·이벤트 매칭·안내 문구(`Bounded N-session`, `회차: n/N`)를 계획의 회차 수 기준으로 바꿨다. 2·5 외 회차 수는 계속 거부한다. 오류 코드 이름 변경: `EXACT_FIVE_PAPER_SESSIONS_REQUIRED`→`APPROVED_PAPER_SESSION_COUNT_REQUIRED`, `OUTSIDE_APPROVED_FIVE_SESSIONS`→`OUTSIDE_APPROVED_SESSIONS`. `stock-automation/tools/paper_batch_checks.py`(회차 수 2·5 허용, 일정 시작·종료일은 기존처럼 계획 날짜로 정확히 검사), `stock-automation/tools/paper_operations.py`(2·5 허용, `bounded_sessions`를 실제 회차 수로 표시, 코드 `APPROVED_SESSION_BATCH_REQUIRED`). 15개 예약과 템플릿 구조는 회차 수와 무관해 바꾸지 않았다.
+- 추가 테스트(미실행): `stock-automation/tests/test_paper_batch.py`, `test_paper_batch_checks.py`, `test_paper_operations.py`.
+- 현재 5회 운용 영향: 이미 배포된 Lambda와 승인 계획은 그대로이며 이 커밋만으로 바뀌지 않는다. 현재 5회 계획은 새 코드에서도 유효하다.
+- PC-C 할 일: 11:16 기록의 템플릿 재생성→테스트 순서에 이번 3개 테스트 파일을 포함한다. 2회 운용은 11/03 이후 새 계획으로 준비하며, 새 앱 이미지(11:16 수정 포함)·batch Lambda를 반영한 별도 승인 절차를 거친다.
+- 직전 회차(parent) 보완(같은 세션 후속, 사용자 요청): 기존 parent는 단회 pilot 계획만 허용했다. `paper_batch.parent_reference()`를 추가해 `parent.kind`가 없거나 `pilot`이면 기존과 동일하게 처리하고, `kind: "batch_session"`이면 이전 batch의 **마지막 회차**를 parent로 쓴다. 이 형식의 parent는 `prefix`(이전 batch 루트, 예 `validation/batch/<이전 batch_id>`), `plan_key`, `plan_sha256`, `batch_plan`(이전 batch 불변 계획 전체)을 가진다. 이전 계획 전체를 `validate_batch`로 다시 검증하고, 새 첫 회차 진입일=이전 마지막 청산일, 이전 batch·pilot ID 재사용 금지, 마지막 회차 모든 단계 완료·실제 lease·판단/장부 일치·REPORT_AM 깨끗함·**ledger digest 일치**(pilot과 달리 필수)·서버 정지를 기존 `completed()`로 확인한다. 이전 batch 루트 STOP·HALT와 마지막 회차 STOP이 있으면 GATE와 DEPLOYMENT_CHECK 모두 거부(`PREDECESSOR_MANUALLY_STOPPED`/`PREDECESSOR_BATCH_HALTED`). 템플릿의 S3 읽기 권한은 이미 `${ParentPrefix}/*`·`${ParentPlanKey}` 기준이라 구조 변경이 없다. 테스트 `BatchSessionParentTests`(미실행).
+- 남은 확인: 새 2회 계획에서 `ParentPrefix`를 이전 batch 루트로, `ParentPlanKey`를 이전 batch 불변 계획 키로 지정해야 한다. 이전 마지막 회차의 decision.json(`runs/2026/10/30/KRX_1520/decision.json` 등)이 새 스택의 `DecisionKey` 읽기 권한 범위에 드는지, 사전 검증(morning proof) 값을 무엇으로 둘지는 PC-C 계획 수립 때 확인한다. 회차 날짜·달력 승인과 AWS 반영은 사용자 승인 대상이다.
+- 실거래 상태: 변경 없음, 실제 주문 없음. commit/push 없음.
+
 ### 2026-10-27 11:16 KST — PC-D / Claude → PC-C / 15:10 시세 0건 오분류 보완·텔레그램 한국어 설명 (코드만, 테스트 미실행)
 
 - 요청: pull 확인 중 발견한 오분류 가능성 보완과, 모의운용 텔레그램 알림의 의미를 알 수 있게 수정. 사용자 지시로 PC-D에서는 **코드만 작성**했고 테스트·템플릿 재생성·실행·커밋·AWS 반영은 하지 않았다. 테스트와 적용은 PC-C가 진행한다.
@@ -330,14 +344,6 @@ python -m compileall -q src tests
 - Plan clarifies: one10/26 validation plus five follow-on entries10/27 through11/02, final exit/report11/03; all-NO_TRADE does not prove operational fill paths; internal ledger simulation is not broker order verification. Batch-aware status/review access remains a handoff concern.
 - Inspected live_cli/live_execution/live_broker entry points; existing implementations must be audited instead of assumed absent. No new source-code tests run for this documentation-only task; previous399 test result is historical. No AWS calls, schedule changes, real orders, credentials, commit or push in this task.
 - Next: follow the new work plan to collect five-session results; prepare live code/tests/templates while leaving live enablement and real-account secrets subject to separate explicit approval. No guaranteed live start date.
-
-### 2026-10-23 PC-C / User reports batch-v3 CREATE_COMPLETE; operator review denied
-
-- User reports CREATE_COMPLETE for batch-v3. Operator DescribeStacks attempt returned AccessDenied; remote creation result is not independently verified, and batch remains NOT confirmed armed.
-- Prepared ignored runtime/paper_batch_v3_admin.py, a self-contained administrator CloudShell script embedding the exact follow-on template/plan. Helper files runtime/batch_admin_core.py and batch-admin-payload.json are also ignored. No credentials or secret values embedded; infrastructure references remain local runtime only.
-- Script validates account/stack/template/parameters, deployed Lambda package/config/environment, all15 disabled schedule targets/retries/bounds; conditionally publishes the immutable plan and invokes DEPLOYMENT_CHECK. --arm explicitly enables stops first, entries last; reads back every update and rolls schedules back to DISABLED on failure. Parent completion/HALT checks remain in deployed code. Default invocation performs review and plan registration only.
-- Validation: script py_compile and embedded payload/default check PASS. Actual administrator execution and rollback integration are untested. Existing full399 regression result predates this new operational script; no new full suite run claimed. No remote changes made in this turn. Await admin CloudShell upload/run; do not claim batch activated.
-- One-time pilot remains previously ARMED_IN_AWS. No live orders/activation or commit/push. Existing handoff modifications preserved.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 

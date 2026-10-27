@@ -111,7 +111,19 @@ class PaperOperationsTests(unittest.TestCase):
         result=batch.status()
         self.assertEqual(result['ARMED']['status'],'NO_RECORD')
         self.assertEqual(len(result['sessions']),5)
+        self.assertEqual(result['bounded_sessions'],5)
         self.clients['s3'].get_object.assert_not_called()
+
+    def test_two_session_batch_status_and_other_lengths_rejected(self):
+        plan={'stack_name':'stock-automation-paper-batch-v2','parameters':{'PilotId':'b'*32,'ArtifactBucketName':'paper'},
+            'batch_plan':{'paper_only':True,'batch_id':'b'*32,'sessions':[{'entry_date':'2026-10-26','exit_date':'2026-10-27'}]*2}}
+        self.clients['s3'].list_objects_v2.return_value={'Contents':[]}
+        result=ops.BatchOperations(plan,self.clients).status()
+        self.assertEqual((result['bounded_sessions'],len(result['sessions'])),(2,2))
+        for count in (1,3,4):
+            other=copy.deepcopy(plan);other['batch_plan']['sessions']=other['batch_plan']['sessions'][:1]*count
+            with self.assertRaisesRegex(ValueError,'APPROVED_SESSION_BATCH_REQUIRED'):
+                ops.BatchOperations(other,self.clients)
 
 
 if __name__=='__main__':unittest.main()

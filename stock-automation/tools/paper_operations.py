@@ -95,8 +95,8 @@ class BatchOperations:
     def __init__(self,plan,clients):
         batch=plan.get('batch_plan',{})
         if (plan.get('stack_name')!='stock-automation-paper-batch-v2' or batch.get('paper_only') is not True
-                or len(batch.get('sessions',[]))!=5 or batch.get('batch_id')!=plan['parameters']['PilotId']):
-            raise ValueError('APPROVED_FIVE_SESSION_BATCH_REQUIRED')
+                or len(batch.get('sessions',[])) not in (2,5) or batch.get('batch_id')!=plan['parameters']['PilotId']):
+            raise ValueError('APPROVED_SESSION_BATCH_REQUIRED')
         self.plan,self.clients=plan,clients
         self.params=plan['parameters'];self.prefix='validation/batch/'+self.params['PilotId']
 
@@ -108,7 +108,7 @@ class BatchOperations:
         return {k:item[k] for k in ('status','phase','reason','report') if k in item}
 
     def status(self):
-        return {'bounded_sessions':5,'ARMED':self.get('ARMED'),'HALT':self.get('HALT'),'STOP':self.get('STOP'),
+        return {'bounded_sessions':len(self.plan['batch_plan']['sessions']),'ARMED':self.get('ARMED'),'HALT':self.get('HALT'),'STOP':self.get('STOP'),
             'sessions':[{'entry_date':slot['entry_date'],'exit_date':slot['exit_date'],
                 'phases':{phase:self.get('sessions/'+slot['entry_date']+'/'+phase) for phase in
                     ('GATE','SCAN_1450','SHORTLIST_1510','ENTRY_1520','EXIT_0910','REPORT_AM')}}

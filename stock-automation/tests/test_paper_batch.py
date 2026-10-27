@@ -103,6 +103,23 @@ class BatchTests(unittest.TestCase):
         self.leases[artifact['idempotency_key']] = {'payload_json': {'S': json.dumps(artifact)}}
         self.clients['dynamodb'].get_item.side_effect = lambda **kw: {'Item': copy.deepcopy(self.leases.get(kw['Key']['pk']['S'], {}))}
 
+    def test_two_session_batch_is_accepted_and_reports_its_own_length(self):
+        short = copy.deepcopy(self.plan)
+        short['sessions'] = short['sessions'][:2]
+        b.validate_batch(short)
+        for count in (1, 3, 4, 6):
+            value = copy.deepcopy(self.plan)
+            value['sessions'] = (value['sessions'] * 2)[:count]
+            with self.assertRaisesRegex(ValueError, 'APPROVED_PAPER_SESSION_COUNT_REQUIRED|NONCONTIGUOUS'):
+                b.validate_batch(value)
+        batch = b.Batch({}, {})
+        batch.batch, batch.index = short, 1
+        batch.current_plan = b.session_plan(short, 1)
+        batch.get = Mock(return_value={})
+        with unittest.mock.patch.object(p.Pilot, 'notify') as parent:
+            batch.notify('GATE: READY. Bounded 2-session paper batch.')
+        self.assertIn('회차: 2/2 (진입일 2026-10-27)', parent.call_args.args[0])
+
     def test_exact_five_contiguous_calendar_approved_sessions_only(self):
         b.validate_batch(self.plan)
         for mutation in (lambda x: x.update(paper_only=False), lambda x: x.update(starting_cash='1'),
@@ -299,10 +316,63 @@ class BatchTemplateTests(unittest.TestCase):
         self.assertEqual(self.template['Resources']['PilotTask']['Properties']['Family'], 'stock-automation-paper-batch')
 
 
+class BatchSessionParentTests(unittest.TestCase):
+    """A later batch may follow the last session of an earlier approved batch."""
+    def setUp(self):
+        self.previous = build_plan()
+        raw = json.dumps(self.previous).encode()
+        self.batch = copy.deepcopy(self.previous)
+        self.batch.update(batch_id='c'*32, sessions=[
+            {'entry_date': '2026-11-02', 'exit_date': '2026-11-03', 'pilot_id': '6'*32},
+            {'entry_date': '2026-11-03', 'exit_date': '2026-11-04', 'pilot_id': '7'*32}],
+            parent={'kind': 'batch_session', 'prefix': 'validation/batch/prev', 'plan_key': 'prev-plan.json',
+                    'plan_sha256': hashlib.sha256(raw).hexdigest(), 'batch_plan': self.previous})
+        self.items = {}
+        self.worker = b.Batch({}, {})
+        self.worker.batch = self.batch
+        self.worker.get = Mock(side_effect=lambda key, optional=False: copy.deepcopy(self.items.get(key)))
+
+    def test_two_sessions_after_previous_batch_are_valid(self):
+        b.validate_batch(self.batch)
+        reference = b.parent_reference(self.batch)
+        self.assertEqual(reference['session_prefix'], 'validation/batch/prev/sessions/2026-10-30')
+        self.assertEqual(reference['plan'], b.session_plan(self.previous, 4))
+        self.assertTrue(reference['require_digest'])
+
+    def test_gap_reused_identity_unknown_kind_or_invalid_previous_plan_rejected(self):
+        mutations = (lambda x: x['sessions'][0].update(entry_date='2026-11-03'),
+                     lambda x: x['sessions'][1].update(pilot_id='5'*32),
+                     lambda x: x.update(batch_id='b'*32),
+                     lambda x: x['parent'].update(kind='other'),
+                     lambda x: x['parent']['batch_plan']['sessions'].pop())
+        for mutation in mutations:
+            value = copy.deepcopy(self.batch)
+            mutation(value)
+            with self.assertRaises(ValueError):
+                b.validate_batch(value)
+
+    def test_predecessor_is_previous_last_session_with_ledger_digest(self):
+        self.assertEqual(self.worker.predecessor(0), ('validation/batch/prev/sessions/2026-10-30', '5'*32,
+                                                      b.session_plan(self.previous, 4), True))
+
+    def test_previous_batch_halt_or_stop_blocks_new_batch(self):
+        for key, code in (('validation/batch/prev/HALT.json', 'PREDECESSOR_BATCH_HALTED'),
+                          ('validation/batch/prev/STOP.json', 'PREDECESSOR_MANUALLY_STOPPED'),
+                          ('validation/batch/prev/sessions/2026-10-30/STOP.json', 'PREDECESSOR_MANUALLY_STOPPED')):
+            self.items = {key: {'status': 'X'}}
+            with self.assertRaisesRegex(ValueError, code):
+                self.worker.predecessor(0)
+
+    def test_pilot_parent_keeps_original_shape(self):
+        reference = b.parent_reference(build_plan())
+        self.assertEqual((reference['session_prefix'], reference['require_digest'], reference['halt_key']),
+                         ('validation/pilot/parent', False, None))
+
+
 class BatchNotificationExplanationTests(unittest.TestCase):
     def test_report_message_keeps_codes_and_adds_korean_meaning(self):
         message = 'REPORT_PM: decision=NO_TRADE; entry_worker=COMPLETED; exit_worker=NO_RECORD; open_positions=0.'
-        text = b.explain(message, (2, '2026-10-27'), '종가배팅 기준을 충족한 종목 없음')
+        text = b.explain(message, (2, 5, '2026-10-27'), '종가배팅 기준을 충족한 종목 없음')
         self.assertIn('회차: 2/5 (진입일 2026-10-27)', text)
         self.assertIn('16:15 오후 결과 보고', text)
         self.assertIn('NO_TRADE', text)

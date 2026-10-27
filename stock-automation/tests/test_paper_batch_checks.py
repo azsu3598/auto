@@ -84,6 +84,21 @@ class BatchChecksTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "COVER_ALL_EVENTS"):
                 checks.validate_operational_plan(document)
 
+    def test_two_session_plan_uses_its_own_date_window(self):
+        document = copy.deepcopy(self.document)
+        document["batch_plan"]["sessions"] = document["batch_plan"]["sessions"][:2]
+        document["parameters"].update(PmEnd="2026-10-27T14:59:59.999Z", AmEnd="2026-10-28T14:59:59.999Z")
+        checks.validate_operational_plan(document)
+        # The five-session window must not be reused for a shorter run.
+        document["parameters"].update(PmEnd="2026-10-30T14:59:59.999Z")
+        with self.assertRaisesRegex(ValueError, "SCHEDULE_OUTSIDE_APPROVED_DATES"):
+            checks.validate_operational_plan(document)
+        for count in (1, 3, 4):
+            short = copy.deepcopy(self.document)
+            short["batch_plan"]["sessions"] = (short["batch_plan"]["sessions"] * 2)[:count]
+            with self.assertRaises(ValueError):
+                checks.validate_operational_plan(short)
+
     def test_engine_calendar_identity_and_paper_only_guards_are_reused(self):
         mutations = (
             lambda d: d.update(stack_name="another-stack"),
