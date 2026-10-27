@@ -287,6 +287,21 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-27 15:40 KST — PC-D / Claude → PC-C / 스냅샷 다운로드 도구 추가 및 버킷 정보 정정 (PC-C는 실행·기록만)
+
+- 정정(아래 15:30 기록): "버킷 이름은 PC-C 인수인계의 값을 쓴다"는 틀렸다. 그 문서에는 버킷 이름이 없다. 코드·인프라에서 확인한 사실: 모의 버킷은 `stock-automation-paper-<AWS계정ID>-<리전>` 형식(`infra/paper-app-iam-bootstrap.yaml` 경계 정책 기준)이며, 실행 문서(`다른_PC_프로그램_실행방법.md`, `AWS_자동매매_실행가이드.md`)는 CloudFormation 스택 출력 `ArtifactBucketName`으로 조회한다. 리전·스택 이름은 저장소에서 확인하지 못했다(문서는 `$Region`·`$Stack` 변수로만 표기).
+- 추가 `stock-automation/tools/fetch_snapshots.py`: 지정한 날짜의 스냅샷 3개만 `GetObject`로 내려받는다. 키는 `runs/YYYY/MM/DD/KRX_1520/{scan_1450,shortlist_1510,entry_1520}-snapshot.json`(`aws_runtime.py`의 `date_prefix`·`phase.lower()` 규칙과 대조). 업로드·삭제·목록 조회·DynamoDB·ECS·주문·Secret 호출이 없다. 저장소 안쪽 출력 폴더와 기존 파일 덮어쓰기를 거부하고, 오류는 코드 그대로 출력하며 재시도·권한 확대를 하지 않는다. 버킷은 `--bucket` 또는 `PAPER_BUCKET`, 리전은 `--region` 또는 `AWS_REGION`/`AWS_DEFAULT_REGION`.
+- 추가 테스트 `stock-automation/tests/test_fetch_snapshots.py` 6개(키 규칙, 다운로드·없음·권한오류 보고, 덮어쓰기 거부, 저장소 내부 출력 거부, 인자 검증, 아무것도 못 받으면 종료코드 1). 가짜 S3 클라이언트를 쓰며 PC-D에서 통과. **실제 S3 접근은 PC-D에서 검증하지 못했다.**
+- PC-D 전체 테스트: 364개 실행, 실패2·오류7~8·skip2. 고정 실패 9건은 이전 기록과 동일한 환경 요인(`boto3` 미설치 7, 텔레그램 TLS 모킹 2)이며 새 실패는 없다.
+- **PC-C 실행 순서(코드 수정 없음)**:
+  1. pull → 세 문서 재확인 → `C:\Test\.venv\Scripts\python.exe`로 전체 테스트·compileall 실행, 결과 그대로 기록(15:50 기록 순서).
+  2. 사용자 승인 후 버킷 이름을 읽기 명령으로 확인한다(예: 스택 출력 `ArtifactBucketName`을 `aws cloudformation describe-stacks`로 조회). 스택 이름·리전은 PC-C가 쓰던 값을 사용한다.
+  3. 저장소 밖 폴더(예: `C:\Users\<사용자>\snapshots-tmp`)로 내려받는다: `"C:\Test\.venv\Scripts\python.exe" stock-automation\tools\fetch_snapshots.py --bucket <버킷> --region <리전> --date 2026-10-27 --out <저장소 밖 폴더>`. 날짜는 `--date`를 반복해 10/26 등을 추가할 수 있다. `AccessDenied`가 나오면 오류 원문만 기록하고 권한을 바꾸거나 다른 계정을 쓰지 않는다(`NOT_FOUND`는 해당 시각 스냅샷이 없다는 뜻).
+  4. `"C:\Test\.venv\Scripts\python.exe" stock-automation\tools\rejection_report.py --dir <같은 폴더>`를 실행하고 출력 표를 기록·사용자에게 전달한다. 탈락 사유를 보려면 `scan_1450`·`shortlist_1510`이 의미 있다. 15:10 통과가 0건이면 `entry_1520`의 시세는 0건으로 저장되므로 집계에서 `시세 0건`으로 보인다.
+  5. 내려받은 스냅샷은 Git에 올리지 않는다(시세 원본). 기록에는 표와 요약만 남긴다.
+- 알려진 한계: 스냅샷이 오늘 이전 회차에 모두 남아 있는지, PC-C 계정이 `runs/` 객체 읽기 권한을 갖는지는 미확인이다. 이 도구는 AWS 이미지 반영 없이 쓸 수 있다.
+- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음.
+
 ### 2026-10-27 15:30 KST — PC-D / Claude → PC-C / 탈락 사유 집계 도구 추가 (기존 스냅샷 읽기 전용 분석)
 
 - 시각 정정: 바로 아래 기록 제목의 `15:50`은 작성 시 잘못 적은 시각이다. 실제 작성은 15:2x KST였다. 기록 원문은 규칙상 수정하지 않고 여기서 정정한다.
@@ -332,23 +347,6 @@ python -m compileall -q src tests
 - 직전 회차(parent) 보완(같은 세션 후속, 사용자 요청): 기존 parent는 단회 pilot 계획만 허용했다. `paper_batch.parent_reference()`를 추가해 `parent.kind`가 없거나 `pilot`이면 기존과 동일하게 처리하고, `kind: "batch_session"`이면 이전 batch의 **마지막 회차**를 parent로 쓴다. 이 형식의 parent는 `prefix`(이전 batch 루트, 예 `validation/batch/<이전 batch_id>`), `plan_key`, `plan_sha256`, `batch_plan`(이전 batch 불변 계획 전체)을 가진다. 이전 계획 전체를 `validate_batch`로 다시 검증하고, 새 첫 회차 진입일=이전 마지막 청산일, 이전 batch·pilot ID 재사용 금지, 마지막 회차 모든 단계 완료·실제 lease·판단/장부 일치·REPORT_AM 깨끗함·**ledger digest 일치**(pilot과 달리 필수)·서버 정지를 기존 `completed()`로 확인한다. 이전 batch 루트 STOP·HALT와 마지막 회차 STOP이 있으면 GATE와 DEPLOYMENT_CHECK 모두 거부(`PREDECESSOR_MANUALLY_STOPPED`/`PREDECESSOR_BATCH_HALTED`). 템플릿의 S3 읽기 권한은 이미 `${ParentPrefix}/*`·`${ParentPlanKey}` 기준이라 구조 변경이 없다. 테스트 `BatchSessionParentTests`(미실행).
 - 남은 확인: 새 2회 계획에서 `ParentPrefix`를 이전 batch 루트로, `ParentPlanKey`를 이전 batch 불변 계획 키로 지정해야 한다. 이전 마지막 회차의 decision.json(`runs/2026/10/30/KRX_1520/decision.json` 등)이 새 스택의 `DecisionKey` 읽기 권한 범위에 드는지, 사전 검증(morning proof) 값을 무엇으로 둘지는 PC-C 계획 수립 때 확인한다. 회차 날짜·달력 승인과 AWS 반영은 사용자 승인 대상이다.
 - 실거래 상태: 변경 없음, 실제 주문 없음. commit/push 없음.
-
-### 2026-10-27 11:16 KST — PC-D / Claude → PC-C / 15:10 시세 0건 오분류 보완·텔레그램 한국어 설명 (코드만, 테스트 미실행)
-
-- 요청: pull 확인 중 발견한 오분류 가능성 보완과, 모의운용 텔레그램 알림의 의미를 알 수 있게 수정. 사용자 지시로 PC-D에서는 **코드만 작성**했고 테스트·템플릿 재생성·실행·커밋·AWS 반영은 하지 않았다. 테스트와 적용은 PC-C가 진행한다.
-- pull 확인 결과(수정 전): 작업 트리 clean, `origin/main`=`9d08d91`. `handoff_archive.py check` PASSED, `fd5e829→c12ab43→9d08d91` 기록 누락·변경0·순서 유지. PC-D 임시 venv에서 전체402개 OK(skipped2)·compileall·recommendation-lab37개·Node 4+8+15개 통과(수정 전 코드 기준이며 이번 수정 결과가 아니다).
-- 수정1 `stock-automation/src/stock_automation/aws_runtime.py`: 9d08d91은 15:10 shortlist가 빈 목록이면 `NO_QUALIFYING_CANDIDATE`로 분류해 15:10 시세 0건(데이터 장애)도 "기준 충족 종목 없음"으로 기록될 수 있었다. shortlist.json에 `quotes`(15:10 수신 시세 수)를 추가하고, `_shortlist_screened_empty()`가 빈 목록이면서 `quotes`>0인 경우만 선별 완료로 본다. `quotes` 없는 기존 파일·0건은 `MARKET_DATA_UNAVAILABLE` 유지. 필터·진입·안전 기준 변경 없음.
-- 수정2 텔레그램(판단 로직 변경 없음, 문구만):
-  - `stock-automation/infra/paper_batch.py`: 기존 코드 줄은 그대로 두고 아래에 한국어 설명(회차 n/5·진입일, 단계, 판단 BUY/NO_TRADE/NO_RECORD 의미, decision.json의 reason_codes·한국어 notes, 15:20/09:10 작업 상태, 열린 가상 포지션, RECONCILIATION_REQUIRED/BLOCKED_OR_FAILED와 HALT 안내, 실패 원인 코드 약40종)을 붙인다. 설명 생성이나 decision.json 읽기 실패 시 원래 메시지만 보내 보고가 실패/HALT로 바뀌지 않게 했다. `paper_pilot.py`(완료된 단회 pilot, 평문 인라인 템플릿)는 변경하지 않았다.
-  - `stock-automation/src/stock_automation/notifications.py`: 청산 등 동작 코드(`SCHEDULED_EXIT` 등)를 한국어로 바꾸고 `사유:` 줄(대시보드 `_REASON_LABELS` 재사용)과 "실제 계좌 주문이 아닙니다" 안내를 추가.
-  - `stock-automation/infra/paper_control.py`: 제어 오류 코드3종(`NETWORK_CONTROL_FAILED`, `TASK_CLEANUP_RECONCILE_REQUIRED`, `ECS_TASK_FAILED_RECONCILE_REQUIRED`) 의미 한 줄과 미분류 안내 추가.
-- 추가 테스트(미실행): `stock-automation/tests/test_aws_runtime.py`, `test_notifications.py`, `test_paper_batch.py`, `test_paper_control.py`.
-- **PC-C 순서**: ① `cd /d C:\Test\stock-automation` 후 `".venv\Scripts\python.exe" tools\build_paper_batch_template.py --output infra\paper-five-session-batch.yaml`로 템플릿 재생성(안 하면 `test_saved_template_matches_builder_exactly` 실패) ② 집중 테스트와 전체 테스트·compileall 실행, 실패 시 결과 그대로 기록 ③ 앱 이미지(aws_runtime·notifications, 9d08d91 수정 포함), batch Lambda(paper_batch), control Lambda 패키지(paper_control)는 각각 별도 반영 대상.
-- 위험: 진행 중 5회 운용은 준비 검사에서 승인 당시 작업 정의·컨테이너 설정·plan hash를 대조한다. 운용 도중 이미지·Lambda를 바꾸면 `PRODUCTION_TASK_CHANGED`/`PAPER_CONTAINER_CHANGED`로 GATE가 막혀 HALT되거나, 반대로 batch가 승인된 이전 이미지를 계속 써서 수정이 적용되지 않을 수 있다(실제 대조 대상은 PC-C에서 확인 필요). 현재 5회 운용 종료(11/03) 후 또는 새로 승인된 계획으로 적용을 권장한다. 적용 전 알림은 기존 영문 형식 그대로다.
-- 한글 깨짐 복원: 아래 `2026-10-26 PC-C / Korean explanations required in final five-session report` 기록의 `??` 두 곳을 사용자 요청으로 복원했다. 근거는 같은 커밋 `9d08d91`의 작업계획 문서이며, 경로 `docs/운영 검증/2026-10-23_5거래일_완료후_실거래준비_작업계획.md`와 문구 `근거 기록 없음`(문서 34행)이 깨진 글자 수와 정확히 일치한다. 그 외 기록 내용은 바꾸지 않았다. 깨지기 전 원문 바이트는 Git 이력에 없으므로 이 복원은 원본 문서 대조 결과다.
-- 사용자 확인 사항: 10/27 09:40 REPORT_AM(`NO_TRADE`, 두 작업 COMPLETED, 열린 포지션0)과 09:45 `2026-10-27 GATE: READY`는 정상 결과로 설명했다. 10/26 NO_TRADE는 오류가 아니라 기준 통과 종목0(PC-C 10/26 기록 기준)이다.
-- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음. commit/push 없음.
-- 다음: PC-C는 pull 후 세 문서를 다시 읽고 위 순서대로 템플릿 재생성→테스트를 실행해 실제 결과를 기록한다. 적용 시점은 사용자와 별도 확인한다.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 
