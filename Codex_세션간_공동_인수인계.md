@@ -287,6 +287,15 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-27 16:43 KST — PC-D / Claude → PC-C / PC-C 수정 범위 정정: 금지가 아니라 최소화
+
+- 정정(아래 15:40·15:30·15:50 기록): 사용자 지시는 "PC-C 코드 수정은 **최소한**으로, 수정은 가능한 PC-D가 한다"였다. 아래 기록의 "코드 수정 없음", "실패하면 코드를 고치지 말고 기록만"은 지시보다 강하게 적은 것이다. 아래 기준으로 대체한다.
+- 기본: 테스트 실행·스냅샷 다운로드·집계·기록이 PC-C의 주 작업이다. 수정 없이 끝나면 수정하지 않는다.
+- PC-C가 수정할 수 있는 경우: PC-C 실행 중 실패·오류가 PC-D 변경 또는 PC-C 환경(Windows 경로, `.venv`, AWS 응답 형식, 권한 오류 처리 등)에서 비롯되고, PC-C에서만 재현·검증할 수 있을 때. 이때 원인을 먼저 확인하고 필요한 최소 범위만 고친다.
+- 수정 시 지킬 것: ① 수정 전 실패 원문을 기록 ② 안전장치·주문·실거래 관련 검사를 완화하지 않으며, 테스트를 통과시키려고 테스트 자체를 지우거나 기대값만 바꾸지 않는다 ③ 수정 후 집중 테스트와 전체 테스트를 다시 실행 ④ 변경 파일·이유·전후 결과를 이 절에 기록 ⑤ commit/push는 사용자 승인 후. 원인이 불명확하거나 설계 변경이 필요하면 고치지 말고 원문과 함께 PC-D로 넘긴다.
+- 기존 금지 사항은 그대로다: AWS 배포·이미지 교체·스케줄 변경, 실거래 활성화, kill switch 해제, 실계좌 Secret 연결, 실주문.
+- 실거래 상태: 변경 없음, 실제 주문 없음.
+
 ### 2026-10-27 15:40 KST — PC-D / Claude → PC-C / 스냅샷 다운로드 도구 추가 및 버킷 정보 정정 (PC-C는 실행·기록만)
 
 - 정정(아래 15:30 기록): "버킷 이름은 PC-C 인수인계의 값을 쓴다"는 틀렸다. 그 문서에는 버킷 이름이 없다. 코드·인프라에서 확인한 사실: 모의 버킷은 `stock-automation-paper-<AWS계정ID>-<리전>` 형식(`infra/paper-app-iam-bootstrap.yaml` 경계 정책 기준)이며, 실행 문서(`다른_PC_프로그램_실행방법.md`, `AWS_자동매매_실행가이드.md`)는 CloudFormation 스택 출력 `ArtifactBucketName`으로 조회한다. 리전·스택 이름은 저장소에서 확인하지 못했다(문서는 `$Region`·`$Stack` 변수로만 표기).
@@ -333,20 +342,6 @@ python -m compileall -q src tests
 - **PC-C 순서**: pull 후 세 문서 재확인 → 집중 테스트(`tests/test_engine.py`, `tests/test_aws_runtime.py`) → 전체 테스트·compileall → 결과 그대로 기록. 앱 이미지 반영은 위 11:16 기록의 위험(운용 중 이미지 변경 시 `PRODUCTION_TASK_CHANGED` 등)과 같으므로 5회 운용 종료(11/03) 후 또는 새 승인 계획에서 11:16·11:24 수정과 함께 한 번에 반영하는 것을 권장한다. 반영 후 첫 15:10 실행의 `shortlist.json` `rejection_counts`를 보고 탈락 상위 사유를 확인한다.
 - 참고(대화 기록 아님): 같은 날 14:21·15:01 대화형 점검에서 거래대금 상위가 반도체·AI 부품에 쏠리고 나머지는 급등 추격 또는 촉매 미확인이어서 확정 추천 0건이었다. 필터 완화 여부는 위 집계를 모은 뒤 사용자와 결정하며, 이번 작업은 필터를 바꾸지 않았다.
 - 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음. commit/push 없음.
-
-### 2026-10-27 11:24 KST — PC-D / Claude → PC-C / 상세 알림 확인용 2회 모의운용 허용 (코드만, 테스트 미실행)
-
-- **PC-C 필독:** 이번 작업은 `docs/운영 검증/2026-10-27_PC-C_작업지시_알림개선_2회운용.md`의 순서만 따른다(pull → 템플릿 재생성 → 집중 테스트 → 전체 테스트 → 기록·rotate). AWS 변경, `stop`, 안전 검사 완화, 실패 테스트 수정·삭제는 금지이며, 실패하면 고치지 말고 오류 원문을 기록한다.
-- 정정: 아래 11:16 기록의 템플릿 재생성 명령은 `stock-automation` 안의 `.venv`를 가리켜 잘못됐다. 가상환경은 저장소 루트 `C:\Test\.venv`이므로 작업지시서의 절대경로 명령(`"C:\Test\.venv\Scripts\python.exe" ...`)을 사용한다.
-
-- 사용자 결정: 11:16 기록의 수정(15:10 시세0건 오분류 보완·텔레그램 한국어 설명)은 진행 중인 5회 운용에 반영하지 않고, 5회 운용 종료(11/03) 뒤 **별도 2회 모의운용**으로 확인한다. 목적은 더 상세한 알림을 실제로 받아 보는 것이다. PC-D에서는 코드만 작성했고 테스트·실행·AWS 변경은 없다.
-- 변경: `stock-automation/infra/paper_batch.py`에 `ALLOWED_SESSION_COUNTS = (2, 5)`를 두고 회차 수 검사·이벤트 매칭·안내 문구(`Bounded N-session`, `회차: n/N`)를 계획의 회차 수 기준으로 바꿨다. 2·5 외 회차 수는 계속 거부한다. 오류 코드 이름 변경: `EXACT_FIVE_PAPER_SESSIONS_REQUIRED`→`APPROVED_PAPER_SESSION_COUNT_REQUIRED`, `OUTSIDE_APPROVED_FIVE_SESSIONS`→`OUTSIDE_APPROVED_SESSIONS`. `stock-automation/tools/paper_batch_checks.py`(회차 수 2·5 허용, 일정 시작·종료일은 기존처럼 계획 날짜로 정확히 검사), `stock-automation/tools/paper_operations.py`(2·5 허용, `bounded_sessions`를 실제 회차 수로 표시, 코드 `APPROVED_SESSION_BATCH_REQUIRED`). 15개 예약과 템플릿 구조는 회차 수와 무관해 바꾸지 않았다.
-- 추가 테스트(미실행): `stock-automation/tests/test_paper_batch.py`, `test_paper_batch_checks.py`, `test_paper_operations.py`.
-- 현재 5회 운용 영향: 이미 배포된 Lambda와 승인 계획은 그대로이며 이 커밋만으로 바뀌지 않는다. 현재 5회 계획은 새 코드에서도 유효하다.
-- PC-C 할 일: 11:16 기록의 템플릿 재생성→테스트 순서에 이번 3개 테스트 파일을 포함한다. 2회 운용은 11/03 이후 새 계획으로 준비하며, 새 앱 이미지(11:16 수정 포함)·batch Lambda를 반영한 별도 승인 절차를 거친다.
-- 직전 회차(parent) 보완(같은 세션 후속, 사용자 요청): 기존 parent는 단회 pilot 계획만 허용했다. `paper_batch.parent_reference()`를 추가해 `parent.kind`가 없거나 `pilot`이면 기존과 동일하게 처리하고, `kind: "batch_session"`이면 이전 batch의 **마지막 회차**를 parent로 쓴다. 이 형식의 parent는 `prefix`(이전 batch 루트, 예 `validation/batch/<이전 batch_id>`), `plan_key`, `plan_sha256`, `batch_plan`(이전 batch 불변 계획 전체)을 가진다. 이전 계획 전체를 `validate_batch`로 다시 검증하고, 새 첫 회차 진입일=이전 마지막 청산일, 이전 batch·pilot ID 재사용 금지, 마지막 회차 모든 단계 완료·실제 lease·판단/장부 일치·REPORT_AM 깨끗함·**ledger digest 일치**(pilot과 달리 필수)·서버 정지를 기존 `completed()`로 확인한다. 이전 batch 루트 STOP·HALT와 마지막 회차 STOP이 있으면 GATE와 DEPLOYMENT_CHECK 모두 거부(`PREDECESSOR_MANUALLY_STOPPED`/`PREDECESSOR_BATCH_HALTED`). 템플릿의 S3 읽기 권한은 이미 `${ParentPrefix}/*`·`${ParentPlanKey}` 기준이라 구조 변경이 없다. 테스트 `BatchSessionParentTests`(미실행).
-- 남은 확인: 새 2회 계획에서 `ParentPrefix`를 이전 batch 루트로, `ParentPlanKey`를 이전 batch 불변 계획 키로 지정해야 한다. 이전 마지막 회차의 decision.json(`runs/2026/10/30/KRX_1520/decision.json` 등)이 새 스택의 `DecisionKey` 읽기 권한 범위에 드는지, 사전 검증(morning proof) 값을 무엇으로 둘지는 PC-C 계획 수립 때 확인한다. 회차 날짜·달력 승인과 AWS 반영은 사용자 승인 대상이다.
-- 실거래 상태: 변경 없음, 실제 주문 없음. commit/push 없음.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 
