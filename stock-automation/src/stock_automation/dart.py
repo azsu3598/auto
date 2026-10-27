@@ -10,6 +10,18 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Protocol
 
+# Disclosure risk flags that block a new entry. Keep equal to
+# MediumTermEngine.BLOCKING_RISKS; a test checks both stay the same.
+BLOCKING_RISK_FLAGS = frozenset({
+    "AUDIT_RISK",
+    "CAPITAL_IMPAIRMENT",
+    "DELISTING_RISK",
+    "DILUTION_EVENT",
+    "EARNINGS_INVALIDATED",
+    "GOING_CONCERN",
+    "TRADING_HALT_RISK",
+})
+
 
 class DartError(RuntimeError):
     pass

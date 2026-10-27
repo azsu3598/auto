@@ -287,6 +287,20 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-28 08:35 KST — PC-D / Claude → PC-C / fada77e 점검 수정: 위험 공시 차단·DART 15:10 이동·ETF 판정 수정·일정 문서 갱신
+
+- 요청: 사용자가 아래 21:30 PC-C 기록과 `fada77e` 점검을 요청했다. 점검 결과 ① 당일 위험 공시가 경고만 붙고 매수를 막지 않음 ② DART 실패 시 위험 확인 없이 진행 ③ 15:20 단계에 DART 호출(요청당 15초, 전체 상한 없음)이 추가돼 `ENTRY_1520` 실행 한도(예정+129초)를 넘기면 다음 GATE가 `PREDECESSOR_REAL_LEASE_NOT_VERIFIED`로 HALT될 수 있음 ④ ETF 이름 규칙이 DART 상장 코드보다 먼저 적용돼 BNK금융지주·HK이노엔·파워로직스를 제외함(오프라인 실행으로 확인)을 보고했다. 사용자 결정: ① 차단 ② 당일 공시만 확인하고 진행(현행 유지) ③ 시간 앞당김 ④ 수정.
+- 변경 `src/stock_automation/dart.py`: `BLOCKING_RISK_FLAGS` 상수(중기 `MediumTermEngine.BLOCKING_RISKS`와 동일, 테스트로 고정).
+- 변경 `src/stock_automation/engine.py`: 하드 필터 `DART_RISK_DISCLOSURE` 추가. `warnings`에 `DART_<차단 플래그>`가 있으면 탈락. 다른 경고·플래그 의미는 그대로.
+- 변경 `src/stock_automation/aws_runtime.py`: DART 공시 조회는 `SHORTLIST_1510`(와 `ENTRY_NXT_1955`)에서만 하고 전체 45초 상한(`budget_seconds`)을 둔다. 결과는 `shortlist.json`의 `dart_checks`(종목별 `checked_at`·`risk_flags`·`catalyst`)에 저장한다. `ENTRY_1520`은 DART를 호출하지 않고 같은 날짜의 `dart_checks`만 재사용한다(`_apply_recorded_dart_checks`). `SCAN_1450`은 ETF 판정용 상장 코드만 읽는다. 15:20은 shortlist 코드가 이미 15:10에 ETF 검사를 거쳤으므로 `exclude_funds`를 끈다(이름 규칙 재적용으로 15:10 통과 종목이 빠지는 것 방지). shortlist가 없는 fallback은 이름 규칙만 사용한다.
+- 변경 `src/stock_automation/providers/kiwoom.py`: `is_exchange_traded_product`는 상장 코드가 있으면 그것만으로 판단하고, 이름 규칙은 코드가 없을 때만 쓴다.
+- 변경 `tools/rejection_report.py`: `DART_RISK_DISCLOSURE` 한국어 이름 추가.
+- 테스트 추가: `test_engine.py` 2개(위험 공시 차단, 중기와 같은 위험 목록), `test_kiwoom_provider.py` 1개(실제 회사명 유지·ETN/ETF 제외), `test_aws_runtime.py` 2개(45초 상한·결과 기록, 15:20 같은 날 결과 재사용·다른 날짜/깨진 값 무시). 모두 가짜 클라이언트이며 외부 통신 없음.
+- 검증(PC-D): 집중 `test_engine`·`test_kiwoom_provider`·`test_aws_runtime`·`test_rejection_report`·`test_medium_term` 72개 OK. 전체 380개 실행, 실패 9건은 이전과 같은 환경 요인(`boto3` 미설치 7, `truststore` 미설치 2, 외부 통신 없음), 새 실패 없음. 변경 파일 `py_compile` 통과, `git diff --check` 통과.
+- 문서 갱신: `docs/운영 검증/2026-10-27_PC-C_작업지시_운용중단_5회재시작.md`와 `..._협의사항_운용중단_재시작_일정.md`를 21:30 기록의 일정(현재 5회 운용 완료 후 전환)으로 고쳤다. 11/03 09:40 완료 뒤에도 `stop`으로 루트 `STOP.json`을 남겨야 한다: `batch_session`은 새 첫 진입일이 11/03이어야 하는데 그날은 옛 운용 마지막 오전 단계와 같은 스택을 써서 배포할 수 없고, 11/04 이후 시작은 `stopped_batch_session`(STOP 필수, `session_index`=entry 11/02 마지막 회차)만 가능하다.
+- 남은 위험·한계: 15:10~15:20 사이 새 공시는 반영되지 않는다. DART 조회 실패·상한 초과 종목은 위험 확인 없이 촉매 0점으로 남는다(사용자 결정). 위험 공시는 당일분만 본다. 영문 혼합 신규 코드(예: `0158S0`)가 DART 회사코드 목록에 있는지 미확인. 당일 정기·형식 공시도 검증 촉매로 인정된다. `AGENTS.md`의 "설명 가능한 촉매" 문구와 프로그램(점수화)이 다르다.
+- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음. commit 있음/push는 사용자가 한다.
+
 ### 2026-10-27 21:30 KST — PC-C / Claude → 종가배팅 촉매 점수화·ETF 제외·DART 당일 공시 연결 (코드만, AWS 미반영)
 
 - 사용자 결정: ① 촉매는 필수 조건이 아니라 점수로 반영 ② 촉매 인정 기준은 DART 당일 공시 1건 이상(위험 공시 제외) ③ 후보에서 ETF·ETN 제외 ④ 이번 수정은 PC-D가 아니라 PC-C에서 진행(사용자 직접 요청). 운용 중단·새 운용 배포는 11/3(화) 저녁 이후로 미룸(5회차 진입 11/2, 마지막 청산·보고 11/3 09:40). 10/28·10/29 낮 중단은 사용자 일정상 불가.
@@ -330,12 +344,6 @@ python -m compileall -q src tests
 - 검증(PC-D): `test_paper_batch*` 51개 OK, `py_compile paper_batch.py` 통과. 전체 371개 실행에서 실패 9건은 기존 환경 요인과 동일(`boto3` 미설치 7, `truststore` 미설치로 텔레그램 보안 컨텍스트 생성 실패 2, 외부 통신 없음)이고 새 실패는 없다. 사용자 요청으로 이후 PC-D에서 외부 통신 가능성이 있는 테스트는 실행하지 않는다.
 - 미확인: 이미지 빌드·Lambda 패키지·스택 갱신의 실제 명령, morning proof 값, 중단한 운용 계획의 실제 `session_index`, PC-C 계정의 S3·스택 권한. 작업지시서에 "추정하지 말고 실제 파일·스택에서 확인"으로 적었다.
 - 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음. commit 있음/push는 사용자가 한다.
-
-### 2026-10-27 16:50 KST — PC-D / Claude → PC-C / 표현 정정: "금지"가 아니라 "별도 승인 필요"
-
-- 정정(바로 아래 16:43 기록): "기존 금지 사항은 그대로다"는 사용자 확인에 따라 **"이번 작업 범위가 아니며 사용자 별도 승인이 필요한 일"** 로 읽는다. 대상은 같다: AWS 배포·이미지 교체·스케줄 변경, 실거래 활성화, kill switch 해제, 실계좌 Secret 연결, 실주문.
-- 이유: AWS 이미지 교체는 진행 중인 5회 운용(11/03 종료 예정)의 준비 검사를 깨뜨려 HALT될 수 있어 종료 후 승인 대상이다. 실거래는 체결·부분체결 원장과 기존 보유종목 보호가 미완성(README)이고 `AGENTS.md`가 별도 명시 승인을 요구한다.
-- 실거래 상태: 변경 없음, 실제 주문 없음.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 

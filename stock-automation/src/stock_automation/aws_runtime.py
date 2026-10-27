@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from collections import Counter
 from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
@@ -20,6 +21,7 @@ from .models import (
     ExitObservation,
     MarketSnapshot,
     Position,
+    Quote,
     Session,
     StopMode,
 )
@@ -217,6 +219,25 @@ def _closing_bet_dart(s3, bucket: str, now: datetime) -> tuple[DartClient | None
         return None, {}
 
 
+def _with_dart_check(quote: Quote, check: dict[str, Any]) -> Quote:
+    """Apply one recorded same-day DART result to a quote."""
+    flags = [str(flag) for flag in check.get("risk_flags", ()) if str(flag)]
+    if flags:
+        return replace(quote, warnings=tuple(dict.fromkeys(
+            (*quote.warnings, *(f"DART_{flag}" for flag in flags))
+        )))
+    summary = str(check.get("catalyst", "")).strip()
+    if summary:
+        return replace(
+            quote,
+            catalyst=f"DART 당일 공시: {summary}",
+            catalyst_score=1.0,
+            catalyst_verified=True,
+            warnings=tuple(w for w in quote.warnings if w != "CATALYST_UNKNOWN"),
+        )
+    return quote
+
+
 def _apply_dart_catalysts(
     snapshot: MarketSnapshot,
     *,
@@ -224,14 +245,21 @@ def _apply_dart_catalysts(
     corporation_codes: dict[str, str],
     now: datetime,
     max_lookups: int = 12,
+    budget_seconds: float = 45.0,
+    clock=time.monotonic,
+    checks: dict[str, dict[str, Any]] | None = None,
 ) -> MarketSnapshot:
     """Mark same-day OpenDART disclosures as verified catalysts.
 
     Only quotes that pass the hard filters are looked up, since the catalyst
     changes the score and not eligibility. A risk disclosure (dilution,
-    delisting, audit, ...) is never a catalyst and is added as a warning.
+    delisting, audit, ...) is never a catalyst; it is added as a warning that
+    the engine rejects. Lookups stop once ``budget_seconds`` is spent so the
+    phase stays inside its runtime limit. Each completed lookup is written to
+    ``checks`` so a later phase can reuse it without calling DART again.
     """
     engine = ClosingBetEngine(StrategyConfig(session=snapshot.session))
+    deadline = clock() + budget_seconds
     lookups = 0
     quotes = []
     for quote in snapshot.quotes:
@@ -240,6 +268,7 @@ def _apply_dart_catalysts(
             quote.catalyst_verified
             or not corp_code
             or lookups >= max_lookups
+            or clock() >= deadline
             or engine.rejection_reason(snapshot, quote) is not None
         ):
             quotes.append(quote)
@@ -252,20 +281,35 @@ def _apply_dart_catalysts(
         except (DartError, OSError, ValueError):
             quotes.append(quote)
             continue
-        if overlay.risk_flags:
-            quotes.append(replace(quote, warnings=tuple(dict.fromkeys(
-                (*quote.warnings, *(f"DART_{flag}" for flag in overlay.risk_flags))
-            ))))
-        elif overlay.disclosures:
-            quotes.append(replace(
-                quote,
-                catalyst=f"DART 당일 공시: {overlay.catalyst}",
-                catalyst_score=1.0,
-                catalyst_verified=True,
-                warnings=tuple(w for w in quote.warnings if w != "CATALYST_UNKNOWN"),
-            ))
-        else:
+        check = {
+            "checked_at": now.isoformat(),
+            "risk_flags": list(overlay.risk_flags),
+            "catalyst": overlay.catalyst if overlay.disclosures and not overlay.risk_flags else "",
+        }
+        if checks is not None:
+            checks[quote.code] = check
+        quotes.append(_with_dart_check(quote, check))
+    return replace(snapshot, quotes=tuple(quotes))
+
+
+def _apply_recorded_dart_checks(
+    snapshot: MarketSnapshot, checks: Any, *, now: datetime
+) -> MarketSnapshot:
+    """Reuse the 15:10 same-day DART results at 15:20 without a new DART call."""
+    if not isinstance(checks, dict):
+        return snapshot
+    run_date = now.astimezone(KST).date()
+    quotes = []
+    for quote in snapshot.quotes:
+        check = checks.get(quote.code)
+        try:
+            checked = datetime.fromisoformat(str(check.get("checked_at", ""))) if isinstance(check, dict) else None
+        except ValueError:
+            checked = None
+        if checked is None or checked.tzinfo is None or checked.astimezone(KST).date() != run_date:
             quotes.append(quote)
+            continue
+        quotes.append(_with_dart_check(quote, check))
     return replace(snapshot, quotes=tuple(quotes))
 
 
@@ -1862,7 +1906,12 @@ def _run_worker() -> int:
                 candidate_limit, int(os.getenv("ENTRY_FALLBACK_CANDIDATE_LIMIT", "12"))
             )
 
-    dart_client, corporation_codes = _closing_bet_dart(s3, bucket, now)
+    # ENTRY_1520 makes no DART call: it reuses the 15:10 results recorded in
+    # shortlist.json so the 15:20 decision stays inside its runtime limit.
+    if phase == "ENTRY_1520":
+        dart_client, corporation_codes = None, {}
+    else:
+        dart_client, corporation_codes = _closing_bet_dart(s3, bucket, now)
     snapshot = builder.build(
         captured_at=now,
         session=session,
@@ -1871,12 +1920,17 @@ def _run_worker() -> int:
         kosdaq_change_pct=_market_change(client, "1", "101"),
         candidate_limit=effective_candidate_limit,
         candidate_codes=candidate_codes,
-        exclude_funds=True,
+        # Shortlisted codes were already screened for ETFs at 15:10.
+        exclude_funds=candidate_codes is None,
         listed_codes=frozenset(corporation_codes) if corporation_codes else None,
     )
-    if dart_client is not None:
+    dart_checks: dict[str, dict[str, Any]] = {}
+    if phase == "ENTRY_1520":
+        snapshot = _apply_recorded_dart_checks(snapshot, shortlist.get("dart_checks"), now=now)
+    elif dart_client is not None and phase != "SCAN_1450":
         snapshot = _apply_dart_catalysts(
-            snapshot, client=dart_client, corporation_codes=corporation_codes, now=now
+            snapshot, client=dart_client, corporation_codes=corporation_codes, now=now,
+            checks=dart_checks,
         )
     s3.put_object(
         Bucket=bucket,
@@ -1896,6 +1950,7 @@ def _run_worker() -> int:
             "quotes": len(snapshot.quotes),
             "rejection_reasons": rejection_reasons,
             "rejection_counts": dict(sorted(Counter(rejection_reasons.values()).items())),
+            "dart_checks": dart_checks,
             "scores": {
                 candidate.quote.code: candidate.score for candidate in ranked[:shortlist_limit]
             },

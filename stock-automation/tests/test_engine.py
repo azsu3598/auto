@@ -7,7 +7,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from stock_automation.config import StrategyConfig
+from stock_automation.dart import BLOCKING_RISK_FLAGS
 from stock_automation.engine import ClosingBetEngine
+from stock_automation.medium_term import MediumTermEngine
 from stock_automation.ledger import DuplicateDecisionError, JsonlLedger
 from stock_automation.models import DecisionType, MarketSnapshot, Quote, Session
 
@@ -221,6 +223,20 @@ class ClosingBetEngineTests(unittest.TestCase):
         self.assertIn("CATALYST_UNKNOWN", missing.risks)
         decision = engine.evaluate(snapshot(quote(catalyst="", catalyst_score=0.0)), cash=600_000)
         self.assertEqual(DecisionType.BUY, decision.decision)
+
+    def test_dart_risk_disclosure_blocks_entry(self):
+        engine = ClosingBetEngine()
+        for flag in sorted(BLOCKING_RISK_FLAGS):
+            risky = quote(warnings=(f"DART_{flag}",))
+            self.assertEqual("DART_RISK_DISCLOSURE", engine.rejection_reason(snapshot(risky), risky))
+            self.assertEqual(DecisionType.NO_TRADE, engine.evaluate(snapshot(risky), cash=600_000).decision)
+        # Only blocking DART flags reject; other warnings keep their old meaning.
+        for warnings in (("DART_OTHER",), ("AUDIT_RISK",), ("CATALYST_UNKNOWN",)):
+            kept = quote(warnings=warnings)
+            self.assertIsNone(engine.rejection_reason(snapshot(kept), kept))
+
+    def test_closing_bet_blocks_the_same_risks_as_medium_term(self):
+        self.assertEqual(set(BLOCKING_RISK_FLAGS), MediumTermEngine.BLOCKING_RISKS)
 
     def test_score_is_normalized_to_one_hundred(self):
         strong = quote(

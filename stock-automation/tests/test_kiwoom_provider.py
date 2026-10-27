@@ -206,6 +206,15 @@ class KiwoomProviderTests(unittest.TestCase):
         )
         self.assertEqual(datetime(2026, 10, 6, 15, 21, tzinfo=KST), snapshot.captured_at)
 
+    def test_listed_codes_decide_alone_so_brand_like_company_names_are_kept(self):
+        listed = frozenset({"138930", "195940", "047310"})
+        for code, name in (("138930", "BNK금융지주"), ("195940", "HK이노엔"), ("047310", "파워로직스")):
+            self.assertFalse(is_exchange_traded_product(code, name, listed))
+            # Without OpenDART codes the name rule is only a fallback.
+            self.assertTrue(is_exchange_traded_product(code, name, None))
+        self.assertTrue(is_exchange_traded_product("580001", "신한 레버리지 WTI원유 선물 ETN", listed))
+        self.assertTrue(is_exchange_traded_product("069500", "KODEX 200", listed))
+
     def test_exchange_traded_products_are_recognized(self):
         listed = frozenset({"005930", "000660"})
         self.assertTrue(is_exchange_traded_product("069500", "KODEX 200", None))

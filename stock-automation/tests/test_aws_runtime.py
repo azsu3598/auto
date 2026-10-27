@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 from stock_automation.aws_runtime import (
     _apply_dart_catalysts,
+    _apply_recorded_dart_checks,
     _closing_bet_dart,
     _archive_replay_case,
     _automatic_disclosure_overlays,
@@ -291,6 +292,56 @@ class AwsRuntimeTests(unittest.TestCase):
         for code in ("000003", "000004", "000005", "000006"):
             self.assertEqual(snap.quotes[int(code) - 1], result[code])
         self.assertEqual(snap.quotes[6], result["000007"])
+
+    def test_dart_lookups_stop_at_budget_and_are_recorded_for_reuse(self):
+        from stock_automation.dart import DartDisclosure, DartOverlay
+
+        now = datetime(2026, 10, 6, 15, 10, 30, tzinfo=KST)
+        ticks = iter([0.0, 0.0, 10.0, 50.0, 60.0])
+
+        class FakeDart:
+            def __init__(self):
+                self.looked_up = []
+
+            def disclosure_overlay(self, *, stock_code, corp_code, checked_at, lookback_days):
+                self.looked_up.append(stock_code)
+                if stock_code == "000002":
+                    return DartOverlay(now, ("DELISTING_RISK",), "관리종목지정", ())
+                return DartOverlay(now, (), "단일판매ㆍ공급계약체결",
+                                   (DartDisclosure("1", "20261006", "단일판매ㆍ공급계약체결", "회사"),))
+
+        unverified = dict(catalyst="", catalyst_score=0.0, catalyst_verified=False)
+        snap = snapshot(*(quote(code=f"00000{i}", **unverified) for i in range(1, 4)))
+        codes = {f"00000{i}": f"0000000{i}" for i in range(1, 4)}
+        dart, checks = FakeDart(), {}
+        _apply_dart_catalysts(snap, client=dart, corporation_codes=codes, now=now,
+                              budget_seconds=45.0, clock=lambda: next(ticks), checks=checks)
+        # Start 0, budget ends at 45; the third quote is reached at 50 and skipped.
+        self.assertEqual(["000001", "000002"], dart.looked_up)
+        self.assertEqual({"000001", "000002"}, set(checks))
+        self.assertEqual(["DELISTING_RISK"], checks["000002"]["risk_flags"])
+        self.assertEqual("", checks["000002"]["catalyst"])
+        self.assertEqual("단일판매ㆍ공급계약체결", checks["000001"]["catalyst"])
+
+    def test_entry_reuses_same_day_recorded_dart_checks_without_dart(self):
+        now = datetime(2026, 10, 6, 15, 20, 30, tzinfo=KST)
+        today = datetime(2026, 10, 6, 15, 10, 30, tzinfo=KST).isoformat()
+        unverified = dict(catalyst="", catalyst_score=0.0, catalyst_verified=False)
+        snap = snapshot(*(quote(code=f"00000{i}", **unverified) for i in range(1, 6)))
+        checks = {
+            "000001": {"checked_at": today, "risk_flags": [], "catalyst": "단일판매ㆍ공급계약체결"},
+            "000002": {"checked_at": today, "risk_flags": ["DILUTION_EVENT"], "catalyst": ""},
+            "000003": {"checked_at": "2026-10-05T15:10:30+09:00", "risk_flags": [], "catalyst": "어제 공시"},
+            "000004": {"checked_at": "not-a-date", "risk_flags": ["DELISTING_RISK"]},
+        }
+        result = {q.code: q for q in _apply_recorded_dart_checks(snap, checks, now=now).quotes}
+        self.assertTrue(result["000001"].catalyst_verified)
+        self.assertIn("DART_DILUTION_EVENT", result["000002"].warnings)
+        engine = ClosingBetEngine()
+        self.assertEqual("DART_RISK_DISCLOSURE", engine.rejection_reason(snap, result["000002"]))
+        for code in ("000003", "000004", "000005"):
+            self.assertEqual(snap.quotes[int(code) - 1], result[code])
+        self.assertEqual(snap, _apply_recorded_dart_checks(snap, None, now=now))
 
     def test_five_minute_stop_confirmation_uses_two_closed_bars(self):
         confirmed, reclaimed = _five_min_stop_confirmation(

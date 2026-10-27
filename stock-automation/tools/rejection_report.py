@@ -33,7 +33,8 @@ LABELS = {
     "EXTENDED_FROM_MA5": "5일선에서 과도하게 이격",
     "BELOW_VWAP": "VWAP 아래",
     "RSI_OUT_OF_RANGE": "RSI 범위 이탈",
-    "CATALYST_NOT_VERIFIED": "촉매 미확인",
+    "CATALYST_NOT_VERIFIED": "촉매 미확인(closing-v0.2 이하)",
+    "DART_RISK_DISCLOSURE": "당일 위험 공시(DART)",
     "MARKET_DECLINE_GATE": "시장 급락 차단",
 }
 

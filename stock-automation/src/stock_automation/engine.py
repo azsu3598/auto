@@ -5,6 +5,7 @@ from hashlib import sha256
 from math import log10
 
 from .config import StrategyConfig
+from .dart import BLOCKING_RISK_FLAGS
 from .models import (
     Candidate,
     Decision,
@@ -185,6 +186,9 @@ class ClosingBetEngine:
         if q.rsi14 is not None and (q.rsi14 < 38.0 or q.rsi14 > 82.0):
             return "RSI_OUT_OF_RANGE"
         # A verified catalyst is scored, not required; see _score_quote.
+        # A same-day risk disclosure (OpenDART) is never scored away: it blocks.
+        if any(w.startswith("DART_") and w[5:] in BLOCKING_RISK_FLAGS for w in q.warnings):
+            return "DART_RISK_DISCLOSURE"
         if self._market_change(snapshot, q) <= cfg.maximum_market_decline_pct:
             return "MARKET_DECLINE_GATE"
         return None

@@ -86,13 +86,13 @@ def is_exchange_traded_product(code: str, name: str, listed_codes: frozenset[str
 
     ``listed_codes`` holds the six-digit codes of listed companies (OpenDART).
     A preferred share (last digit not 0) counts as listed when its common share is.
+    When the codes are available they decide alone: brand prefixes such as BNK,
+    HK or 파워 are also real company names (BNK금융지주, HK이노엔, 파워로직스).
     """
+    if listed_codes is not None:
+        return code not in listed_codes and f"{code[:5]}0" not in listed_codes
     upper = name.strip().upper()
-    if "ETN" in upper or upper.startswith(_FUND_NAME_PREFIXES):
-        return True
-    if listed_codes is None:
-        return False
-    return code not in listed_codes and f"{code[:5]}0" not in listed_codes
+    return "ETN" in upper or upper.startswith(_FUND_NAME_PREFIXES)
 
 
 class KiwoomSnapshotBuilder:
