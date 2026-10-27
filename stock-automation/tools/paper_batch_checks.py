@@ -32,7 +32,7 @@ def require(condition, code):
 def validate_schedule_bounds(parameters, sessions):
     """Validate actual UTC inputs; cover every event but no extra local dates."""
     # Keep in step with infra/paper_batch.py ALLOWED_SESSION_COUNTS.
-    require(isinstance(sessions, list) and len(sessions) in (2, 5), "APPROVED_SESSION_COUNT_REQUIRED")
+    require(isinstance(sessions, list) and len(sessions) in (2, 3, 5), "APPROVED_SESSION_COUNT_REQUIRED")
     for window, field, first_clock, last_clock in (
         ("Pm", "entry_date", "09:45", "16:20"),
         ("Am", "exit_date", "08:55", "09:40"),

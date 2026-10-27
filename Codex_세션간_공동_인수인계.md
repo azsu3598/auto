@@ -287,6 +287,16 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-28 08:54 KST — PC-D / Claude → PC-C / 모의운용 3회(3거래일) 허용, 다음 새 운용은 3회
+
+- 사용자 결정: 조건 변경 확인 주기를 줄이기 위해 **다음 새 운용부터 3회(3거래일)** 로 한다. 소스만 PC-D에서 수정했고 실행은 PC-C가 한다.
+- 변경: `infra/paper_batch.py` `ALLOWED_SESSION_COUNTS = (2, 3, 5)`(한국어 사유 문구 2회·3회·5회), `tools/paper_batch_checks.py`(2·3·5), `tools/paper_operations.py`(2·3·5). 다른 회차 수는 계속 거부한다. 예약 15종·템플릿 구조는 회차 수와 무관해 바꾸지 않았다.
+- 재생성: `infra/paper-five-session-batch.yaml`(paper_batch.py 포함분). PC-C는 다시 만들지 않는다.
+- 테스트: `test_paper_batch.py`(3회 허용, 1·4·6회 거부), `test_paper_batch_checks.py`(3회 날짜 범위 통과, 5회 범위 재사용 거부, 1·4회 거부), `test_paper_operations.py`(3회 상태 표시, 1·4회 거부). PC-D에서 세 모듈 60개 OK(외부 통신 없음).
+- 문서: 작업지시서·협의 문서의 새 운용을 3회로 고쳤다. 스택 `PmEnd`·`AmEnd`는 3회차 날짜에 맞춰야 한다.
+- 남은 위험: `docs/운영 검증/2026-10-23_5거래일_완료후_실거래준비_작업계획.md`는 실거래 준비의 전제로 5거래일 완료를 요구한다. 3회 운용은 조건 조정 확인용이며, 실거래 준비 판단에는 별도 5회 운용이 필요하다(사용자에게 안내함).
+- 실거래 상태: 변경 없음, 실제 주문 없음. commit 있음/push는 사용자가 한다.
+
 ### 2026-10-28 08:35 KST — PC-D / Claude → PC-C / fada77e 점검 수정: 위험 공시 차단·DART 15:10 이동·ETF 판정 수정·일정 문서 갱신
 
 - 요청: 사용자가 아래 21:30 PC-C 기록과 `fada77e` 점검을 요청했다. 점검 결과 ① 당일 위험 공시가 경고만 붙고 매수를 막지 않음 ② DART 실패 시 위험 확인 없이 진행 ③ 15:20 단계에 DART 호출(요청당 15초, 전체 상한 없음)이 추가돼 `ENTRY_1520` 실행 한도(예정+129초)를 넘기면 다음 GATE가 `PREDECESSOR_REAL_LEASE_NOT_VERIFIED`로 HALT될 수 있음 ④ ETF 이름 규칙이 DART 상장 코드보다 먼저 적용돼 BNK금융지주·HK이노엔·파워로직스를 제외함(오프라인 실행으로 확인)을 보고했다. 사용자 결정: ① 차단 ② 당일 공시만 확인하고 진행(현행 유지) ③ 시간 앞당김 ④ 수정.
@@ -327,23 +337,6 @@ python -m compileall -q src tests
 - 추가 `docs/운영 검증/2026-10-27_PC-C_협의사항_운용중단_재시작_일정.md`: 사용자와 PC-C가 협의할 일정(10/28 09:41~14:30 중단, 10/29 15:20 첫 매수 판단), 자동/수동 구분, 오늘 중단하거나 10/28에 시작할 수 없는 이유, 미리 등록할 때의 제약, 상세 메시지 반영 위치 3곳, S3 확인 범위를 정리했다. 실행 절차 원본은 바로 아래 16:56 기록의 작업지시서다.
 - 사용자 결정: 과거 탈락 사유 S3 집계는 **2026-10-27 하루만** 본다(작업지시서 2-4의 날짜를 10/27로 한정).
 - 코드 변경 없음. 테스트 미실행(문서만 변경). 실거래 상태 변경 없음, 실제 주문 없음.
-
-### 2026-10-27 16:56 KST — PC-D / Claude → PC-C / 현재 5회 운용 중단 후 새 5회 재시작용 코드·작업지시서 (소스만, 실행은 PC-C)
-
-- **PC-C 필독:** 실행 순서는 `docs/운영 검증/2026-10-27_PC-C_작업지시_운용중단_5회재시작.md`를 따른다. 사용자 결정: 진행 중인 5회 운용을 **2026-10-28 09:40 REPORT_AM 이후 14:30 이전**에 `tools\paper_operations.py stop`으로 중단하고, 지금까지의 변경(9d08d91, 11:16, 11:24, 653f87f, 이번 변경)으로 **새 5회 모의운용**을 시작한다. 촉매 자동수집은 포함하지 않는다. 사용자 지시로 PC-D는 소스만 작성했고, 중단·이미지 빌드·배포·시작은 PC-C가 사용자 승인 후 실행한다.
-- 막혀 있던 이유: 기존 parent 규칙은 직전 운용에 STOP이 있으면 거부하고(`PREDECESSOR_MANUALLY_STOPPED`), 직전 batch의 **마지막** 회차만 parent로 쓰며, 새 첫 진입일이 직전 청산일과 **같아야** 했다. 따라서 stop 후에는 어떤 새 운용도 시작할 수 없었다.
-- 변경 `stock-automation/infra/paper_batch.py`: parent 형식 `stopped_batch_session` 추가.
-  - `session_index`(정수, 범위 검사, bool·문자열·실수 거부)로 **정상 완료된 회차**를 지정한다. 그 회차의 기존 완료 검사(전 단계·lease·판단/장부 일치·최종 보고 깨끗함·ledger digest·서버 정지)는 그대로 적용한다.
-  - 루트 `STOP.json`은 거부가 아니라 **필수**(`status=STOPPED_BY_OPERATOR`, `at` 필요, 없으면 `PREDECESSOR_OPERATOR_STOP_REQUIRED`). parent 회차 폴더의 `STOP.json`은 계속 거부한다.
-  - 루트 `HALT.json`은 `reason=BATCH_MANUALLY_STOPPED`이고 STOP 시각 이후일 때만 허용한다(stop 직후 예약이 꺼지기 전 발동한 경우). 그 외는 `PREDECESSOR_BATCH_HALTED`.
-  - parent 회차 이후 회차에 서버·작업 시작 단계(`LAUNCH_PHASES` = START_PM·START_AM·SCAN_1450·SHORTLIST_1510·ENTRY_1520·EQUITY_SNAPSHOT_1550·EXIT_0905·EXIT_0910) 기록이 있으면 `PREDECESSOR_LATER_SESSION_STARTED`. `BATCH_MANUALLY_STOPPED`로 차단된 기록과 GATE는 허용한다.
-  - 새 첫 진입일은 parent 청산일보다 **뒤**여야 한다(같은 날 거부). 이후 회차의 연속성 규칙은 그대로다. 기존 `pilot`·`batch_session` 동작은 바꾸지 않았다.
-  - 한국어 사유 3종 추가: `PREDECESSOR_OPERATOR_STOP_REQUIRED`, `PREDECESSOR_LATER_SESSION_STARTED`, `INVALID_STOPPED_SESSION_INDEX`.
-- 재생성 `stock-automation/infra/paper-five-session-batch.yaml`: `paper_batch.py`가 템플릿에 포함되므로 빌더로 임시 경로에 생성해 교체했다. **PC-C는 다시 생성하지 않는다.**
-- 추가 테스트 `stock-automation/tests/test_paper_batch.py`의 `StoppedBatchRestartTests` 7개: parent 회차·이후 회차 경로, 앞으로만 허용되는 간격과 연속성, 회차 번호 검증, STOP 필수, stop이 만든 HALT만 허용, 이후 회차 실행 기록 거부, parent 회차 STOP 거부.
-- 검증(PC-D): `test_paper_batch*` 51개 OK, `py_compile paper_batch.py` 통과. 전체 371개 실행에서 실패 9건은 기존 환경 요인과 동일(`boto3` 미설치 7, `truststore` 미설치로 텔레그램 보안 컨텍스트 생성 실패 2, 외부 통신 없음)이고 새 실패는 없다. 사용자 요청으로 이후 PC-D에서 외부 통신 가능성이 있는 테스트는 실행하지 않는다.
-- 미확인: 이미지 빌드·Lambda 패키지·스택 갱신의 실제 명령, morning proof 값, 중단한 운용 계획의 실제 `session_index`, PC-C 계정의 S3·스택 권한. 작업지시서에 "추정하지 말고 실제 파일·스택에서 확인"으로 적었다.
-- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음. commit 있음/push는 사용자가 한다.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 

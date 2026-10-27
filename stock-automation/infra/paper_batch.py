@@ -15,7 +15,7 @@ LIMITS = {'SCAN_1450': (240, 300), 'SHORTLIST_1510': (180, 180),
           'ENTRY_1520': (59, 60), 'EQUITY_SNAPSHOT_1550': (180, 180),
           'EXIT_0905': (120, 120), 'EXIT_0910': (120, 120)}
 # Only these reviewed run lengths are accepted; any other count fails closed.
-ALLOWED_SESSION_COUNTS = (2, 5)
+ALLOWED_SESSION_COUNTS = (2, 3, 5)
 EXPECTED = {'GATE': 'READY', 'START_PM': 'READY', 'START_AM': 'READY',
             'STOP_PM': 'STOP_REQUESTED', 'STOP_AM': 'STOP_REQUESTED',
             'REPORT_PM': 'REPORTED', 'REPORT_AM': 'REPORTED',
@@ -58,7 +58,7 @@ REASON_KO = {
     'PREDECESSOR_OPERATOR_STOP_REQUIRED': '이어 시작할 직전 운용에 운영자 stop 기록이 없어 새 운용을 시작하지 않았습니다.',
     'PREDECESSOR_LATER_SESSION_STARTED': '직전 운용에서 지정 회차 이후 회차가 실행된 기록이 있어 새 운용을 시작하지 않았습니다.',
     'INVALID_STOPPED_SESSION_INDEX': '직전 운용에서 이어 붙일 회차 번호가 올바르지 않습니다.',
-    'APPROVED_PAPER_SESSION_COUNT_REQUIRED': '운용 회차 수가 승인된 값(2회 또는 5회)이 아닙니다.',
+    'APPROVED_PAPER_SESSION_COUNT_REQUIRED': '운용 회차 수가 승인된 값(2회·3회·5회)이 아닙니다.',
     'OUTSIDE_APPROVED_SESSIONS': '승인된 회차 날짜에 해당하지 않는 예약이라 실행하지 않았습니다.',
     'PREDECESSOR_NOT_COMPLETED': '직전 회차의 단계가 모두 정상 완료되지 않았습니다.',
     'PREDECESSOR_TIME_INVALID': '직전 회차 단계의 실행 시각이 허용 범위를 벗어났습니다.',

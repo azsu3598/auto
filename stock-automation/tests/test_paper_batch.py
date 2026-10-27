@@ -107,7 +107,10 @@ class BatchTests(unittest.TestCase):
         short = copy.deepcopy(self.plan)
         short['sessions'] = short['sessions'][:2]
         b.validate_batch(short)
-        for count in (1, 3, 4, 6):
+        three = copy.deepcopy(self.plan)
+        three['sessions'] = three['sessions'][:3]
+        b.validate_batch(three)
+        for count in (1, 4, 6):
             value = copy.deepcopy(self.plan)
             value['sessions'] = (value['sessions'] * 2)[:count]
             with self.assertRaisesRegex(ValueError, 'APPROVED_PAPER_SESSION_COUNT_REQUIRED|NONCONTIGUOUS'):

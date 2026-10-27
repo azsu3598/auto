@@ -120,7 +120,9 @@ class PaperOperationsTests(unittest.TestCase):
         self.clients['s3'].list_objects_v2.return_value={'Contents':[]}
         result=ops.BatchOperations(plan,self.clients).status()
         self.assertEqual((result['bounded_sessions'],len(result['sessions'])),(2,2))
-        for count in (1,3,4):
+        three=copy.deepcopy(plan);three['batch_plan']['sessions']=three['batch_plan']['sessions'][:1]*3
+        self.assertEqual(ops.BatchOperations(three,self.clients).status()['bounded_sessions'],3)
+        for count in (1,4):
             other=copy.deepcopy(plan);other['batch_plan']['sessions']=other['batch_plan']['sessions'][:1]*count
             with self.assertRaisesRegex(ValueError,'APPROVED_SESSION_BATCH_REQUIRED'):
                 ops.BatchOperations(other,self.clients)

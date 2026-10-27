@@ -95,7 +95,7 @@ class BatchOperations:
     def __init__(self,plan,clients):
         batch=plan.get('batch_plan',{})
         if (plan.get('stack_name')!='stock-automation-paper-batch-v2' or batch.get('paper_only') is not True
-                or len(batch.get('sessions',[])) not in (2,5) or batch.get('batch_id')!=plan['parameters']['PilotId']):
+                or len(batch.get('sessions',[])) not in (2,3,5) or batch.get('batch_id')!=plan['parameters']['PilotId']):
             raise ValueError('APPROVED_SESSION_BATCH_REQUIRED')
         self.plan,self.clients=plan,clients
         self.params=plan['parameters'];self.prefix='validation/batch/'+self.params['PilotId']
