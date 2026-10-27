@@ -287,6 +287,15 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-27 15:50 KST — PC-D / Claude → PC-C / PC-C는 코드 수정 없이 테스트 실행·기록만 (템플릿 재생성 완료)
+
+- 사용자 지시: 코드 수정은 PC-D가 최대한 끝내고 **PC-C는 테스트 실행과 기록만** 한다. 아래 15:14 기록의 PC-C 순서 중 코드·산출물 수정이 필요한 부분을 PC-D에서 미리 처리했다.
+- PC-D가 처리: 11:16 기록이 PC-C 몫으로 남긴 `stock-automation/infra/paper-five-session-batch.yaml` 재생성을 완료했다. 빌더는 기존 출력 파일을 덮어쓰지 않으므로(`Preserve existing output`) 임시 경로에 생성해 저장본과 비교한 뒤 교체했다(차이는 `Resources`뿐이며 11:16 paper_batch.py 텔레그램 문구 반영분). 따라서 PC-C는 **템플릿 재생성을 하지 않는다.** 재생성 후 `test_saved_template_matches_builder_exactly`는 통과한다.
+- PC-D 전체 테스트(시스템 Python 3.13, `unittest discover`): 355개 실행, 실패2·오류7·skip2. 변경 전 커밋 `49aec1c`를 같은 방법으로 돌린 결과와 비교해 **새로 생긴 실패 없음**(템플릿 실패1건은 재생성으로 해소). 남은 9건은 이 PC 환경 요인으로 변경 전에도 동일하다: `boto3`/`botocore` 미설치로 `test_paper_control`·`test_runtime_safety`·`test_scheduled_execution`·`test_worker_verifier`·`test_storage_contract_scope` 오류, 텔레그램 TLS 모킹 `test_telegram_setup` 3건. 이 PC에는 저장소 `.venv`가 없어 AWS 의존 테스트는 PC-D에서 검증하지 못했다.
+- **PC-C 할 일(코드 수정 없음)**: ① pull 후 세 문서 재확인 ② `C:\Test\.venv\Scripts\python.exe`로 전체 테스트와 compileall 실행(AWS 의존 테스트 포함) ③ 결과를 있는 그대로 기록하고 rotate ④ 이미지·Lambda 반영은 사용자 승인 후 11/03 이후. **테스트가 실패하면 코드를 고치지 말고 실패 테스트명과 오류 원문만 기록해 PC-D에 넘긴다.** 실패 테스트를 수정·삭제하거나 안전 검사를 완화하지 않는다.
+- 기대 결과: PC-D에서 `boto3` 때문에 못 돌린 테스트가 PC-C에서는 통과해야 한다. 만약 PC-C에서 위 9건 외의 실패가 나오면 PC-D 변경이 원인일 수 있으므로 원문을 기록한다.
+- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음.
+
 ### 2026-10-27 15:14 KST — PC-D / Claude → PC-C / 15:10 후보 선별 탈락 사유 기록 추가 (코드만, 전체 테스트 미실행)
 
 - 요청: 종가배팅이 계속 `NO_TRADE`인 이유를 필터 완화 전에 숫자로 확인하기 위해, 후보 선별에서 종목별 탈락 사유를 남긴다. 기존에는 통과 종목 코드·점수만 저장돼 36건이 왜 전부 탈락했는지 알 수 없었다. 사용자 지시로 PC-D에서는 코드만 작성했고 커밋·push·AWS 반영은 하지 않았다. 적용은 PC-C가 진행한다.
@@ -341,13 +350,6 @@ python -m compileall -q src tests
 - 안전: 이 작업에서는 AWS 배포, 스케줄 변경, 실계좌 연결, 실주문 없음. 기존 모의·실거래 분리와 모든 주문 안전장치는 유지.
 - 다음: PC-C에서 새 앱 이미지를 별도 검토·빌드·게시하고, 정확한 digest를 사용하는 템플릿을 검증한 다음 기존 스택의 이미지 갱신만 진행한다. 테스트/적용은 PC-C에서 하고 PC-D에서는 실행하지 않는다.
 - 실거래 상태: 비활성; 실제 주문 없음. 커밋은 본 기록·보관 회전 및 diff 점검 뒤 수행.
-
-### 2026-10-26 PC-C / Korean explanations required in final five-session report
-
-- User requested that, after current run completes normally, next report explain in Korean why each action/outcome occurred.
-- Updated `docs/운영 검증/2026-10-23_5거래일_완료후_실거래준비_작업계획.md`: report each BUY/SELL/NO_TRADE/HALT and other relevant action with Korean reason grounded in logs, decision inputs, quotes and ledger evidence; mark missing reason as `근거 기록 없음`, never infer.
-- No AWS or schedule changes and no source change. Report is due only after actual five-session completion. No test run required for this documentation clarification.
-- Live order state unchanged; no commit/push.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 
