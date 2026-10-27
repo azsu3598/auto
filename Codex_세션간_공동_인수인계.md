@@ -287,6 +287,12 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-27 16:50 KST — PC-D / Claude → PC-C / 표현 정정: "금지"가 아니라 "별도 승인 필요"
+
+- 정정(바로 아래 16:43 기록): "기존 금지 사항은 그대로다"는 사용자 확인에 따라 **"이번 작업 범위가 아니며 사용자 별도 승인이 필요한 일"** 로 읽는다. 대상은 같다: AWS 배포·이미지 교체·스케줄 변경, 실거래 활성화, kill switch 해제, 실계좌 Secret 연결, 실주문.
+- 이유: AWS 이미지 교체는 진행 중인 5회 운용(11/03 종료 예정)의 준비 검사를 깨뜨려 HALT될 수 있어 종료 후 승인 대상이다. 실거래는 체결·부분체결 원장과 기존 보유종목 보호가 미완성(README)이고 `AGENTS.md`가 별도 명시 승인을 요구한다.
+- 실거래 상태: 변경 없음, 실제 주문 없음.
+
 ### 2026-10-27 16:43 KST — PC-D / Claude → PC-C / PC-C 수정 범위 정정: 금지가 아니라 최소화
 
 - 정정(아래 15:40·15:30·15:50 기록): 사용자 지시는 "PC-C 코드 수정은 **최소한**으로, 수정은 가능한 PC-D가 한다"였다. 아래 기록의 "코드 수정 없음", "실패하면 코드를 고치지 말고 기록만"은 지시보다 강하게 적은 것이다. 아래 기준으로 대체한다.
@@ -330,18 +336,6 @@ python -m compileall -q src tests
 - **PC-C 할 일(코드 수정 없음)**: ① pull 후 세 문서 재확인 ② `C:\Test\.venv\Scripts\python.exe`로 전체 테스트와 compileall 실행(AWS 의존 테스트 포함) ③ 결과를 있는 그대로 기록하고 rotate ④ 이미지·Lambda 반영은 사용자 승인 후 11/03 이후. **테스트가 실패하면 코드를 고치지 말고 실패 테스트명과 오류 원문만 기록해 PC-D에 넘긴다.** 실패 테스트를 수정·삭제하거나 안전 검사를 완화하지 않는다.
 - 기대 결과: PC-D에서 `boto3` 때문에 못 돌린 테스트가 PC-C에서는 통과해야 한다. 만약 PC-C에서 위 9건 외의 실패가 나오면 PC-D 변경이 원인일 수 있으므로 원문을 기록한다.
 - 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음.
-
-### 2026-10-27 15:14 KST — PC-D / Claude → PC-C / 15:10 후보 선별 탈락 사유 기록 추가 (코드만, 전체 테스트 미실행)
-
-- 요청: 종가배팅이 계속 `NO_TRADE`인 이유를 필터 완화 전에 숫자로 확인하기 위해, 후보 선별에서 종목별 탈락 사유를 남긴다. 기존에는 통과 종목 코드·점수만 저장돼 36건이 왜 전부 탈락했는지 알 수 없었다. 사용자 지시로 PC-D에서는 코드만 작성했고 커밋·push·AWS 반영은 하지 않았다. 적용은 PC-C가 진행한다.
-- 변경 `stock-automation/src/stock_automation/engine.py`: `ClosingBetEngine.rejection_reason(snapshot, quote)`를 추가해 기존 하드 필터를 **같은 순서**로 검사하고 처음 걸린 사유 코드를 반환한다(`STALE_QUOTE`, `NXT_ELIGIBLE_EXCLUDED`, `PRICE_OUT_OF_RANGE`, `LOW_TRADING_VALUE`, `LOW_VOLUME_RATIO`, `WEAK_CLOSE_STRENGTH`, `DAY_CHANGE_OUT_OF_RANGE`, `BELOW_5M_MA20_OR_FALLING`, `INVALID_SUPPORT`, `EXTENDED_FROM_MA5`, `BELOW_VWAP`, `RSI_OUT_OF_RANGE`, `CATALYST_NOT_VERIFIED`, `MARKET_DECLINE_GATE`). `rejection_reasons(snapshot)`는 탈락 종목코드→사유 딕셔너리를 반환하며 지연 스냅샷은 기존처럼 `ValueError`로 거부한다. `_score_quote`는 이 함수를 호출하도록 바꿨고 필터 조건·순서·점수 계산은 바꾸지 않았다.
-- 변경 `stock-automation/src/stock_automation/aws_runtime.py`: `SHORTLIST_1510`의 `shortlist.json`에 `rejection_reasons`(종목별)와 `rejection_counts`(사유별 건수)를 추가한다(`collections.Counter` import 추가). 기존 키 `codes`·`quotes`·`scores`는 그대로이며 15:20 단계는 `codes`·`quotes`만 읽는다. 필터·진입·손절·안전 기준 변경 없음.
-- 추가 테스트 `stock-automation/tests/test_engine.py` 3개: 첫 실패 필터가 사유로 기록됨(여러 조건 동시 실패 시 앞선 것), 탈락 목록과 `rank_candidates` 결과가 서로 겹치지 않고 일치, 지연 스냅샷 거부.
-- 검증(PC-D): `python -m unittest tests.test_engine` 19개 OK(기존16+신규3), `py_compile aws_runtime.py` 통과. **전체 테스트·compileall은 실행하지 않았다.** `shortlist.json` 저장 부분은 큰 함수 안에 있어 단위 테스트가 없다.
-- 한계: ① 한 종목이 여러 조건에 걸려도 **처음 걸린 사유 하나만** 기록한다. ② 테마 중복 제외와 점수 60점 미만 탈락은 집계하지 않는다(하드 필터 탈락만). ③ 새 앱 이미지를 빌드·게시하고 ECS 템플릿 `ImageUri` digest를 갱신하기 전에는 AWS에 반영되지 않는다.
-- **PC-C 순서**: pull 후 세 문서 재확인 → 집중 테스트(`tests/test_engine.py`, `tests/test_aws_runtime.py`) → 전체 테스트·compileall → 결과 그대로 기록. 앱 이미지 반영은 위 11:16 기록의 위험(운용 중 이미지 변경 시 `PRODUCTION_TASK_CHANGED` 등)과 같으므로 5회 운용 종료(11/03) 후 또는 새 승인 계획에서 11:16·11:24 수정과 함께 한 번에 반영하는 것을 권장한다. 반영 후 첫 15:10 실행의 `shortlist.json` `rejection_counts`를 보고 탈락 상위 사유를 확인한다.
-- 참고(대화 기록 아님): 같은 날 14:21·15:01 대화형 점검에서 거래대금 상위가 반도체·AI 부품에 쏠리고 나머지는 급등 추격 또는 촉매 미확인이어서 확정 추천 0건이었다. 필터 완화 여부는 위 집계를 모은 뒤 사용자와 결정하며, 이번 작업은 필터를 바꾸지 않았다.
-- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음. commit/push 없음.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 
