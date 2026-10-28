@@ -287,6 +287,18 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-28 PC-C / Claude → 11/02 PC-C 작업자 / 11/02 승인 목록 사전 승인 기록(문서만)
+
+- **사용자 사전 승인(2026-10-28, 대화에서 "4개 모두 승인")**: [병행 작업 계획](docs/운영%20검증/2026-10-28_실거래까지_병행작업계획.md) 3절 4개 항목 전부.
+  1. 기존 batch 운용 `stop`(11/02 09:41~14:40, 5회차 미시작 종료 포함)
+  2. 새 앱 이미지 ECR 게시(`4c85dd9` 이후 커밋 포함 필수)와 control Lambda 갱신
+  3. batch 스택 갱신(새 5회 계획, `PmStart`·`PmEnd`·`AmStart`·`AmEnd`=11/03~11/10)과 `DEPLOYMENT_CHECK`
+  4. 새 5회 예약 활성화와 그에 따른 AWS 비용(기존 운용과 같은 구성, 문서상 월 $7~10 예상, 상한 아님)
+- 범위 밖(포함 안 됨): 예약 추가·연장, 실거래 설정·`LIVE_ORDER_ENABLED`·kill switch, 실계좌 Secret, 실주문, 잠긴 실거래 템플릿 배포, 이 목록에 없는 AWS 변경.
+- 조건: 작업지시서 순서·각 단계 결과 확인을 그대로 따른다. 결과가 기대와 다르면(2-3 status 이상, `schedule_errors`, 오프라인 검사 실패, `DEPLOYMENT_CHECK` 거부 등) 승인과 관계없이 멈추고 사용자에게 보고한다. 14:40을 넘기면 stop하지 않고 일정을 다시 정한다. commit/push는 이 승인에 포함되지 않는다.
+- 이 기록은 사용자 요청으로 commit·push하지 않았다(PC-C 작업 트리에 미커밋 상태).
+- 실거래 상태: 변경 없음, AWS 호출 없음, 실제 주문 없음.
+
 ### 2026-10-28 PC-C / Claude → PC-D / 15:20 DART 미확인 종목 진입 차단(모의 경로, 11/02 배포 대상)
 
 - 사용자 승인: 아래 기록의 `4115c94` 발견을 11/02 배포 전에 PC-C에서 수정하고 commit/push.
@@ -325,15 +337,6 @@ python -m compileall -q src tests
 - 변경 파일: 이 문서(기록 추가)와 rotate로 보관 파일. 코드·템플릿 변경 없음.
 - 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 변경 없음, 실제 주문 없음. AWS 호출 없음.
 - 다음: 11/02(월) 09:41~14:40 작업지시서 2-3부터(사용자 사전 승인 후). commit/push는 사용자 승인 대기.
-
-### 2026-10-28 PC-D / Claude → PC-C / 병행계획 A2 가짜 응답 시나리오 테스트·A4 증권사 검증 계획(코드 변경 없음)
-
-- A2 새 테스트 `tests/test_live_scenarios.py` 15개: 실제 `KiwoomLiveBroker`·`DynamoLiveOrderStore`·`LiveOrderExecutor`·`LiveOrderSupervisor`를 묶고 키움 응답만 스크립트로 바꿨다. 주문 단계(증권사 오류 응답·주문번호 없는 응답·응답 유실·claim 직후 중단 재시작 → `UNCERTAIN`/kill switch, 재전송 없음), 체결 단계(부분체결→시간 초과 취소→취소 완료 시 체결분만 보유, 시간 전 미체결 유지, 접수 후 거부, 다음 페이지에서 주문 발견, 주문 미발견, 누적 체결 감소, 취소 수량 불일치 → 재취소 없음), 계좌 단계(부분 매도는 프로그램 수량만 감소, 프로그램 수량 초과 매도 체결 거부, 보호 보유분 수동 매도 감지, 보유 조회 실패). 외부 통신 없음.
-- 테스트 보조 수정 `tests/test_live_execution.py` `FakeDdb`: 상태 결정 순서에서 `:uncertain`을 `:cancel_submitting`보다 먼저(실제 `mark_cancel_uncertain`과 같게), 체결 트랜잭션 조건에 `CANCEL_ACKNOWLEDGED` 허용(실제 `reconcile_fill` 조건과 같게). 기존 13개 그대로 통과.
-- 발견(정책 확인 필요, 코드 미수정): 증권사의 명확한 주문 거절(`return_code`≠0, 예: 주문가능금액 부족)도 `UNCERTAIN`으로 잠겨 수동 대사 전까지 거래가 멈춘다. 안전 쪽 동작이며, 실제 거절 응답 형식을 A4 R1b에서 확인한 뒤 판단한다.
-- A4 새 문서 `docs/운영 검증/2026-10-28_실거래_증권사검증계획.md`: 실계좌로만 확인 가능한 V1~V10(가장 위험: `kt00007` `acpt_tp` 거부·취소 문구), 단계 R0 읽기만 → R1 미체결 1주 주문·취소 → R1b 거절 주문 → R2 1주 체결 매수 → R3 매도(10:00~14:00, KRX, 저가 1주), 시험 시간만 `LIVE_ORDER_ENABLED=1` 허용하는 별도 검토 템플릿 권장, 중단 조건, 증거 기록 범위(비밀값 없음), 주문 4건+취소 1건 상한.
-- 검증(PC-D): 새 15개 OK. 전체 416개 실행, 실패 9건(아래 기록들과 같은 `botocore`·`truststore` 환경 요인), 새 실패 없음. `compileall` 통과, `git diff --check` 통과.
-- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 변경 없음, 실제 주문 없음. commit 없음, push 없음.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 
