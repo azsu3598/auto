@@ -287,56 +287,52 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
-### 2026-10-28 08:54 KST — PC-D / Claude → PC-C / 모의운용 3회(3거래일) 허용, 다음 새 운용은 3회
+### 2026-10-28 PC-D / Claude → PC-C / 병행계획 A2 가짜 응답 시나리오 테스트·A4 증권사 검증 계획(코드 변경 없음)
 
-- 사용자 결정: 조건 변경 확인 주기를 줄이기 위해 **다음 새 운용부터 3회(3거래일)** 로 한다. 소스만 PC-D에서 수정했고 실행은 PC-C가 한다.
-- 변경: `infra/paper_batch.py` `ALLOWED_SESSION_COUNTS = (2, 3, 5)`(한국어 사유 문구 2회·3회·5회), `tools/paper_batch_checks.py`(2·3·5), `tools/paper_operations.py`(2·3·5). 다른 회차 수는 계속 거부한다. 예약 15종·템플릿 구조는 회차 수와 무관해 바꾸지 않았다.
-- 재생성: `infra/paper-five-session-batch.yaml`(paper_batch.py 포함분). PC-C는 다시 만들지 않는다.
-- 테스트: `test_paper_batch.py`(3회 허용, 1·4·6회 거부), `test_paper_batch_checks.py`(3회 날짜 범위 통과, 5회 범위 재사용 거부, 1·4회 거부), `test_paper_operations.py`(3회 상태 표시, 1·4회 거부). PC-D에서 세 모듈 60개 OK(외부 통신 없음).
-- 문서: 작업지시서·협의 문서의 새 운용을 3회로 고쳤다. 스택 `PmEnd`·`AmEnd`는 3회차 날짜에 맞춰야 한다.
-- 남은 위험: `docs/운영 검증/2026-10-23_5거래일_완료후_실거래준비_작업계획.md`는 실거래 준비의 전제로 5거래일 완료를 요구한다. 3회 운용은 조건 조정 확인용이며, 실거래 준비 판단에는 별도 5회 운용이 필요하다(사용자에게 안내함).
-- 실거래 상태: 변경 없음, 실제 주문 없음. commit 있음/push는 사용자가 한다.
+- A2 새 테스트 `tests/test_live_scenarios.py` 15개: 실제 `KiwoomLiveBroker`·`DynamoLiveOrderStore`·`LiveOrderExecutor`·`LiveOrderSupervisor`를 묶고 키움 응답만 스크립트로 바꿨다. 주문 단계(증권사 오류 응답·주문번호 없는 응답·응답 유실·claim 직후 중단 재시작 → `UNCERTAIN`/kill switch, 재전송 없음), 체결 단계(부분체결→시간 초과 취소→취소 완료 시 체결분만 보유, 시간 전 미체결 유지, 접수 후 거부, 다음 페이지에서 주문 발견, 주문 미발견, 누적 체결 감소, 취소 수량 불일치 → 재취소 없음), 계좌 단계(부분 매도는 프로그램 수량만 감소, 프로그램 수량 초과 매도 체결 거부, 보호 보유분 수동 매도 감지, 보유 조회 실패). 외부 통신 없음.
+- 테스트 보조 수정 `tests/test_live_execution.py` `FakeDdb`: 상태 결정 순서에서 `:uncertain`을 `:cancel_submitting`보다 먼저(실제 `mark_cancel_uncertain`과 같게), 체결 트랜잭션 조건에 `CANCEL_ACKNOWLEDGED` 허용(실제 `reconcile_fill` 조건과 같게). 기존 13개 그대로 통과.
+- 발견(정책 확인 필요, 코드 미수정): 증권사의 명확한 주문 거절(`return_code`≠0, 예: 주문가능금액 부족)도 `UNCERTAIN`으로 잠겨 수동 대사 전까지 거래가 멈춘다. 안전 쪽 동작이며, 실제 거절 응답 형식을 A4 R1b에서 확인한 뒤 판단한다.
+- A4 새 문서 `docs/운영 검증/2026-10-28_실거래_증권사검증계획.md`: 실계좌로만 확인 가능한 V1~V10(가장 위험: `kt00007` `acpt_tp` 거부·취소 문구), 단계 R0 읽기만 → R1 미체결 1주 주문·취소 → R1b 거절 주문 → R2 1주 체결 매수 → R3 매도(10:00~14:00, KRX, 저가 1주), 시험 시간만 `LIVE_ORDER_ENABLED=1` 허용하는 별도 검토 템플릿 권장, 중단 조건, 증거 기록 범위(비밀값 없음), 주문 4건+취소 1건 상한.
+- 검증(PC-D): 새 15개 OK. 전체 416개 실행, 실패 9건(아래 기록들과 같은 `botocore`·`truststore` 환경 요인), 새 실패 없음. `compileall` 통과, `git diff --check` 통과.
+- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 변경 없음, 실제 주문 없음. commit 없음, push 없음.
 
-### 2026-10-28 08:35 KST — PC-D / Claude → PC-C / fada77e 점검 수정: 위험 공시 차단·DART 15:10 이동·ETF 판정 수정·일정 문서 갱신
+### 2026-10-28 PC-D / Claude → PC-C / 병행계획 A3: 잠긴 실거래 전용 템플릿 작성(배포 없음)
 
-- 요청: 사용자가 아래 21:30 PC-C 기록과 `fada77e` 점검을 요청했다. 점검 결과 ① 당일 위험 공시가 경고만 붙고 매수를 막지 않음 ② DART 실패 시 위험 확인 없이 진행 ③ 15:20 단계에 DART 호출(요청당 15초, 전체 상한 없음)이 추가돼 `ENTRY_1520` 실행 한도(예정+129초)를 넘기면 다음 GATE가 `PREDECESSOR_REAL_LEASE_NOT_VERIFIED`로 HALT될 수 있음 ④ ETF 이름 규칙이 DART 상장 코드보다 먼저 적용돼 BNK금융지주·HK이노엔·파워로직스를 제외함(오프라인 실행으로 확인)을 보고했다. 사용자 결정: ① 차단 ② 당일 공시만 확인하고 진행(현행 유지) ③ 시간 앞당김 ④ 수정.
-- 변경 `src/stock_automation/dart.py`: `BLOCKING_RISK_FLAGS` 상수(중기 `MediumTermEngine.BLOCKING_RISKS`와 동일, 테스트로 고정).
-- 변경 `src/stock_automation/engine.py`: 하드 필터 `DART_RISK_DISCLOSURE` 추가. `warnings`에 `DART_<차단 플래그>`가 있으면 탈락. 다른 경고·플래그 의미는 그대로.
-- 변경 `src/stock_automation/aws_runtime.py`: DART 공시 조회는 `SHORTLIST_1510`(와 `ENTRY_NXT_1955`)에서만 하고 전체 45초 상한(`budget_seconds`)을 둔다. 결과는 `shortlist.json`의 `dart_checks`(종목별 `checked_at`·`risk_flags`·`catalyst`)에 저장한다. `ENTRY_1520`은 DART를 호출하지 않고 같은 날짜의 `dart_checks`만 재사용한다(`_apply_recorded_dart_checks`). `SCAN_1450`은 ETF 판정용 상장 코드만 읽는다. 15:20은 shortlist 코드가 이미 15:10에 ETF 검사를 거쳤으므로 `exclude_funds`를 끈다(이름 규칙 재적용으로 15:10 통과 종목이 빠지는 것 방지). shortlist가 없는 fallback은 이름 규칙만 사용한다.
-- 변경 `src/stock_automation/providers/kiwoom.py`: `is_exchange_traded_product`는 상장 코드가 있으면 그것만으로 판단하고, 이름 규칙은 코드가 없을 때만 쓴다.
-- 변경 `tools/rejection_report.py`: `DART_RISK_DISCLOSURE` 한국어 이름 추가.
-- 테스트 추가: `test_engine.py` 2개(위험 공시 차단, 중기와 같은 위험 목록), `test_kiwoom_provider.py` 1개(실제 회사명 유지·ETN/ETF 제외), `test_aws_runtime.py` 2개(45초 상한·결과 기록, 15:20 같은 날 결과 재사용·다른 날짜/깨진 값 무시). 모두 가짜 클라이언트이며 외부 통신 없음.
-- 검증(PC-D): 집중 `test_engine`·`test_kiwoom_provider`·`test_aws_runtime`·`test_rejection_report`·`test_medium_term` 72개 OK. 전체 380개 실행, 실패 9건은 이전과 같은 환경 요인(`boto3` 미설치 7, `truststore` 미설치 2, 외부 통신 없음), 새 실패 없음. 변경 파일 `py_compile` 통과, `git diff --check` 통과.
-- 문서 갱신: `docs/운영 검증/2026-10-27_PC-C_작업지시_운용중단_5회재시작.md`와 `..._협의사항_운용중단_재시작_일정.md`를 21:30 기록의 일정(현재 5회 운용 완료 후 전환)으로 고쳤다. 11/03 09:40 완료 뒤에도 `stop`으로 루트 `STOP.json`을 남겨야 한다: `batch_session`은 새 첫 진입일이 11/03이어야 하는데 그날은 옛 운용 마지막 오전 단계와 같은 스택을 써서 배포할 수 없고, 11/04 이후 시작은 `stopped_batch_session`(STOP 필수, `session_index`=entry 11/02 마지막 회차)만 가능하다.
-- 남은 위험·한계: 15:10~15:20 사이 새 공시는 반영되지 않는다. DART 조회 실패·상한 초과 종목은 위험 확인 없이 촉매 0점으로 남는다(사용자 결정). 위험 공시는 당일분만 본다. 영문 혼합 신규 코드(예: `0158S0`)가 DART 회사코드 목록에 있는지 미확인. 당일 정기·형식 공시도 검증 촉매로 인정된다. `AGENTS.md`의 "설명 가능한 촉매" 문구와 프로그램(점수화)이 다르다.
-- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 예약 변경 없음, 실제 주문 없음. commit 있음/push는 사용자가 한다.
+- 새 템플릿 `stock-automation/infra/live-locked.yaml`(JSON 형식): 실거래 전용 DynamoDB `stock-automation-live`(삭제 보호·PITR·Retain), ECS 클러스터·작업 정의 `stock-automation-live`(기본 명령 `--help`, 비루트·읽기 전용·권한 제거), 로그 `/stock-automation/live`(365일), 실행/작업 역할. 예약·규칙·Lambda·EC2·서비스 없음.
+- 잠금: `LiveOrderEnabled` 허용값 `"0"`만(→ `live-execute`·`live-supervise` 실행 불가). kill switch 기록을 만들지 않아 기본 ON. 한도 파라미터 기본값=최대값(30만/60만/1만/2종목/종목당 하루 1회). `KiwoomRealSecretArn` 기본 빈 값이면 키·Secret 읽기 권한 없음(연결은 별도 승인 갱신). 작업 역할은 실거래 테이블만, `DeleteItem`은 `CONTROL#LIVE_EXECUTION_LOCK`만, 모의 테이블·버킷 명시 Deny.
+- 새 테스트 `tests/test_live_infrastructure.py` 8개. `tools/validate_paper_infrastructure.py` `TEMPLATE_NAMES`에 추가(`test_paper_batch_checks`가 `infra/*.yaml` 전체 등재를 요구).
+- 새 문서 `docs/운영 검증/2026-10-28_실거래_잠금템플릿_운영안내.md`: 리소스·잠금·Secret JSON 키(값 없음)·지문 로컬 계산·단계(배포 → Secret 연결 → 기준선 잠금, 각각 별도 승인)·이상 시 대응·미확인.
+- 검증(PC-D): 새 8개 OK. 전체 401개 실행, 실패 9건(아래 기록과 같은 `botocore`·`truststore` 환경 요인), 새 실패 없음. `compileall` 통과, `git diff --check` 통과. **`cfn-lint` 미설치로 스키마 검사 미실행** — PC-C에서 `validate_paper_infrastructure.py` 실행 필요.
+- 남은 위험·미확인: 키움 실계좌 허용 IP 등록 요구 여부, 실제 `ka00001`·`kt00018` 응답. 역할에 Permission Boundary가 없어 관리자 배포가 전제다. 한도 상향은 A5 결정 후 템플릿 수정 필요.
+- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 변경 없음, 배포 없음, 실제 주문 없음. commit 없음, push 없음.
 
-### 2026-10-27 21:30 KST — PC-C / Claude → 종가배팅 촉매 점수화·ETF 제외·DART 당일 공시 연결 (코드만, AWS 미반영)
+### 2026-10-28 PC-D / Claude → PC-C / A1 발견 ①~⑥ 실거래 안전 수정(실거래 경로만)
 
-- 사용자 결정: ① 촉매는 필수 조건이 아니라 점수로 반영 ② 촉매 인정 기준은 DART 당일 공시 1건 이상(위험 공시 제외) ③ 후보에서 ETF·ETN 제외 ④ 이번 수정은 PC-D가 아니라 PC-C에서 진행(사용자 직접 요청). 운용 중단·새 운용 배포는 11/3(화) 저녁 이후로 미룸(5회차 진입 11/2, 마지막 청산·보고 11/3 09:40). 10/28·10/29 낮 중단은 사용자 일정상 불가.
-- 변경 `src/stock_automation/engine.py`: 하드 필터에서 `CATALYST_NOT_VERIFIED` 제거. 점수는 `catalyst_score*6`(최대 6) + 검증 촉매 4점. 검증 촉매가 아니면 `CATALYST_UNKNOWN` 위험 표시, `CATALYST_CONFIRMED`는 검증 촉매일 때만. `config.py` `rule_version` `closing-v0.3`. 최소 점수 60 등 다른 조건은 그대로.
-- 변경 `providers/kiwoom.py`: `build(exclude_funds, listed_codes)` 추가. 시세 요청 전에 ETF·ETN을 후보에서 뺀다. 판단: 이름에 `ETN` 또는 ETF 브랜드 접두어(KODEX·TIGER 등) → 제외, DART 상장회사 코드가 있으면 코드에 없는 종목도 제외(우선주는 보통주 코드로 인정). 기본값은 기존 동작.
-- 변경 `aws_runtime.py`: 종가배팅 경로에서 `_closing_bet_dart`(DART 키·회사코드 로드, 실패하면 DART 없이 진행)와 `_apply_dart_catalysts`(하드 필터 통과 종목만 최대 12건 당일 공시 조회, 위험 공시는 촉매 아님+`DART_<flag>` 경고, 조회 오류는 해당 종목만 건너뜀) 연결. DART 키는 batch 템플릿에 이미 연결돼 있다. 회사코드 S3 캐시(`config/dart/corp-code-map.json`) 쓰기 권한은 확인하지 못했으며 실패 시 매번 DART에서 직접 받는다.
-- 테스트: 변경 반영 `test_engine.py`(촉매 점수화), `test_rejection_report.py`, 추가 `test_kiwoom_provider.py` 2개, `test_aws_runtime.py` 2개. 집중 57개 OK, 전체 441개 OK(skip 2), `compileall -q src tests tools infra` 통과, `git diff --check` 통과.
-- 10/27 스냅샷 재적용(로컬): 이름 규칙으로 ETF 23종목 제외 후 13종목, 하드 필터 통과 0(NXT 8, 가격 2, 종가 강도 2, 거래량 1). 실제 운용에서는 ETF가 빠진 자리를 다음 순위 종목이 채우므로 결과가 다를 수 있다. 이 수정으로 매수가 나온다고 보장하지 않는다.
-- 미확인: 실제 DART 응답·요청 시간, 태스크 역할의 S3 쓰기 권한, 키움 종목 마스터의 ETF 구분값. 새 이미지 배포 후 첫 15:10 `shortlist.json`의 `rejection_counts`로 확인한다.
-- 실거래: AWS·이미지·예약 변경 없음, 실주문 없음. commit/push는 사용자 승인 대기.
+- 사용자 요청: 일정 단축을 위해 아래 A1 기록의 ①~⑥을 수정. ⑦(일 손실한도 범위)·⑧(미체결 자동 취소)은 A5 실계좌 조건과 함께 결정하므로 손대지 않았다.
+- `live_broker.py`: 계좌 조회 연속 페이지 전체 읽기(`_pages`, 20페이지 초과 시 실패), `kt00018`·`kt00007`에 적용. `account_numbers()`(`ka00001` `acctNo`, 숫자만 정규화). `account_risk_state(program_positions=...)`를 주면 노출·보유종목 수를 프로그램 보유분만으로 계산(없으면 기존처럼 계좌 전체).
+- `order_safety.py`: `LiveOrderPolicy.maximum_daily_buy_orders_per_code`(기본 1) → `DAILY_CODE_ORDER_LIMIT`, `AccountRiskState.ambiguous_orders` → `AMBIGUOUS_ORDER_STATE`.
+- `live_execution.py`: `ACTIVE_STATES`/`SUBMITTED_STATES`/`AMBIGUOUS_STATES` 상수, `submitted_orders()`, 실행 잠금 `acquire_execution_lock`/`release_execution_lock`(`CONTROL#LIVE_EXECUTION_LOCK`, 120초 만료, 소유자만 해제), `apply_order_book()`(미체결 매수 금액·종목을 노출·보유 수에 더함, 같은 종목 당일 매수 수, 모호 주문 수).
+- `live_cli.py`: `live-execute`가 잠금 획득 후 `_execute_locked` 실행. 증권사 계좌가 설정 계좌 하나와 같을 때만 지문 생성(`_verified_account_fingerprint`, baseline·supervise에도 적용, supervise는 확인 실패 시 빈 지문으로 kill switch). 계좌 전체 `holding_mismatches`가 비어야 `holdings_reconciled`. 시세 `date`/`tm` 없으면 거부. 환경변수 `LIVE_MAX_DAILY_BUY_ORDERS_PER_CODE`. README 실거래 절에 설명 추가.
+- 테스트 추가 10개: `test_live_broker` 4(프로그램분만 한도, 연속 페이지, 페이지 무한 시 실패, 계좌번호 정규화), `test_order_safety` 1, `test_live_execution` 2(잠금 단일 소유·만료, order book), 새 `test_live_cli.py` 3(시세 시각 필수, 계좌 일치·불일치·복수·빈 값). 가짜 응답만 사용, 외부 통신 없음.
+- 검증(PC-D): 실거래 4개 모듈 35개 OK. 전체 393개 실행, 실패 9건(`botocore` 미설치 로드 오류 5·`storage_contract_scope` 1, `truststore` 관련 `test_telegram_setup` 4 — 위 09:29 기록과 같은 9건), 새 실패 없음. `compileall -q src tests tools infra` 통과, `git diff --check` 통과.
+- 남은 위험·미확인: `_execute_locked` 전체 흐름(잠금→계좌 대조→대사→승인→주문)을 묶은 통합 테스트는 없다(구성 함수별 테스트만). 실제 `ka00001` 응답이 계좌 여러 개일 때의 형식, `kt00018` 연속 조회 동작은 실계좌로 미확인. 실행 잠금은 `DeleteItem` 권한이 필요하므로 A3 실거래 템플릿 IAM에 포함해야 한다. 모의 경로 파일(`aws_runtime.py`·`engine.py`·`paper_*`·batch 템플릿)은 바꾸지 않아 11/02 배포 대상 불변.
+- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 변경 없음, 실제 주문 없음. commit 없음, push 없음.
 
-### 2026-10-27 19:49 KST — PC-C / Codex → 10/27 탈락 사유 집계 완료, 운용 중단 대기
+### 2026-10-28 PC-D / Claude → PC-C / 병행계획 A1: 실거래 안전 기능 점검(읽기만, 수정 없음)
 
-- 절차 확인: `CLAUDE.md`, `AGENTS.md`, PC-C 전체 인수인계, 공동 인수인계, 2026-10-27 작업지시서와 일정 문서를 읽었다. `git pull`은 `Already up to date`; 작업 시작 시 worktree clean이었다.
-- 검증: 지정 집중 테스트 143개 통과, 전체 unittest 437개 통과(기존 skip 2), `compileall -q src tests tools infra` 통과. 집중 테스트의 첫 시도는 `tests` import 경로 누락으로 3개 모듈 로드 오류가 있었으며 `PYTHONPATH=src;tests`로 재실행해 통과했다.
-- S3 읽기(사용자 승인, 2026-10-27만): 저장소 밖 임시 폴더에 `scan_1450`, `shortlist_1510`, `entry_1520` snapshot 3/3 다운로드. 로컬 집계는 시세 72건, 하드 필터 통과 0건; 거래량 증가 부족 25건(34.7%), NXT 대상 종목 16건(22.2%), 종가 강도 부족 16건(22.2%), 가격 범위 초과 10건(13.9%), 등락률 범위 초과 3건(4.2%), 5분봉 20이평 조건 1건(1.4%), 촉매 미확인 1건(1.4%). 15:20 entry 시세는 0건. 집계는 첫 탈락 사유 기준이며 테마 중복·점수 미달은 제외된다.
-- AWS 조회 한계: 로그인 후에도 `cloudformation:ListStacks`와 `s3:ListAllMyBuckets`가 AccessDenied였다. 사용자가 연 batch 설정의 기존 artifact 버킷 참조를 사용해 승인된 날짜 한정 GetObject를 마쳤다. 10/28 운용 상태는 아직 조회하지 않았다.
-- 파일: 이 handoff 기록만 추가. 코드/템플릿/런타임 파일 수정 없음. S3 결과는 `%TEMP%`에 보관하고 Git에 추가하지 않는다.
-- 실거래: 이번 세션에서 AWS 리소스·예약·실거래 설정을 변경하지 않았고 실주문 없음. live-order의 실제 배포 상태는 권한 부족으로 독립 조회하지 못했으며 기존 설정은 변경하지 않았다.
-- 다음 작업: 2026-10-28 09:41 이후 14:30 이전, 사용자 승인 후 `paper_operations.py status`로 10/27 `REPORT_AM=REPORTED`, `HALT=NO_RECORD` 확인. 조건이 맞지 않으면 중단하고 보고한다. 조건 확인 후 stop 및 이후 각 AWS 단계의 별도 승인을 받는다. 10/27 S3 이외 날짜는 조회하지 않는다.
+- 범위: `order_safety.py`, `live_broker.py`, `live_execution.py`, `live_cli.py`와 `test_order_safety`·`test_live_broker`·`test_live_execution`을 읽었다. 코드·테스트 수정 없음, 테스트 미실행.
+- 이미 있는 보호: 기본 `LIVE_ORDER_ENABLED` 꺼짐, kill switch 기록 없으면 ON, 승인 challenge가 주문 전체에 묶임(가격 바꾸면 무효), 승인·주문 TTL 300초, READY→SUBMITTING 조건부 claim으로 같은 주문 중복 차단, 주문 후 예외는 UNCERTAIN·자동 재주문 없음, 매도는 프로그램 수량·보호 기준선 초과분만, 기준선 write-once, supervisor가 불일치 시 kill switch ON.
+- 발견(우선순위 순): ① 계좌 지문이 증권사 응답이 아니라 환경변수 `KIWOOM_ACCOUNT_NUMBER`로만 계산된다. 토큰의 실제 계좌와 달라도 통과한다(`ka00001`이 `acctNo`를 반환함, 명세 확인). ② 노출금액·보유종목 수 한도에 기존 사용자 보유분이 포함된다(`account_risk_state`의 `open_rows` 전체). 기존 보유가 60만 원 이상이거나 2종목 이상이면 매수가 항상 거부된다. ③ `kt00018` 보유 조회가 첫 페이지만 읽는다(명세에 `cont-yn` 있음). 보유 종목이 많으면 기준선이 불완전한 채 write-once로 잠긴다. ④ `live-execute`가 `holdings_reconciled=True`를 고정으로 넘겨, 해당 종목 수량 ≥ 기준선+프로그램만 확인하고 계좌 전체 정확 대사는 하지 않는다. ⑤ 다른 주문끼리는 동시 실행 잠금이 없어 현금·노출 한도 검사가 경합할 수 있고, `event_id`가 시각을 포함해 같은 종목 주문을 다시 준비할 수 있다(종목·일별 주문 수 제한 없음). ⑥ `ka10007`에 `date`/`tm`이 없으면 시세 시각을 현재 시각으로 간주해 오래된 시세 검사를 통과한다. ⑦ 일 손실한도는 계좌 전체 실현손익(`ka10074`)만 본다. 사용자 수동 매매가 섞이고 미실현 손실은 빠진다. ⑧ 미체결 취소는 `live-supervise`를 수동 실행할 때만 동작한다.
+- 다음: 사용자 결정 후 ①~⑥ 수정과 회귀 테스트(실거래 경로만, 모의 경로·11/02 배포 대상 불변). ⑦⑧은 A5 실계좌 조건과 함께 결정.
+- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 변경 없음, 실제 주문 없음. commit 없음, push 없음.
 
-### 2026-10-27 17:02 KST — PC-D / Claude → PC-C / 운용 중단·재시작 일정 협의 문서 추가
+### 2026-10-28 PC-D / Claude → PC-C / 새 운용 5회로 변경·실거래까지 병행 작업 묶음(문서만)
 
-- 추가 `docs/운영 검증/2026-10-27_PC-C_협의사항_운용중단_재시작_일정.md`: 사용자와 PC-C가 협의할 일정(10/28 09:41~14:30 중단, 10/29 15:20 첫 매수 판단), 자동/수동 구분, 오늘 중단하거나 10/28에 시작할 수 없는 이유, 미리 등록할 때의 제약, 상세 메시지 반영 위치 3곳, S3 확인 범위를 정리했다. 실행 절차 원본은 바로 아래 16:56 기록의 작업지시서다.
-- 사용자 결정: 과거 탈락 사유 S3 집계는 **2026-10-27 하루만** 본다(작업지시서 2-4의 날짜를 10/27로 한정).
-- 코드 변경 없음. 테스트 미실행(문서만 변경). 실거래 상태 변경 없음, 실제 주문 없음.
+- 사용자 결정: 아래 기록의 새 3회 운용을 **5회(11/03·11/04·11/05·11/06·11/09 진입, 마지막 보고 11/10 09:40)**로 바꾼다. 조건 확인과 실거래 준비 판단용 5회 완료를 한 운용으로 묶는다. 동시에 할 수 있는 작업은 묶어서 진행한다.
+- 새 문서: `docs/운영 검증/2026-10-28_실거래까지_병행작업계획.md` — 권장안, 묶음 A(~11/02, AWS 불필요: 실거래 안전 기능 점검·가짜 응답 테스트·잠긴 실거래 템플릿 작성·검증 계획·실계좌 조건 결정), B(11/02 PC-C 순서 고정, 승인 목록 사전 일괄 승인), C(모의 5회 중 병행: 실계좌 읽기 검증·잠긴 템플릿 배포 검토, 각각 별도 승인), D(11/10 이후 순서대로: 5회 판정 → 소액 실주문 → 정기 실거래 재승인).
+- 변경 문서: 작업지시서·일정 문서의 3회 → 5회(제목, 결론, 일정표, 2-6 `sessions` 5개·`PmStart`/`PmEnd`/`AmStart`/`AmEnd`=새 1~5회차 날짜). 코드·템플릿·테스트 변경 없음, 테스트 미실행(문서만). `ALLOWED_SESSION_COUNTS`에 5가 이미 있다.
+- 남은 위험: 운용 중 판정 코드를 배포하면 5회 기록이 다시 시작된다. 5회 모두 `NO_TRADE`면 매수·청산 경로 미검증. 묶음 A에서 모의 경로 파일을 바꾸면 11/02 배포 대상이 바뀌므로 11/10 이후로 미룬다. 회차 날짜는 계산값이며 실제 계획 파일로 미확인.
+- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 변경 없음, 실제 주문 없음. commit 없음, push 없음.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 
