@@ -26,7 +26,7 @@ class DayTradeExitAction(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class DayTradeConfig:
-    rule_version: str = "day-trade-v0.1"
+    rule_version: str = "day-trade-v0.2"
     entry_start: time = time(9, 10)
     last_entry: time = time(14, 50)
     mandatory_exit: time = time(15, 10)
@@ -314,8 +314,6 @@ class DayTradeEngine:
             or quote.price < quote.vwap
             or quote.support_price <= 0
             or quote.support_price >= quote.price
-            or not quote.catalyst_verified
-            or not quote.catalyst.strip()
             or not (quote.breakout_holds or quote.reclaimed_ma20)
         ):
             return None
@@ -328,17 +326,24 @@ class DayTradeEngine:
         score += 8.0 if quote.higher_lows else 0.0
         if 0.1 <= quote.last_fifteen_min_return_pct <= 3.0:
             score += 5.0
-        score += 10.0
+        # The catalyst is scored, not required, so ranked candidates without a
+        # verified same-day catalyst can still qualify on chart and flow alone.
+        catalyst_confirmed = quote.catalyst_verified and bool(quote.catalyst.strip())
+        score += 10.0 if catalyst_confirmed else 0.0
         score += 3.0 if (quote.institution_net or 0) > 0 else 0.0
         score += 3.0 if (quote.program_net or 0) > 0 else 0.0
         risks = list(quote.warnings)
+        if not catalyst_confirmed:
+            risks.append("CATALYST_UNKNOWN")
         if market_change < -1.0:
             score -= min(10.0, (-1.0 - market_change) * 5.0)
             risks.append("MARKET_WEAKNESS")
         if quote.day_change_pct > 8.0:
             score -= (quote.day_change_pct - 8.0) * 2.0
             risks.append("LATE_ENTRY_RISK")
-        reasons = ["ABOVE_5M_MA20", "ABOVE_VWAP", "INTRADAY_VOLUME_EXPANSION", "CATALYST_CONFIRMED"]
+        reasons = ["ABOVE_5M_MA20", "ABOVE_VWAP", "INTRADAY_VOLUME_EXPANSION"]
+        if catalyst_confirmed:
+            reasons.append("CATALYST_CONFIRMED")
         reasons.append("BREAKOUT_HOLD" if quote.breakout_holds else "MA20_RECLAIM")
         if quote.higher_lows:
             reasons.append("FIVE_MIN_HIGHER_LOWS")

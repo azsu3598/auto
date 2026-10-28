@@ -265,8 +265,14 @@ class KiwoomSnapshotBuilder:
         kospi_change_pct: float,
         kosdaq_change_pct: float,
         candidate_limit: int = 30,
+        listed_codes: frozenset[str] | None = None,
     ) -> DayTradeSnapshot:
-        """Build one on-demand, paper-only intraday snapshot from KRX read APIs."""
+        """Build one on-demand, paper-only intraday snapshot from KRX read APIs.
+
+        Candidates come from the current KRX trading-value ranking with ETFs and
+        ETNs removed. Catalysts only add score to ranked stocks; they no longer
+        decide which stocks are fetched.
+        """
         if not 1 <= candidate_limit <= 60:
             raise ValueError("day-trade candidate_limit must be between 1 and 60")
         base = self.build(
@@ -276,7 +282,8 @@ class KiwoomSnapshotBuilder:
             kospi_change_pct=kospi_change_pct,
             kosdaq_change_pct=kosdaq_change_pct,
             candidate_limit=candidate_limit,
-            candidate_codes=tuple(catalysts),
+            exclude_funds=True,
+            listed_codes=listed_codes,
         )
         quotes = tuple(
             DayTradeQuote(

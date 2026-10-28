@@ -59,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
         "daytrade-kiwoom-scan",
         help="run one on-demand Kiwoom read-only scan and record a paper decision",
     )
-    day_trade_kiwoom.add_argument("--catalysts", required=True)
+    day_trade_kiwoom.add_argument("--catalysts")
     day_trade_kiwoom.add_argument("--ledger", required=True)
     day_trade_kiwoom.add_argument("--cash", type=int, default=600_000)
     day_trade_kiwoom.add_argument("--candidate-limit", type=int, default=30)
@@ -277,7 +277,9 @@ def _run_day_trade_kiwoom(args) -> int:
     from .providers.reliable import KiwoomRetryPolicy, ReliableKiwoomClient
 
     now = datetime.now(timezone(timedelta(hours=9)))
-    raw = json.loads(Path(args.catalysts).read_text(encoding="utf-8"))
+    # The catalyst file is optional: candidates come from the trading-value
+    # ranking and a verified same-day catalyst only adds score.
+    raw = json.loads(Path(args.catalysts).read_text(encoding="utf-8")) if args.catalysts else {}
     catalysts: dict[str, Catalyst] = {}
     for code, item in raw.items():
         if not isinstance(item, dict):

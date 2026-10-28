@@ -150,7 +150,46 @@ class FlowFailureClient(FakeClient):
         )
 
 
+class RankedFundClient(FakeClient):
+    """Ranks an ETF above the stock and records which codes get quote requests."""
+
+    def __init__(self):
+        self.quoted_codes = []
+
+    def fetch_page(self, *, api_id, path, body, cont_yn=None, next_key=None):
+        response = super().fetch_page(
+            api_id=api_id, path=path, body=body, cont_yn=cont_yn, next_key=next_key
+        )
+        if api_id == "ka10099" and body["mrkt_tp"] == "0":
+            response.body["list"].append({"code": "069500", "name": "KODEX 200", "nxtEnable": "N"})
+        if api_id == "ka10032":
+            response.body["trde_prica_upper"].insert(0, {
+                "stk_cd": "069500", "stk_nm": "KODEX 200", "cur_prc": "+40000",
+                "flu_rt": "+1.00", "now_trde_qty": "9000000",
+                "pred_trde_qty": "8000000", "trde_prica": "360000",
+            })
+        if api_id == "ka10007":
+            self.quoted_codes.append(body["stk_cd"])
+        return response
+
+
 class KiwoomProviderTests(unittest.TestCase):
+    def test_day_trade_candidates_come_from_ranking_without_catalyst_file(self):
+        client = RankedFundClient()
+        builder = KiwoomSnapshotBuilder(client)
+        result = builder.build_day_trade_snapshot(
+            captured_at=datetime(2026, 10, 6, 13, 24, 30, tzinfo=KST),
+            catalysts={},
+            kospi_change_pct=0.42,
+            kosdaq_change_pct=-0.35,
+        )
+        self.assertEqual(["123456"], [quote.code for quote in result.quotes])
+        self.assertFalse(result.quotes[0].catalyst_verified)
+        self.assertIn("CATALYST_UNKNOWN", result.quotes[0].warnings)
+        # The ranked ETF is dropped before any quote request is spent on it.
+        self.assertNotIn("069500", client.quoted_codes)
+
+
     def test_builds_separate_on_demand_day_trade_snapshot(self):
         builder = KiwoomSnapshotBuilder(FakeClient())
         captured = datetime(2026, 10, 6, 13, 24, 30, tzinfo=KST)

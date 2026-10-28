@@ -70,7 +70,34 @@ class DayTradeEngineTests(unittest.TestCase):
             * decision.position.quantity,
             8_000,
         )
-        self.assertEqual("day-trade-v0.1", decision.rule_version)
+        self.assertEqual("day-trade-v0.2", decision.rule_version)
+
+    def test_unverified_catalyst_is_scored_instead_of_rejected(self):
+        engine = DayTradeEngine()
+        confirmed = engine.evaluate(snapshot(quote()), cash=600_000).candidates[0]
+        for overrides in (
+            {"catalyst": "", "catalyst_verified": False},
+            {"catalyst": "  ", "catalyst_verified": True},
+        ):
+            with self.subTest(overrides=overrides):
+                decision = engine.evaluate(snapshot(quote(**overrides)), cash=600_000)
+                self.assertEqual(DayTradeDecisionType.BUY, decision.decision)
+                candidate = decision.candidates[0]
+                self.assertAlmostEqual(confirmed.score - 10.0, candidate.score)
+                self.assertIn("CATALYST_UNKNOWN", candidate.risks)
+                self.assertNotIn("CATALYST_CONFIRMED", candidate.reasons)
+        self.assertIn("CATALYST_CONFIRMED", confirmed.reasons)
+        self.assertNotIn("CATALYST_UNKNOWN", confirmed.risks)
+
+    def test_missing_catalyst_cannot_lift_a_weak_chart_over_the_minimum(self):
+        weak = quote(
+            catalyst="", catalyst_verified=False, breakout_holds=False,
+            reclaimed_ma20=True, higher_lows=False, five_min_volume_ratio=1.4,
+            institution_net=None, program_net=None,
+        )
+        decision = DayTradeEngine().evaluate(snapshot(weak), cash=600_000)
+        self.assertEqual(DayTradeDecisionType.NO_TRADE, decision.decision)
+        self.assertLess(decision.candidates[0].score, 65.0)
 
     def test_nxt_or_market_crash_is_no_trade(self):
         nxt = DayTradeEngine().evaluate(snapshot(quote(nxt_eligible=True)), cash=600_000)
