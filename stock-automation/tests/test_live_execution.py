@@ -11,9 +11,11 @@ from stock_automation.live_execution import (
     LiveOrderSupervisor,
     LiveOrderState,
     StoredLiveOrder,
+    apply_order_book,
     holding_mismatches,
 )
 from stock_automation.order_safety import (
+    AccountRiskState,
     AuthorizationStatus,
     OrderAuthorization,
     OrderSide,
@@ -37,8 +39,20 @@ class FakeDdb:
     def put_item(self, **kwargs):
         key = kwargs["Item"]["pk"]["S"]
         if kwargs.get("ConditionExpression") and key in self.items:
-            raise ConditionalFailure()
+            now = kwargs.get("ExpressionAttributeValues", {}).get(":now")
+            expired = now is not None and int(
+                self.items[key].get("expires_epoch", {}).get("N", "0")
+            ) < int(now["N"])
+            if not expired:
+                raise ConditionalFailure()
         self.items[key] = dict(kwargs["Item"])
+
+    def delete_item(self, **kwargs):
+        key = kwargs["Key"]["pk"]["S"]
+        owner = kwargs["ExpressionAttributeValues"][":owner"]
+        if self.items.get(key, {}).get("owner") != owner:
+            raise ConditionalFailure()
+        del self.items[key]
 
     def get_item(self, **kwargs):
         item = self.items.get(kwargs["Key"]["pk"]["S"])
@@ -73,7 +87,7 @@ class FakeDdb:
         if expected is not None and current != expected:
             raise ConditionalFailure()
         target_tokens = (
-            ":cancel_ack", ":cancel_submitting", ":uncertain", ":ack", ":submitting", ":ready"
+            ":cancel_ack", ":uncertain", ":cancel_submitting", ":ack", ":submitting", ":ready"
         )
         status_value = next(
             (values[name]["S"] for name in target_tokens if name in values), current
@@ -107,7 +121,7 @@ class FakeDdb:
                 if item.get("broker_order_no", {}).get("S") != values[":number"]["S"]:
                     raise ConditionalFailure()
                 if item.get("status", {}).get("S") not in {
-                    values[":ack"]["S"], values[":partial"]["S"]
+                    values[":ack"]["S"], values[":partial"]["S"], values[":cancel_ack"]["S"]
                 }:
                     raise ConditionalFailure()
                 previous = int(item.get("last_filled_quantity", {}).get("N", "0"))
@@ -488,6 +502,46 @@ class LiveExecutionTests(unittest.TestCase):
         ).run_once(checked_at=NOW + timedelta(seconds=10), observed_account_fingerprint="fp")
         self.assertTrue(result.kill_switch_activated)
         self.assertIn(f"{order_intent.intent_id}:AMBIGUOUS_ORDER_STATE", result.actions)
+
+    def test_execution_lock_allows_one_owner_until_release_or_expiry(self):
+        store = DynamoLiveOrderStore(FakeDdb(), "live")
+        self.assertTrue(store.acquire_execution_lock("A", acquired_at=NOW))
+        self.assertFalse(store.acquire_execution_lock("B", acquired_at=NOW + timedelta(seconds=60)))
+        store.release_execution_lock("B")  # not the owner: lock is kept
+        self.assertFalse(store.acquire_execution_lock("B", acquired_at=NOW + timedelta(seconds=61)))
+        store.release_execution_lock("A")
+        self.assertTrue(store.acquire_execution_lock("B", acquired_at=NOW + timedelta(seconds=62)))
+        # An abandoned lease expires so a crash cannot block trading forever.
+        self.assertTrue(store.acquire_execution_lock("C", acquired_at=NOW + timedelta(seconds=300)))
+
+    def test_order_book_adds_open_buys_same_code_and_ambiguous_orders(self):
+        current = intent()
+        def stored(code, state, *, event, created=NOW, side=OrderSide.BUY):
+            order = build_order_intent(
+                event_id=event, strategy="CLOSING_BET", side=side, code=code,
+                name="x", quantity=5, limit_price=10_000, reference_price=10_000,
+                reference_at=created, created_at=created, account_alias="main",
+            )
+            return StoredLiveOrder(order, state)
+        open_buy = stored("111111", LiveOrderState.ACKNOWLEDGED, event="E1")
+        same_filled = stored("123456", LiveOrderState.FILLED, event="E2")
+        same_rejected = stored("123456", LiveOrderState.REJECTED, event="E3")
+        same_yesterday = stored("123456", LiveOrderState.FILLED, event="E4", created=NOW - timedelta(days=1))
+        uncertain = stored("222222", LiveOrderState.UNCERTAIN, event="E5")
+        base = AccountRiskState(
+            account_alias="main", available_cash=600_000, current_exposure=40_000,
+            realized_daily_pnl=0, open_positions=1, owned_quantity=0, kill_switch_active=False,
+        )
+        result = apply_order_book(
+            base, current,
+            active=(open_buy, uncertain),
+            submitted=(open_buy, same_filled, same_rejected, same_yesterday, uncertain),
+            program_positions={"333333": 4},
+        )
+        self.assertEqual(90_000, result.current_exposure)  # 40,000 + open buy 50,000
+        self.assertEqual(2, result.open_positions)  # 333333 held + 111111 pending
+        self.assertEqual(1, result.same_code_buy_orders_today)
+        self.assertEqual(1, result.ambiguous_orders)
 
 
 if __name__ == "__main__":

@@ -199,6 +199,74 @@ class KiwoomLiveBrokerTests(unittest.TestCase):
         broker = KiwoomLiveBroker(FakeClient(), account_alias="main")
         self.assertEqual({"123456": 10, "654321": 5}, broker.holdings())
 
+    def test_program_positions_exclude_protected_holdings_from_limits(self):
+        broker = KiwoomLiveBroker(FakeClient(), account_alias="main")
+        state = broker.account_risk_state(
+            code="123456",
+            trading_date="20261007",
+            kill_switch_active=False,
+            program_positions={"123456": 4},
+        )
+        # 4 of 10 shares valued at 101,000 belong to the program; 654321 is protected.
+        self.assertEqual(40_400, state.current_exposure)
+        self.assertEqual(1, state.open_positions)
+
+        empty = broker.account_risk_state(
+            code="123456", trading_date="20261007", kill_switch_active=False,
+            program_positions={},
+        )
+        self.assertEqual((0, 0), (empty.current_exposure, empty.open_positions))
+
+    def test_holdings_read_every_continuation_page(self):
+        client = PagedClient([
+            [{"stk_cd": "A111111", "rmnd_qty": "3"}],
+            [{"stk_cd": "222222", "rmnd_qty": "7"}],
+        ])
+        broker = KiwoomLiveBroker(client, account_alias="main")
+        self.assertEqual({"111111": 3, "222222": 7}, broker.holdings())
+        self.assertEqual([None, "Y"], [call["cont_yn"] for call in client.calls])
+        self.assertEqual("KEY-1", client.calls[1]["next_key"])
+
+    def test_holdings_fail_closed_when_pages_never_end(self):
+        client = PagedClient([[{"stk_cd": "111111", "rmnd_qty": "1"}]] * 25)
+        broker = KiwoomLiveBroker(client, account_alias="main")
+        with self.assertRaisesRegex(RuntimeError, "incomplete"):
+            broker.holdings()
+
+    def test_account_numbers_are_read_from_broker_and_normalized(self):
+        client = AccountClient(["1234-5678", "12345678"])
+        broker = KiwoomLiveBroker(client, account_alias="main")
+        self.assertEqual(("12345678",), broker.account_numbers())
+
+
+class PagedClient:
+    def __init__(self, pages):
+        self.pages = pages
+        self.calls = []
+
+    def fetch_page(self, **kwargs):
+        index = len(self.calls)
+        self.calls.append(kwargs)
+        response = Response({"return_code": 0, "acnt_evlt_remn_indv_tot": self.pages[index]})
+        if index + 1 < len(self.pages):
+            response.continuation = SimpleNamespace(cont_yn="Y", next_key=f"KEY-{index + 1}")
+        return response
+
+
+class AccountClient:
+    def __init__(self, numbers):
+        self.numbers = numbers
+        self.calls = []
+
+    def fetch_page(self, **kwargs):
+        index = len(self.calls)
+        self.calls.append(kwargs)
+        assert kwargs["api_id"] == "ka00001"
+        response = Response({"return_code": 0, "acctNo": self.numbers[index]})
+        if index + 1 < len(self.numbers):
+            response.continuation = SimpleNamespace(cont_yn="Y", next_key="NEXT")
+        return response
+
 
 if __name__ == "__main__":
     unittest.main()

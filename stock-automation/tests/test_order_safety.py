@@ -140,6 +140,27 @@ class OrderSafetyTests(unittest.TestCase):
             "REFERENCE_QUOTE_STALE",
         }.issubset(result.reason_codes))
 
+    def test_second_same_code_buy_today_and_ambiguous_orders_reject(self):
+        order = intent()
+        result = authorize_live_order(
+            order,
+            approval=approval(order),
+            state=state(same_code_buy_orders_today=1, ambiguous_orders=1),
+            policy=live_policy(),
+            checked_at=NOW,
+        )
+        self.assertIn("DAILY_CODE_ORDER_LIMIT", result.reason_codes)
+        self.assertIn("AMBIGUOUS_ORDER_STATE", result.reason_codes)
+
+        allowed = authorize_live_order(
+            order,
+            approval=approval(order),
+            state=state(same_code_buy_orders_today=1),
+            policy=live_policy(maximum_daily_buy_orders_per_code=2),
+            checked_at=NOW,
+        )
+        self.assertEqual(AuthorizationStatus.AUTHORIZED, allowed.status)
+
     def test_sell_cannot_exceed_verified_holding(self):
         order = intent(side=OrderSide.SELL, quantity=20)
         result = authorize_live_order(

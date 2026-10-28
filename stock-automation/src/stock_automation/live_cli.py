@@ -13,6 +13,8 @@ from .live_execution import (
     LiveOrderExecutor,
     LiveOrderSupervisor,
     LiveOrderState,
+    apply_order_book,
+    holding_mismatches,
 )
 from .order_safety import (
     LiveOrderPolicy,
@@ -32,7 +34,7 @@ def prepare(args) -> int:
     account_alias = _approved_account_alias(args.account_alias)
     raw, read = _real_clients()
     del raw
-    observed_at, reference_price = _current_quote(read, args.code, now)
+    observed_at, reference_price = _current_quote(read, args.code)
     event_id = args.event_id or f"LIVE-{now:%Y%m%d%H%M%S}-{args.code}"
     intent = build_order_intent(
         event_id=event_id,
@@ -100,15 +102,26 @@ def execute(args) -> int:
     account_alias = _approved_account_alias(stored.intent.account_alias)
     if store.kill_switch_active(account_alias=account_alias):
         raise RuntimeError("live kill switch is active")
+    # One live execution at a time: cash, exposure and per-code checks below
+    # must not race another order that has not been recorded yet.
+    if not store.acquire_execution_lock(stored.intent.intent_id, acquired_at=now):
+        raise RuntimeError("another live execution is in progress; no order was submitted")
+    try:
+        return _execute_locked(args, store, stored, account_alias, now)
+    finally:
+        store.release_execution_lock(stored.intent.intent_id)
+
+
+def _execute_locked(args, store, stored, account_alias: str, now: datetime) -> int:
     guard = store.load_account_guard()
     if guard is None:
         raise RuntimeError("protected account baseline is missing")
-    observed_fingerprint = _account_fingerprint()
+    raw, read = _real_clients()
+    observed_fingerprint = _verified_account_fingerprint(read, account_alias)
     if guard.account_alias != account_alias or guard.account_fingerprint != observed_fingerprint:
         raise RuntimeError("account guard does not match the active account")
 
-    raw, read = _real_clients()
-    observed_at, current_price = _current_quote(read, stored.intent.code, now)
+    observed_at, current_price = _current_quote(read, stored.intent.code)
     if abs((now - observed_at).total_seconds()) > _policy().maximum_quote_age_seconds:
         raise RuntimeError("current quote is stale")
     # The exact approved limit cannot be changed. This current quote check only
@@ -121,17 +134,32 @@ def execute(args) -> int:
             raise RuntimeError("market moved beyond approved buy-slippage limit")
 
     read_broker = KiwoomLiveBroker(read, account_alias=account_alias)
-    program_quantity = store.program_quantity(stored.intent.code)
+    program_positions = store.program_positions()
+    # Exact whole-account reconciliation: every holding must equal the locked
+    # baseline plus program quantity before any new order is allowed.
+    mismatches = holding_mismatches(
+        read_broker.holdings(exchange=args.exchange),
+        guard.protected_holdings,
+        program_positions,
+    )
     risk_state = read_broker.account_risk_state(
         code=stored.intent.code,
         trading_date=now.strftime("%Y%m%d"),
-        kill_switch_active=False,
+        kill_switch_active=store.kill_switch_active(account_alias=account_alias),
         already_submitted_intent_ids=store.submitted_intent_ids(),
         exchange=args.exchange,
         observed_account_fingerprint=observed_fingerprint,
         protected_baseline_quantity=guard.protected_quantity(stored.intent.code),
-        program_owned_quantity=program_quantity,
-        holdings_reconciled=True,
+        program_owned_quantity=program_positions.get(stored.intent.code, 0),
+        holdings_reconciled=not mismatches,
+        program_positions=program_positions,
+    )
+    risk_state = apply_order_book(
+        risk_state,
+        stored.intent,
+        active=store.active_orders(),
+        submitted=store.submitted_orders(),
+        program_positions=program_positions,
     )
     authorization = authorize_live_order(
         stored.intent,
@@ -200,7 +228,7 @@ def initialize_account_baseline(args) -> int:
     broker = KiwoomLiveBroker(read, account_alias=account_alias)
     guard = AccountGuard(
         account_alias=account_alias,
-        account_fingerprint=_account_fingerprint(),
+        account_fingerprint=_verified_account_fingerprint(read, account_alias),
         protected_holdings=broker.holdings(exchange=args.exchange),
         captured_at=now,
     )
@@ -254,10 +282,15 @@ def supervise(args) -> int:
     now = datetime.now(KST)
     account_alias = _approved_account_alias(args.account_alias)
     store = _store(args.table)
-    raw, _read = _real_clients()
+    raw, read = _real_clients()
     # One raw client is intentional: a cancellation is a state-changing request
     # and must never inherit automatic retry behavior from the read client.
     broker = KiwoomLiveBroker(raw, account_alias=account_alias)
+    try:
+        observed_fingerprint = _verified_account_fingerprint(read, account_alias)
+    except RuntimeError:
+        # The supervisor turns the kill switch ON for an unverifiable account.
+        observed_fingerprint = ""
     result = LiveOrderSupervisor(
         broker,
         store,
@@ -266,7 +299,7 @@ def supervise(args) -> int:
         exchange=args.exchange,
     ).run_once(
         checked_at=now,
-        observed_account_fingerprint=_account_fingerprint(),
+        observed_account_fingerprint=observed_fingerprint,
     )
     print(json.dumps({
         "status": "KILL_SWITCH_ON" if result.kill_switch_activated else "SUPERVISION_OK",
@@ -321,6 +354,9 @@ def _policy() -> LiveOrderPolicy:
         maximum_quote_age_seconds=int(os.getenv("LIVE_MAX_QUOTE_AGE_SECONDS", "60")),
         maximum_buy_slippage_pct=float(os.getenv("LIVE_MAX_BUY_SLIPPAGE_PCT", "0.5")),
         approval_ttl_seconds=int(os.getenv("LIVE_APPROVAL_TTL_SECONDS", "300")),
+        maximum_daily_buy_orders_per_code=int(
+            os.getenv("LIVE_MAX_DAILY_BUY_ORDERS_PER_CODE", "1")
+        ),
         expected_account_fingerprint=(
             os.getenv("LIVE_APPROVED_ACCOUNT_FINGERPRINT", "").strip() or None
         ),
@@ -337,7 +373,17 @@ def _account_fingerprint() -> str:
     return sha256(f"{salt}|{account_number}".encode()).hexdigest()
 
 
-def _current_quote(client: Any, code: str, fallback: datetime) -> tuple[datetime, int]:
+def _verified_account_fingerprint(client: Any, account_alias: str) -> str:
+    """Fingerprint the configured account only if the broker token uses exactly it."""
+    configured = "".join(c for c in os.getenv("KIWOOM_ACCOUNT_NUMBER", "") if c.isdigit())
+    numbers = KiwoomLiveBroker(client, account_alias=account_alias).account_numbers()
+    # More than one account makes the order destination ambiguous.
+    if not configured or numbers != (configured,):
+        raise RuntimeError("broker account does not match the approved account")
+    return _account_fingerprint()
+
+
+def _current_quote(client: Any, code: str) -> tuple[datetime, int]:
     response = client.fetch_page(
         api_id="ka10007",
         path="/api/dostk/mrkcond",
@@ -349,9 +395,9 @@ def _current_quote(client: Any, code: str, fallback: datetime) -> tuple[datetime
     price = abs(int(float(str(body.get("cur_prc", "0")).replace(",", ""))))
     if price <= 0:
         raise RuntimeError("verified current quote is unavailable")
-    date_text = str(body.get("date", ""))
-    time_text = str(body.get("tm", "")).zfill(6)
-    observed_at = fallback
-    if len(date_text) == 8 and len(time_text) == 6 and date_text.isdigit() and time_text.isdigit():
-        observed_at = datetime.strptime(date_text + time_text, "%Y%m%d%H%M%S").replace(tzinfo=KST)
-    return observed_at, price
+    date_text = str(body.get("date", "")).strip()
+    time_text = str(body.get("tm", "")).strip().zfill(6)
+    # Without the broker's quote time the freshness check cannot be proven.
+    if not (len(date_text) == 8 and len(time_text) == 6 and date_text.isdigit() and time_text.isdigit()):
+        raise RuntimeError("quote time is missing; freshness cannot be verified")
+    return datetime.strptime(date_text + time_text, "%Y%m%d%H%M%S").replace(tzinfo=KST), price

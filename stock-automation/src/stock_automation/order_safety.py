@@ -63,6 +63,7 @@ class LiveOrderPolicy:
     maximum_quote_age_seconds: int = 60
     maximum_buy_slippage_pct: float = 0.5
     approval_ttl_seconds: int = 300
+    maximum_daily_buy_orders_per_code: int = 1
     allowed_strategies: tuple[str, ...] = ("CLOSING_BET", "MEDIUM_TERM")
     expected_account_fingerprint: str | None = None
 
@@ -82,6 +83,10 @@ class AccountRiskState:
     program_owned_quantity: int = 0
     holdings_reconciled: bool = False
     total_owned_quantity: int = 0
+    # Submitted (not broker-rejected) buy orders for this code today.
+    same_code_buy_orders_today: int = 0
+    # Orders in SUBMITTING, CANCEL_SUBMITTING or UNCERTAIN need manual reconciliation.
+    ambiguous_orders: int = 0
 
     @property
     def program_sellable_quantity(self) -> int:
@@ -172,6 +177,8 @@ def authorize_live_order(
         reasons.append("ACCOUNT_FINGERPRINT_MISMATCH")
     if not state.holdings_reconciled:
         reasons.append("HOLDINGS_NOT_RECONCILED")
+    if state.ambiguous_orders > 0:
+        reasons.append("AMBIGUOUS_ORDER_STATE")
     if intent.strategy not in policy.allowed_strategies:
         reasons.append("STRATEGY_NOT_ALLOWED")
     if intent.intent_id in state.already_submitted_intent_ids:
@@ -199,6 +206,8 @@ def authorize_live_order(
             reasons.append("TOTAL_EXPOSURE_LIMIT")
         if state.open_positions >= policy.maximum_open_positions:
             reasons.append("OPEN_POSITION_LIMIT")
+        if state.same_code_buy_orders_today >= policy.maximum_daily_buy_orders_per_code:
+            reasons.append("DAILY_CODE_ORDER_LIMIT")
     elif intent.quantity > state.program_sellable_quantity:
         reasons.append("SELL_QUANTITY_EXCEEDS_PROGRAM_HOLDING")
 

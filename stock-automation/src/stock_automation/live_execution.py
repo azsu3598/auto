@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from dataclasses import asdict, dataclass, replace
+from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from typing import Any, Protocol
 
 from .live_broker import BrokerCancellation, BrokerOrder, BrokerOrderStatus, KiwoomLiveBroker
 from .order_safety import (
+    AccountRiskState,
     AuthorizationStatus,
     OrderAuthorization,
     OrderIntent,
@@ -29,6 +30,28 @@ class LiveOrderState(StrEnum):
     CANCELLED = "CANCELLED"
     REJECTED = "REJECTED"
     UNCERTAIN = "UNCERTAIN"
+
+
+ACTIVE_STATES = frozenset({
+    LiveOrderState.SUBMITTING.value,
+    LiveOrderState.ACKNOWLEDGED.value,
+    LiveOrderState.PARTIALLY_FILLED.value,
+    LiveOrderState.CANCEL_SUBMITTING.value,
+    LiveOrderState.CANCEL_ACKNOWLEDGED.value,
+    LiveOrderState.UNCERTAIN.value,
+})
+SUBMITTED_STATES = ACTIVE_STATES | {
+    LiveOrderState.FILLED.value,
+    LiveOrderState.CANCELLED.value,
+    LiveOrderState.REJECTED.value,
+}
+AMBIGUOUS_STATES = frozenset({
+    LiveOrderState.SUBMITTING,
+    LiveOrderState.CANCEL_SUBMITTING,
+    LiveOrderState.UNCERTAIN,
+})
+EXECUTION_LOCK_PK = "CONTROL#LIVE_EXECUTION_LOCK"
+KST = timezone(timedelta(hours=9))
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,17 +291,7 @@ class DynamoLiveOrderStore:
         return _stored_order(item) if item else None
 
     def submitted_intent_ids(self) -> frozenset[str]:
-        submitted_states = {
-            LiveOrderState.SUBMITTING.value,
-            LiveOrderState.ACKNOWLEDGED.value,
-            LiveOrderState.PARTIALLY_FILLED.value,
-            LiveOrderState.CANCEL_SUBMITTING.value,
-            LiveOrderState.CANCEL_ACKNOWLEDGED.value,
-            LiveOrderState.FILLED.value,
-            LiveOrderState.CANCELLED.value,
-            LiveOrderState.REJECTED.value,
-            LiveOrderState.UNCERTAIN.value,
-        }
+        submitted_states = SUBMITTED_STATES
         result: set[str] = set()
         start_key = None
         while True:
@@ -329,14 +342,55 @@ class DynamoLiveOrderStore:
                 return result
 
     def active_orders(self) -> tuple[StoredLiveOrder, ...]:
-        active_states = {
-            LiveOrderState.SUBMITTING.value,
-            LiveOrderState.ACKNOWLEDGED.value,
-            LiveOrderState.PARTIALLY_FILLED.value,
-            LiveOrderState.CANCEL_SUBMITTING.value,
-            LiveOrderState.CANCEL_ACKNOWLEDGED.value,
-            LiveOrderState.UNCERTAIN.value,
-        }
+        return self._orders_in(ACTIVE_STATES)
+
+    def submitted_orders(self) -> tuple[StoredLiveOrder, ...]:
+        return self._orders_in(SUBMITTED_STATES)
+
+    def acquire_execution_lock(
+        self,
+        owner: str,
+        *,
+        acquired_at: datetime,
+        ttl_seconds: int = 120,
+    ) -> bool:
+        """Allow one live execution at a time; an abandoned lease expires."""
+        if acquired_at.tzinfo is None:
+            raise ValueError("execution lock timestamp must be timezone-aware")
+        expires_at = acquired_at + timedelta(seconds=ttl_seconds)
+        try:
+            self.ddb.put_item(
+                TableName=self.table_name,
+                Item={
+                    "pk": {"S": EXECUTION_LOCK_PK},
+                    "owner": {"S": owner},
+                    "acquired_at": {"S": acquired_at.isoformat()},
+                    "expires_epoch": {"N": str(int(expires_at.timestamp()))},
+                },
+                ConditionExpression="attribute_not_exists(pk) OR expires_epoch < :now",
+                ExpressionAttributeValues={":now": {"N": str(int(acquired_at.timestamp()))}},
+            )
+            return True
+        except Exception as exc:
+            if _conditional_failure(exc):
+                return False
+            raise
+
+    def release_execution_lock(self, owner: str) -> None:
+        try:
+            self.ddb.delete_item(
+                TableName=self.table_name,
+                Key={"pk": {"S": EXECUTION_LOCK_PK}},
+                ConditionExpression="#owner = :owner",
+                ExpressionAttributeNames={"#owner": "owner"},
+                ExpressionAttributeValues={":owner": {"S": owner}},
+            )
+        except Exception as exc:
+            # Another owner took over an expired lease; never delete its lock.
+            if not _conditional_failure(exc):
+                raise
+
+    def _orders_in(self, states: frozenset[str]) -> tuple[StoredLiveOrder, ...]:
         result: list[StoredLiveOrder] = []
         start_key = None
         while True:
@@ -347,7 +401,7 @@ class DynamoLiveOrderStore:
             for item in response.get("Items", []):
                 key = item.get("pk", {}).get("S", "")
                 state = item.get("status", {}).get("S", "")
-                if key.startswith("LIVE_ORDER#") and state in active_states:
+                if key.startswith("LIVE_ORDER#") and state in states:
                     result.append(_stored_order(item))
             start_key = response.get("LastEvaluatedKey")
             if not start_key:
@@ -692,11 +746,7 @@ class LiveOrderSupervisor:
         active = self.store.active_orders()
         for stored in active:
             order = stored.broker_order
-            if order is None or stored.state in {
-                LiveOrderState.SUBMITTING,
-                LiveOrderState.CANCEL_SUBMITTING,
-                LiveOrderState.UNCERTAIN,
-            }:
+            if order is None or stored.state in AMBIGUOUS_STATES:
                 activate_kill = True
                 actions.append(f"{stored.intent.intent_id}:AMBIGUOUS_ORDER_STATE")
                 continue
@@ -777,6 +827,44 @@ class LiveOrderSupervisor:
             holding_mismatches=mismatches,
             kill_switch_activated=activate_kill,
         )
+
+
+def apply_order_book(
+    state: AccountRiskState,
+    intent: OrderIntent,
+    *,
+    active: tuple[StoredLiveOrder, ...],
+    submitted: tuple[StoredLiveOrder, ...],
+    program_positions: dict[str, int],
+) -> AccountRiskState:
+    """Add in-flight program orders to an account risk snapshot.
+
+    Open buy orders count at their full approved amount (conservative for
+    partial fills) and as open positions, so a second order cannot spend the
+    same cash or limit before the first one is reconciled.
+    """
+    trading_date = intent.created_at.astimezone(KST).date()
+    open_buys = [
+        stored for stored in active
+        if stored.intent.side == OrderSide.BUY and stored.state not in AMBIGUOUS_STATES
+        and stored.intent.intent_id != intent.intent_id
+    ]
+    codes = {code for code, quantity in program_positions.items() if quantity > 0}
+    codes |= {stored.intent.code for stored in open_buys}
+    same_code_buys = sum(
+        1 for stored in submitted
+        if stored.intent.side == OrderSide.BUY
+        and stored.intent.code == intent.code
+        and stored.state != LiveOrderState.REJECTED
+        and stored.intent.created_at.astimezone(KST).date() == trading_date
+    )
+    return replace(
+        state,
+        current_exposure=state.current_exposure + sum(s.intent.order_amount for s in open_buys),
+        open_positions=max(state.open_positions, len(codes)),
+        same_code_buy_orders_today=same_code_buys,
+        ambiguous_orders=sum(1 for stored in active if stored.state in AMBIGUOUS_STATES),
+    )
 
 
 def holding_mismatches(

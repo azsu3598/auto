@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
+# Account reads must be complete. A truncated holdings list would lock an
+# incomplete protected baseline, so exceeding this limit fails closed.
+MAX_ACCOUNT_PAGES = 20
+
 from .order_safety import (
     AccountRiskState,
     AuthorizationStatus,
@@ -135,10 +139,9 @@ class KiwoomLiveBroker:
     ) -> BrokerOrderStatus:
         if checked_at.tzinfo is None:
             raise ValueError("checked_at must be timezone-aware")
-        response = self.client.fetch_page(
-            api_id="kt00007",
-            path="/api/dostk/acnt",
-            body={
+        rows = self._rows(
+            "kt00007",
+            {
                 "ord_dt": order.submitted_at.strftime("%Y%m%d"),
                 "qry_tp": "1",
                 "stk_bond_tp": "1",
@@ -147,12 +150,8 @@ class KiwoomLiveBroker:
                 "fr_ord_no": "",
                 "dmst_stex_tp": order.exchange,
             },
+            "acnt_ord_cntr_prps_dtl",
         )
-        body = response.body
-        _ensure_success(body)
-        rows = body.get("acnt_ord_cntr_prps_dtl")
-        if not isinstance(rows, list):
-            rows = []
         match = next(
             (
                 row for row in rows
@@ -234,32 +233,45 @@ class KiwoomLiveBroker:
         protected_baseline_quantity: int = 0,
         program_owned_quantity: int = 0,
         holdings_reconciled: bool = False,
+        program_positions: dict[str, int] | None = None,
     ) -> AccountRiskState:
+        """Read cash, holdings and realized P&L for one order check.
+
+        With `program_positions`, exposure and open positions count only the
+        program-owned quantity, so protected user holdings do not consume the
+        program limits. Without it, the whole account is counted.
+        """
         cash = self._single("kt00001", {"qry_tp": "3"})
-        holdings = self._single(
-            "kt00018", {"qry_tp": "1", "dmst_stex_tp": exchange.upper()}
-        )
+        rows = self._holding_rows(exchange)
         pnl = self._single(
             "ka10074", {"strt_dt": trading_date, "end_dt": trading_date}
         )
-        rows = holdings.get("acnt_evlt_remn_indv_tot")
-        if not isinstance(rows, list):
-            rows = []
-        open_rows = [
-            row for row in rows
-            if isinstance(row, dict) and _integer(row.get("rmnd_qty")) > 0
-        ]
+        open_rows = [row for row in rows if _integer(row.get("rmnd_qty")) > 0]
         owned = sum(
             _integer(row.get("trde_able_qty"))
             for row in open_rows
-            if str(row.get("stk_cd", "")).replace("A", "", 1).strip() == code
+            if _code(row) == code
         )
         total_owned = sum(
             _integer(row.get("rmnd_qty"))
             for row in open_rows
-            if str(row.get("stk_cd", "")).replace("A", "", 1).strip() == code
+            if _code(row) == code
         )
-        exposure = sum(_integer(row.get("evlt_amt")) for row in open_rows)
+        if program_positions is None:
+            exposure = sum(_integer(row.get("evlt_amt")) for row in open_rows)
+            open_positions = len(open_rows)
+        else:
+            program = {
+                str(item_code): int(quantity)
+                for item_code, quantity in program_positions.items()
+                if int(quantity) > 0
+            }
+            exposure = 0
+            for row in open_rows:
+                held = _integer(row.get("rmnd_qty"))
+                quantity = min(program.get(_code(row), 0), held)
+                exposure += _integer(row.get("evlt_amt")) * quantity // held
+            open_positions = len(program)
         normalized_baseline = max(0, protected_baseline_quantity)
         normalized_program = max(0, program_owned_quantity)
         reconciled = bool(
@@ -271,7 +283,7 @@ class KiwoomLiveBroker:
             available_cash=_integer(cash.get("ord_alow_amt")),
             current_exposure=exposure,
             realized_daily_pnl=_signed_integer(pnl.get("rlzt_pl")),
-            open_positions=len(open_rows),
+            open_positions=open_positions,
             owned_quantity=owned,
             kill_switch_active=kill_switch_active,
             already_submitted_intent_ids=already_submitted_intent_ids,
@@ -283,21 +295,61 @@ class KiwoomLiveBroker:
         )
 
     def holdings(self, *, exchange: str = "KRX") -> dict[str, int]:
-        body = self._single(
-            "kt00018", {"qry_tp": "1", "dmst_stex_tp": exchange.upper()}
-        )
-        rows = body.get("acnt_evlt_remn_indv_tot")
-        if not isinstance(rows, list):
-            return {}
         result: dict[str, int] = {}
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            code = str(row.get("stk_cd", "")).replace("A", "", 1).strip()
+        for row in self._holding_rows(exchange):
+            code = _code(row)
             quantity = _integer(row.get("rmnd_qty"))
             if code and quantity > 0:
-                result[code] = quantity
+                result[code] = result.get(code, 0) + quantity
         return result
+
+    def account_numbers(self) -> tuple[str, ...]:
+        """Return the distinct account numbers the broker token can use (ka00001)."""
+        numbers: list[str] = []
+        for body in self._pages("ka00001", {}):
+            number = _digits(body.get("acctNo"))
+            if number and number not in numbers:
+                numbers.append(number)
+        return tuple(numbers)
+
+    def _holding_rows(self, exchange: str) -> list[dict[str, Any]]:
+        return self._rows(
+            "kt00018",
+            {"qry_tp": "1", "dmst_stex_tp": exchange.upper()},
+            "acnt_evlt_remn_indv_tot",
+        )
+
+    def _rows(self, api_id: str, body: dict[str, str], key: str) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for page in self._pages(api_id, body):
+            values = page.get(key)
+            if isinstance(values, list):
+                rows.extend(row for row in values if isinstance(row, dict))
+        return rows
+
+    def _pages(self, api_id: str, body: dict[str, str]) -> list[dict[str, Any]]:
+        """Read every continuation page of one account query or fail closed."""
+        pages: list[dict[str, Any]] = []
+        cont_yn = None
+        next_key = None
+        for _ in range(MAX_ACCOUNT_PAGES):
+            response = self.client.fetch_page(
+                api_id=api_id,
+                path="/api/dostk/acnt",
+                body=body,
+                cont_yn=cont_yn,
+                next_key=next_key,
+            )
+            _ensure_success(response.body)
+            pages.append(response.body)
+            continuation = getattr(response, "continuation", None)
+            cont_yn = getattr(continuation, "cont_yn", None)
+            next_key = getattr(continuation, "next_key", None)
+            if cont_yn != "Y":
+                return pages
+        raise RuntimeError(
+            f"Kiwoom {api_id} exceeded {MAX_ACCOUNT_PAGES} pages; account read is incomplete"
+        )
 
     def _single(self, api_id: str, body: dict[str, str]) -> dict[str, Any]:
         response = self.client.fetch_page(
@@ -313,6 +365,14 @@ def _ensure_success(body: dict[str, Any]) -> None:
     code = body.get("return_code")
     if code not in (None, 0, "0"):
         raise RuntimeError(f"Kiwoom API error {code}: {body.get('return_msg', '')}")
+
+
+def _code(row: dict[str, Any]) -> str:
+    return str(row.get("stk_cd", "")).replace("A", "", 1).strip()
+
+
+def _digits(value: Any) -> str:
+    return "".join(character for character in str(value or "") if character.isdigit())
 
 
 def _integer(value: Any) -> int:
