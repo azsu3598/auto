@@ -35,6 +35,7 @@ LABELS = {
     "RSI_OUT_OF_RANGE": "RSI 범위 이탈",
     "CATALYST_NOT_VERIFIED": "촉매 미확인(closing-v0.2 이하)",
     "DART_RISK_DISCLOSURE": "당일 위험 공시(DART)",
+    "DART_NOT_CHECKED": "당일 DART 확인 없음(15:20 진입 차단)",
     "MARKET_DECLINE_GATE": "시장 급락 차단",
 }
 

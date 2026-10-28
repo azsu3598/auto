@@ -33,7 +33,7 @@ from stock_automation.backtest import TradingCosts
 from stock_automation.engine import ClosingBetEngine
 from stock_automation.day_trade import DayTradeEngine
 from stock_automation.medium_term import MediumTermEngine, confirm_medium_term_entry
-from stock_automation.models import Session
+from stock_automation.models import DecisionType, Session
 from test_engine import quote, snapshot
 from test_day_trade import quote as day_trade_quote, snapshot as day_trade_snapshot
 from test_exit_engine import position
@@ -270,7 +270,7 @@ class AwsRuntimeTests(unittest.TestCase):
             quote(code="000004", **unverified),
             quote(code="000005", trading_value=1, **unverified),  # rejected: not looked up
             quote(code="000006", **unverified),  # no DART corporation code
-            quote(code="000007"),  # already verified by the S3 override
+            quote(code="000007"),  # verified by the S3 override: risk-checked, text kept
         )
         dart = FakeDart()
         codes = {f"00000{i}": f"0000000{i}" for i in range(1, 6)} | {"000007": "00000007"}
@@ -280,7 +280,7 @@ class AwsRuntimeTests(unittest.TestCase):
         ).quotes}
 
         self.assertEqual(
-            ["000001", "000002", "000003", "000004"], [row[0] for row in dart.looked_up]
+            ["000001", "000002", "000003", "000004", "000007"], [row[0] for row in dart.looked_up]
         )
         self.assertTrue(all(row[2:] == (now.date(), 0) for row in dart.looked_up))
         self.assertTrue(result["000001"].catalyst_verified)
@@ -342,6 +342,65 @@ class AwsRuntimeTests(unittest.TestCase):
         for code in ("000003", "000004", "000005"):
             self.assertEqual(snap.quotes[int(code) - 1], result[code])
         self.assertEqual(snap, _apply_recorded_dart_checks(snap, None, now=now))
+
+    def test_entry_blocks_quotes_without_a_same_day_dart_check_when_required(self):
+        now = datetime(2026, 10, 6, 15, 20, 30, tzinfo=KST)
+        today = datetime(2026, 10, 6, 15, 10, 30, tzinfo=KST).isoformat()
+        snap = snapshot(*(quote(code=f"00000{i}") for i in range(1, 5)))
+        checks = {
+            "000001": {"checked_at": today, "risk_flags": [], "catalyst": ""},
+            "000002": {"checked_at": "2026-10-05T15:10:30+09:00", "risk_flags": [], "catalyst": ""},
+            "000003": {"checked_at": "not-a-date", "risk_flags": []},
+        }
+        engine = ClosingBetEngine()
+        result = {
+            q.code: q
+            for q in _apply_recorded_dart_checks(snap, checks, now=now, require_check=True).quotes
+        }
+        self.assertIsNone(engine.rejection_reason(snap, result["000001"]))
+        # Stale, unreadable and missing checks (budget spent, DART error) all block.
+        for code in ("000002", "000003", "000004"):
+            self.assertEqual("DART_NOT_CHECKED", engine.rejection_reason(snap, result[code]))
+        # A missed 15:10 shortlist leaves no checks at all: nothing can enter.
+        for missing in (None, {}):
+            fallback = _apply_recorded_dart_checks(snap, missing, now=now, require_check=True)
+            self.assertTrue(all("DART_NOT_CHECKED" in q.warnings for q in fallback.quotes))
+            self.assertEqual(
+                DecisionType.NO_TRADE, engine.evaluate(fallback, cash=600_000).decision
+            )
+
+    def test_verified_catalyst_quote_is_still_checked_for_dart_risk(self):
+        from stock_automation.dart import DartDisclosure, DartOverlay
+
+        now = datetime(2026, 10, 6, 15, 10, 30, tzinfo=KST)
+
+        class FakeDart:
+            def __init__(self):
+                self.looked_up = []
+
+            def disclosure_overlay(self, *, stock_code, corp_code, checked_at, lookback_days):
+                self.looked_up.append(stock_code)
+                if stock_code == "000002":
+                    return DartOverlay(now, ("DILUTION_EVENT",), "유상증자결정", ())
+                return DartOverlay(now, (), "자기주식취득결정",
+                                   (DartDisclosure("1", "20261006", "자기주식취득결정", "회사"),))
+
+        snap = snapshot(
+            quote(code="000001", catalyst="수동 검증 촉매", catalyst_verified=True),
+            quote(code="000002", catalyst="수동 검증 촉매", catalyst_verified=True),
+        )
+        dart, checks = FakeDart(), {}
+        result = {q.code: q for q in _apply_dart_catalysts(
+            snap, client=dart, corporation_codes={"000001": "1", "000002": "2"},
+            now=now, checks=checks,
+        ).quotes}
+        self.assertEqual(["000001", "000002"], dart.looked_up)
+        self.assertEqual({"000001", "000002"}, set(checks))
+        # The verified catalyst keeps its own text; DART adds only the risk flag.
+        self.assertEqual("수동 검증 촉매", result["000001"].catalyst)
+        self.assertEqual(
+            "DART_RISK_DISCLOSURE", ClosingBetEngine().rejection_reason(snap, result["000002"])
+        )
 
     def test_five_minute_stop_confirmation_uses_two_closed_bars(self):
         confirmed, reclaimed = _five_min_stop_confirmation(

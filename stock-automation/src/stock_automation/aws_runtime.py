@@ -227,7 +227,8 @@ def _with_dart_check(quote: Quote, check: dict[str, Any]) -> Quote:
             (*quote.warnings, *(f"DART_{flag}" for flag in flags))
         )))
     summary = str(check.get("catalyst", "")).strip()
-    if summary:
+    # A catalyst verified elsewhere keeps its own text; DART only adds risk.
+    if summary and not quote.catalyst_verified:
         return replace(
             quote,
             catalyst=f"DART 당일 공시: {summary}",
@@ -251,8 +252,9 @@ def _apply_dart_catalysts(
 ) -> MarketSnapshot:
     """Mark same-day OpenDART disclosures as verified catalysts.
 
-    Only quotes that pass the hard filters are looked up, since the catalyst
-    changes the score and not eligibility. A risk disclosure (dilution,
+    Only quotes that pass the hard filters are looked up, including quotes
+    whose catalyst is already verified, because 15:20 refuses any quote
+    without a same-day check. A risk disclosure (dilution,
     delisting, audit, ...) is never a catalyst; it is added as a warning that
     the engine rejects. Lookups stop once ``budget_seconds`` is spent so the
     phase stays inside its runtime limit. Each completed lookup is written to
@@ -265,8 +267,7 @@ def _apply_dart_catalysts(
     for quote in snapshot.quotes:
         corp_code = corporation_codes.get(quote.code) or corporation_codes.get(f"{quote.code[:5]}0")
         if (
-            quote.catalyst_verified
-            or not corp_code
+            not corp_code
             or lookups >= max_lookups
             or clock() >= deadline
             or engine.rejection_reason(snapshot, quote) is not None
@@ -293,11 +294,19 @@ def _apply_dart_catalysts(
 
 
 def _apply_recorded_dart_checks(
-    snapshot: MarketSnapshot, checks: Any, *, now: datetime
+    snapshot: MarketSnapshot, checks: Any, *, now: datetime, require_check: bool = False
 ) -> MarketSnapshot:
-    """Reuse the 15:10 same-day DART results at 15:20 without a new DART call."""
+    """Reuse the 15:10 same-day DART results at 15:20 without a new DART call.
+
+    With ``require_check`` a quote without a same-day check (15:10 missed,
+    lookup budget spent, DART error) gets ``DART_NOT_CHECKED``, which the
+    engine rejects: a risk disclosure must not pass just because it was
+    never looked up.
+    """
     if not isinstance(checks, dict):
-        return snapshot
+        if not require_check:
+            return snapshot
+        checks = {}
     run_date = now.astimezone(KST).date()
     quotes = []
     for quote in snapshot.quotes:
@@ -307,6 +316,8 @@ def _apply_recorded_dart_checks(
         except ValueError:
             checked = None
         if checked is None or checked.tzinfo is None or checked.astimezone(KST).date() != run_date:
+            if require_check:
+                quote = replace(quote, warnings=tuple(dict.fromkeys((*quote.warnings, "DART_NOT_CHECKED"))))
             quotes.append(quote)
             continue
         quotes.append(_with_dart_check(quote, check))
@@ -1926,7 +1937,10 @@ def _run_worker() -> int:
     )
     dart_checks: dict[str, dict[str, Any]] = {}
     if phase == "ENTRY_1520":
-        snapshot = _apply_recorded_dart_checks(snapshot, shortlist.get("dart_checks"), now=now)
+        snapshot = _apply_recorded_dart_checks(
+            snapshot, shortlist.get("dart_checks"), now=now,
+            require_check=bool(os.getenv("DART_API_KEY", "").strip()),
+        )
     elif dart_client is not None and phase != "SCAN_1450":
         snapshot = _apply_dart_catalysts(
             snapshot, client=dart_client, corporation_codes=corporation_codes, now=now,

@@ -235,6 +235,14 @@ class ClosingBetEngineTests(unittest.TestCase):
             kept = quote(warnings=warnings)
             self.assertIsNone(engine.rejection_reason(snapshot(kept), kept))
 
+    def test_missing_dart_check_blocks_entry(self):
+        engine = ClosingBetEngine()
+        unchecked = quote(warnings=("DART_NOT_CHECKED",))
+        self.assertEqual("DART_NOT_CHECKED", engine.rejection_reason(snapshot(unchecked), unchecked))
+        self.assertEqual(
+            DecisionType.NO_TRADE, engine.evaluate(snapshot(unchecked), cash=600_000).decision
+        )
+
     def test_closing_bet_blocks_the_same_risks_as_medium_term(self):
         self.assertEqual(set(BLOCKING_RISK_FLAGS), MediumTermEngine.BLOCKING_RISKS)
 

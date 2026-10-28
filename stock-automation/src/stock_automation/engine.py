@@ -189,6 +189,9 @@ class ClosingBetEngine:
         # A same-day risk disclosure (OpenDART) is never scored away: it blocks.
         if any(w.startswith("DART_") and w[5:] in BLOCKING_RISK_FLAGS for w in q.warnings):
             return "DART_RISK_DISCLOSURE"
+        # 15:20 marks a quote whose same-day DART check is missing; unknown risk blocks.
+        if "DART_NOT_CHECKED" in q.warnings:
+            return "DART_NOT_CHECKED"
         if self._market_change(snapshot, q) <= cfg.maximum_market_decline_pct:
             return "MARKET_DECLINE_GATE"
         return None
