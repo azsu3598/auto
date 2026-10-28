@@ -1,0 +1,195 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Locked real-account order tooling: LIVE_ORDER_ENABLED fixed to 0, kill switch defaults ON, no schedules, separate from the paper ledger",
+  "Parameters": {
+    "ImageUri": {
+      "Type": "String",
+      "Description": "ECR image URI built from stock-automation/Dockerfile (pin a digest)"
+    },
+    "ApprovedAccountAlias": {
+      "Type": "String",
+      "AllowedPattern": "^[a-z0-9-]{1,32}$",
+      "Description": "Non-secret label for the one approved real account; never the account number"
+    },
+    "KiwoomRealSecretArn": {
+      "Type": "String",
+      "Default": "",
+      "AllowedPattern": "^$|^arn:aws:secretsmanager:ap-northeast-2:[0-9]{12}:secret:stock-automation-live/kiwoom-real-[A-Za-z0-9]{6}$",
+      "Description": "Empty keeps the task without broker keys. Linking the secret is a separately approved stack update. JSON keys: app_key, app_secret, account_number, fingerprint_salt, approved_fingerprint"
+    },
+    "LiveOrderEnabled": {
+      "Type": "String",
+      "Default": "0",
+      "AllowedValues": ["0"],
+      "Description": "Locked. Enabling real orders requires a reviewed template change and separate approval"
+    },
+    "MaxOrderAmount": {"Type": "Number", "Default": 300000, "MinValue": 1, "MaxValue": 300000},
+    "MaxTotalExposure": {"Type": "Number", "Default": 600000, "MinValue": 1, "MaxValue": 600000},
+    "MaxDailyLoss": {"Type": "Number", "Default": 10000, "MinValue": 1, "MaxValue": 10000},
+    "MaxOpenPositions": {"Type": "Number", "Default": 2, "MinValue": 1, "MaxValue": 2},
+    "MaxDailyBuyOrdersPerCode": {"Type": "Number", "Default": 1, "MinValue": 1, "MaxValue": 1}
+  },
+  "Conditions": {
+    "HasRealSecret": {"Fn::Not": [{"Fn::Equals": [{"Ref": "KiwoomRealSecretArn"}, ""]}]}
+  },
+  "Resources": {
+    "LiveOrderTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "TableName": "stock-automation-live",
+        "BillingMode": "PAY_PER_REQUEST",
+        "AttributeDefinitions": [{"AttributeName": "pk", "AttributeType": "S"}],
+        "KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}],
+        "PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": true},
+        "SSESpecification": {"SSEEnabled": true},
+        "DeletionProtectionEnabled": true,
+        "Tags": [{"Key": "Project", "Value": "stock-automation-live"}]
+      }
+    },
+    "Cluster": {
+      "Type": "AWS::ECS::Cluster",
+      "Properties": {
+        "ClusterName": "stock-automation-live",
+        "Tags": [{"Key": "Project", "Value": "stock-automation-live"}]
+      }
+    },
+    "LogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {"LogGroupName": "/stock-automation/live", "RetentionInDays": 365}
+    },
+    "ExecutionRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "stock-live-execution",
+        "Path": "/stock-live/",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Principal": {"Service": "ecs-tasks.amazonaws.com"}, "Action": "sts:AssumeRole"}]
+        },
+        "ManagedPolicyArns": ["arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"],
+        "Policies": {
+          "Fn::If": [
+            "HasRealSecret",
+            [{
+              "PolicyName": "read-kiwoom-real-secret",
+              "PolicyDocument": {
+                "Version": "2012-10-17",
+                "Statement": [{"Effect": "Allow", "Action": "secretsmanager:GetSecretValue", "Resource": {"Ref": "KiwoomRealSecretArn"}}]
+              }
+            }],
+            {"Ref": "AWS::NoValue"}
+          ]
+        }
+      }
+    },
+    "TaskRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "stock-live-task",
+        "Path": "/stock-live/",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Principal": {"Service": "ecs-tasks.amazonaws.com"}, "Action": "sts:AssumeRole"}]
+        },
+        "Policies": [{
+          "PolicyName": "live-order-table-only",
+          "PolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Sid": "LiveOrderLedger",
+                "Effect": "Allow",
+                "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:ConditionCheckItem", "dynamodb:Scan"],
+                "Resource": {"Fn::GetAtt": ["LiveOrderTable", "Arn"]}
+              },
+              {
+                "Sid": "ReleaseExecutionLockOnly",
+                "Effect": "Allow",
+                "Action": "dynamodb:DeleteItem",
+                "Resource": {"Fn::GetAtt": ["LiveOrderTable", "Arn"]},
+                "Condition": {"ForAllValues:StringEquals": {"dynamodb:LeadingKeys": ["CONTROL#LIVE_EXECUTION_LOCK"]}}
+              },
+              {
+                "Sid": "NeverTouchPaperLedger",
+                "Effect": "Deny",
+                "Action": ["dynamodb:*", "s3:*"],
+                "Resource": [
+                  {"Fn::Sub": "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/stock-automation-paper"},
+                  {"Fn::Sub": "arn:${AWS::Partition}:s3:::stock-automation-paper-*"}
+                ]
+              }
+            ]
+          }
+        }]
+      }
+    },
+    "TaskDefinition": {
+      "Type": "AWS::ECS::TaskDefinition",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "Tags": [{"Key": "Project", "Value": "stock-automation-live"}],
+        "Family": "stock-automation-live",
+        "Cpu": "256",
+        "Memory": "512",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": ["FARGATE"],
+        "ExecutionRoleArn": {"Fn::GetAtt": ["ExecutionRole", "Arn"]},
+        "TaskRoleArn": {"Fn::GetAtt": ["TaskRole", "Arn"]},
+        "Volumes": [{"Name": "runtime-tmp"}],
+        "ContainerDefinitions": [{
+          "Name": "stock-automation-live",
+          "Image": {"Ref": "ImageUri"},
+          "Essential": true,
+          "User": "65534:65534",
+          "ReadonlyRootFilesystem": true,
+          "LinuxParameters": {"Capabilities": {"Drop": ["ALL"]}, "InitProcessEnabled": true},
+          "MountPoints": [{"SourceVolume": "runtime-tmp", "ContainerPath": "/tmp", "ReadOnly": false}],
+          "Command": ["--help"],
+          "Environment": [
+            {"Name": "KIWOOM_MODE", "Value": "real"},
+            {"Name": "KIWOOM_TOKEN_STORE", "Value": "memory"},
+            {"Name": "LIVE_ORDER_ENABLED", "Value": {"Ref": "LiveOrderEnabled"}},
+            {"Name": "LIVE_ORDER_TABLE", "Value": {"Ref": "LiveOrderTable"}},
+            {"Name": "LIVE_APPROVED_ACCOUNT_ALIAS", "Value": {"Ref": "ApprovedAccountAlias"}},
+            {"Name": "LIVE_MAX_ORDER_AMOUNT", "Value": {"Ref": "MaxOrderAmount"}},
+            {"Name": "LIVE_MAX_TOTAL_EXPOSURE", "Value": {"Ref": "MaxTotalExposure"}},
+            {"Name": "LIVE_MAX_DAILY_LOSS", "Value": {"Ref": "MaxDailyLoss"}},
+            {"Name": "LIVE_MAX_OPEN_POSITIONS", "Value": {"Ref": "MaxOpenPositions"}},
+            {"Name": "LIVE_MAX_DAILY_BUY_ORDERS_PER_CODE", "Value": {"Ref": "MaxDailyBuyOrdersPerCode"}}
+          ],
+          "Secrets": {
+            "Fn::If": [
+              "HasRealSecret",
+              [
+                {"Name": "APP_KEY", "ValueFrom": {"Fn::Sub": "${KiwoomRealSecretArn}:app_key::"}},
+                {"Name": "APP_SECRET", "ValueFrom": {"Fn::Sub": "${KiwoomRealSecretArn}:app_secret::"}},
+                {"Name": "KIWOOM_ACCOUNT_NUMBER", "ValueFrom": {"Fn::Sub": "${KiwoomRealSecretArn}:account_number::"}},
+                {"Name": "LIVE_ACCOUNT_FINGERPRINT_SALT", "ValueFrom": {"Fn::Sub": "${KiwoomRealSecretArn}:fingerprint_salt::"}},
+                {"Name": "LIVE_APPROVED_ACCOUNT_FINGERPRINT", "ValueFrom": {"Fn::Sub": "${KiwoomRealSecretArn}:approved_fingerprint::"}}
+              ],
+              {"Ref": "AWS::NoValue"}
+            ]
+          },
+          "LogConfiguration": {
+            "LogDriver": "awslogs",
+            "Options": {
+              "awslogs-group": {"Ref": "LogGroup"},
+              "awslogs-region": {"Ref": "AWS::Region"},
+              "awslogs-stream-prefix": "live"
+            }
+          }
+        }]
+      }
+    }
+  },
+  "Outputs": {
+    "ClusterName": {"Value": {"Ref": "Cluster"}},
+    "TaskDefinitionArn": {"Value": {"Ref": "TaskDefinition"}},
+    "LiveOrderTableName": {"Value": {"Ref": "LiveOrderTable"}}
+  }
+}

@@ -21,7 +21,7 @@ TEMPLATE_NAMES = (
     "cloudformation.yaml", "paper-fixed-egress.yaml", "paper-network-iam-bootstrap.yaml",
     "paper-app-iam-bootstrap.yaml", "paper-control.yaml", "paper-timer-verification.yaml",
     "paper-web-dashboard.yaml", "paper-worker-verification.yaml", "paper-one-session-pilot.yaml",
-    "paper-five-session-batch.yaml",
+    "paper-five-session-batch.yaml", "live-locked.yaml",
 )
 
 
