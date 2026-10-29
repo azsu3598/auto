@@ -86,7 +86,8 @@ def build():
         *[{'Name': name, 'Value': ref(param)} for name, param in (
             ('STARTING_CASH', 'StartingCash'), ('MEDIUM_STARTING_CASH', 'MediumStartingCash'),
             ('DAY_TRADE_STARTING_CASH', 'DayTradeStartingCash'), ('BUY_FEE_BPS', 'BuyFeeBps'),
-            ('SELL_FEE_BPS', 'SellFeeBps'), ('SELL_TAX_BPS', 'SellTaxBps'))],
+            ('SELL_FEE_BPS', 'SellFeeBps'), ('SELL_TAX_BPS', 'SellTaxBps'),
+            ('PAPER_WALLET_EPOCH', 'PaperWalletEpoch'))],
         {'Name': 'NOTIFICATION_CHANNEL', 'Value': 'telegram'}, {'Name': 'NOTIFICATION_SECRET_ARN', 'Value': ref('TelegramSecretArn')},
         {'Name': 'SNS_NOTIFICATION_TOPIC_ARN', 'Value': ref('TradeNotificationTopicArn')}]
     resources = {
@@ -174,9 +175,11 @@ def build():
     parameters['TestId']['AllowedPattern'] = '[a-f0-9]{32}'
     for name in ('StartAt', 'DispatchAt', 'RunAt', 'WatchAt', 'FailSafeAt'):
         parameters[name]['AllowedPattern'] = '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}'
-    for name, default in (('StartingCash', '600000'), ('MediumStartingCash', '600000'), ('DayTradeStartingCash', '600000'),
+    for name, default in (('StartingCash', '200000'), ('MediumStartingCash', '200000'), ('DayTradeStartingCash', '200000'),
                           ('BuyFeeBps', '1.5'), ('SellFeeBps', '1.5'), ('SellTaxBps', '20')):
         parameters[name] = {'Type': 'String', 'Default': default}
+    # Empty keeps the original wallet keys; the 200,000 KRW run uses 200K-20261103.
+    parameters['PaperWalletEpoch'] = {'Type': 'String', 'Default': '', 'AllowedPattern': '[A-Za-z0-9_-]{0,40}'}
     return {'AWSTemplateFormatVersion': '2010-09-09',
         'Description': 'Disabled one-off prewarmed empty 09:05 paper worker verification; no recurring or live schedule activation',
         'Parameters': parameters, 'Resources': resources, 'Outputs': {

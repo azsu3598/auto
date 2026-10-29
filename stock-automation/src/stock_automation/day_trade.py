@@ -37,7 +37,7 @@ class DayTradeConfig:
     maximum_day_gain_pct: float = 12.0
     maximum_market_decline_pct: float = -3.0
     maximum_allocation_pct: float = 0.25
-    maximum_position_loss: int = 8_000
+    maximum_position_loss: int = 2_700  # 200,000 KRW principal (2026-10-29)
     maximum_candidates: int = 3
 
 

@@ -114,6 +114,24 @@ class PaperOperationsTests(unittest.TestCase):
         self.assertEqual(result['bounded_sessions'],5)
         self.clients['s3'].get_object.assert_not_called()
 
+    def test_status_reads_the_wallet_of_the_stack_epoch(self):
+        epoch='200K-20261103';key='WALLET#CLOSING_BET#KRX_1520#'+epoch
+        wallets={key:{'available_cash':{'N':'200000'}},'WALLET#CLOSING_BET#KRX_1520':{'available_cash':{'N':'587000'}}}
+        self.clients['dynamodb'].get_item.side_effect=lambda **kw:{'Item':wallets[kw['Key']['pk']['S']]} if kw['Key']['pk']['S'] in wallets else {}
+        self.clients['ec2'].describe_instances.return_value={'Reservations':[{'Instances':[{'State':{'Name':'stopped'}}]}]}
+        self.clients['ecs'].describe_clusters.return_value={'clusters':[{'runningTasksCount':0,'pendingTasksCount':0}]}
+        self.clients['s3'].list_objects_v2.return_value={'Contents':[]}
+        for epoch_value,expected_key,cash in (('','WALLET#CLOSING_BET#KRX_1520','587000'),(epoch,key,'200000')):
+            with self.subTest(epoch=epoch_value):
+                plan=copy.deepcopy(self.plan);plan['parameters']['PaperWalletEpoch']=epoch_value
+                operator=ops.Operations(plan,self.clients);operator.get=Mock(return_value=None)
+                result=operator.status()
+                self.assertEqual((result['wallet_key'],result['virtual_available_cash']),(expected_key,cash))
+        batch=self.batch_operator();batch.params['PaperWalletEpoch']=epoch
+        result=batch.status()
+        self.assertEqual((result['wallet_key'],result['virtual_available_cash']),(key,'200000'))
+        self.clients['dynamodb'].put_item.assert_not_called();self.clients['dynamodb'].delete_item.assert_not_called()
+
     def test_two_session_batch_status_and_other_lengths_rejected(self):
         plan={'stack_name':'stock-automation-paper-batch-v2','parameters':{'PilotId':'b'*32,'ArtifactBucketName':'paper'},
             'batch_plan':{'paper_only':True,'batch_id':'b'*32,'sessions':[{'entry_date':'2026-10-26','exit_date':'2026-10-27'}]*2}}

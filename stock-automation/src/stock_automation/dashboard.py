@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any, Iterable, Protocol
 from urllib.parse import urlparse
 
+from .paper_wallet import is_current_wallet
+
 KST = timezone(timedelta(hours=9))
 STATIC_DIR = Path(__file__).with_name("dashboard_static")
 
@@ -57,8 +59,12 @@ class CombinedDashboardRepository:
 
 
 def dashboard_payload(
-    items: Iterable[dict[str, Any]], *, now: datetime | None = None
+    items: Iterable[dict[str, Any]],
+    *,
+    now: datetime | None = None,
+    wallet_epoch: str | None = None,
 ) -> dict[str, Any]:
+    """``wallet_epoch`` defaults to ``PAPER_WALLET_EPOCH``; older wallets are then hidden."""
     now = now or datetime.now(KST)
     rows = list(items)
     wallets: list[dict[str, Any]] = []
@@ -75,6 +81,8 @@ def dashboard_payload(
         key = str(item.get("pk", ""))
         payload = _payload(item)
         if key.startswith("WALLET#"):
+            if not is_current_wallet(key, epoch=wallet_epoch):
+                continue
             wallets.append({
                 "key": key,
                 "strategy": _strategy_label(key),

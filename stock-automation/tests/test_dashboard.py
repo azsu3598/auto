@@ -241,6 +241,23 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(1, uncertain["live_safety"]["ambiguous_orders"])
         self.assertTrue(any("실주문 상태" in row for row in uncertain["warnings"]))
 
+    def test_wallet_epoch_shows_only_the_current_paper_wallets(self):
+        epoch = "200K-20261103"
+        rows = [
+            {"pk": "WALLET#CLOSING_BET#KRX_1520", "available_cash": 600_000},
+            {"pk": "WALLET#CLOSING_BET#KRX_1520#" + epoch, "available_cash": 200_000},
+            {"pk": "WALLET#DAY_TRADE#" + epoch, "available_cash": 200_000},
+        ]
+        with patch.dict(os.environ, {"PAPER_WALLET_EPOCH": epoch}):
+            current = dashboard_payload(rows, now=datetime(2026, 11, 3, 15, 0, tzinfo=KST))
+        self.assertEqual(
+            [("WALLET#CLOSING_BET#KRX_1520#" + epoch, "KRX 종가배팅", 200_000),
+             ("WALLET#DAY_TRADE#" + epoch, "장중 단타", 200_000)],
+            [(w["key"], w["strategy"], w["available_cash"]) for w in current["wallets"]],
+        )
+        original = dashboard_payload(rows, now=datetime(2026, 11, 3, 15, 0, tzinfo=KST), wallet_epoch="")
+        self.assertEqual(["WALLET#CLOSING_BET#KRX_1520"], [w["key"] for w in original["wallets"]])
+
     def test_decodes_dynamodb_and_loads_fixture(self):
         decoded = _decode_item({
             "pk": {"S": "WALLET#TEST"},

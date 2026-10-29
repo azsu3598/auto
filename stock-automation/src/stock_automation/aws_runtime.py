@@ -50,6 +50,8 @@ from .medium_reporting import (
     render_signal_report,
 )
 from .notifications import build_notifier
+from .paper_wallet import is_current_wallet, stored_wallet_key
+from .paper_wallet import wallet_key as paper_wallet_key
 from .portfolio import entry_cash_flow, exit_cash_flow
 from .providers.kiwoom import Catalyst, KiwoomSnapshotBuilder, _number
 from .providers.reliable import KiwoomRetryPolicy, ReliableKiwoomClient
@@ -585,6 +587,9 @@ def _save_decision(
                     }
                 },
             ]
+            if wallet_key:
+                # The exit returns cash to the wallet that paid for the entry.
+                actions[1]["Put"]["Item"]["wallet_key"] = {"S": wallet_key}
             if wallet_key and costs:
                 actions.append(_wallet_entry_action(
                     table_name,
@@ -613,7 +618,8 @@ def _save_decision(
         raise
 
 
-def _load_open_position(ddb, table_name: str, session: Session) -> tuple[Position, int] | None:
+def _load_open_position(ddb, table_name: str, session: Session) -> tuple[Position, int, str] | None:
+    """Return the open position, its remaining quantity and the wallet that paid for it."""
     response = ddb.get_item(
         TableName=table_name,
         Key={"pk": {"S": f"OPEN#CLOSING_BET#{session.value}"}},
@@ -628,7 +634,8 @@ def _load_open_position(ddb, table_name: str, session: Session) -> tuple[Positio
     raw["entry_at"] = datetime.fromisoformat(raw["entry_at"])
     position = Position(**raw)
     remaining = int(item.get("remaining_quantity", {"N": str(position.quantity)})["N"])
-    return position, remaining
+    legacy = paper_wallet_key("CLOSING_BET", session, epoch="")
+    return position, remaining, stored_wallet_key(item, legacy)
 
 
 def _current_observation(client, position: Position, now: datetime) -> ExitObservation:
@@ -835,7 +842,7 @@ def _save_day_trade_decision(
     table_name: str,
     decision,
     *,
-    wallet_key: str = "WALLET#DAY_TRADE",
+    wallet_key: str | None = None,
     costs: TradingCosts | None = None,
 ) -> bool:
     """Atomically store one isolated paper day-trade decision.
@@ -870,6 +877,7 @@ def _save_day_trade_decision(
     if costs is None:
         raise ValueError("trading costs are required for a day-trade entry")
 
+    wallet_key = wallet_key or paper_wallet_key("DAY_TRADE")
     position = decision.position
     actions = [
         event,
@@ -898,6 +906,7 @@ def _save_day_trade_decision(
     # The JSON helper stores metadata as strings; quantity stays numeric so a
     # later exit can use DynamoDB's arithmetic and conditional expressions.
     actions[1]["Put"]["Item"]["remaining_quantity"] = {"N": str(position.quantity)}
+    actions[1]["Put"]["Item"]["wallet_key"] = {"S": wallet_key}
     try:
         ddb.transact_write_items(TransactItems=actions)
         return True
@@ -963,6 +972,9 @@ def _paper_equity_components(
     for item in items:
         key = item.get("pk", {}).get("S", "")
         if key.startswith("WALLET#"):
+            # With PAPER_WALLET_EPOCH set, older wallets are history, not cash.
+            if not is_current_wallet(key):
+                continue
             available_cash += int(item.get("available_cash", {"N": "0"})["N"])
             wallet_count += 1
             continue
@@ -1068,7 +1080,7 @@ def _run_day_trade_scan(
         ).encode("utf-8"),
         ContentType="application/json; charset=utf-8",
     )
-    wallet_key = "WALLET#DAY_TRADE"
+    wallet_key = paper_wallet_key("DAY_TRADE")
     available_cash = _load_or_create_wallet(
         ddb, table, wallet_key, initial_cash, now
     )
@@ -1158,13 +1170,15 @@ def _load_medium_plan(ddb, table_name: str) -> MediumTermEntryPlan | None:
     return _medium_plan_from_dict(json.loads(item["payload_json"]["S"]))
 
 
-def _load_medium_position(ddb, table_name: str) -> tuple[MediumTermPosition, int] | None:
+def _load_medium_position(ddb, table_name: str) -> tuple[MediumTermPosition, int, str] | None:
+    """Return the open position, its remaining quantity and the wallet that paid for it."""
     item = _load_medium_pointer(ddb, table_name, "OPEN#MEDIUM_TERM")
     if not item:
         return None
     position = _medium_position_from_dict(json.loads(item["payload_json"]["S"]))
     remaining = int(item.get("remaining_quantity", {"N": str(position.quantity)})["N"])
-    return position, remaining
+    legacy = paper_wallet_key("MEDIUM_TERM", epoch="")
+    return position, remaining, stored_wallet_key(item, legacy)
 
 
 def _current_price(client, code: str, now: datetime) -> tuple[datetime, int]:
@@ -1245,6 +1259,7 @@ def _save_medium_entry(
                         position_id=result.position.position_id,
                     ),
                     "remaining_quantity": {"N": str(result.position.quantity)},
+                    **({"wallet_key": {"S": wallet_key}} if wallet_key else {}),
                 },
                 "ConditionExpression": "attribute_not_exists(pk)",
             }
@@ -1378,7 +1393,7 @@ def _run_medium_signal(
         print(json.dumps({"status": "SKIPPED", "reason": "MEDIUM_POSITION_OR_PLAN_EXISTS"}))
         return 0
     cash = _load_or_create_wallet(
-        ddb, table, "WALLET#MEDIUM_TERM", initial_cash, now
+        ddb, table, paper_wallet_key("MEDIUM_TERM"), initial_cash, now
     )
     builder = KiwoomSnapshotBuilder(client)
     candidate_limit = int(os.getenv("MEDIUM_CANDIDATE_LIMIT", "40"))
@@ -1419,7 +1434,7 @@ def _run_medium_entry(
     if plan is None:
         print(json.dumps({"status": "SKIPPED", "reason": "NO_PENDING_MEDIUM_PLAN"}))
         return 0
-    wallet_key = "WALLET#MEDIUM_TERM"
+    wallet_key = paper_wallet_key("MEDIUM_TERM")
     cash = _load_or_create_wallet(ddb, table, wallet_key, initial_cash, now)
     costs = _runtime_costs()
     observed_at, price = _current_price(client, plan.code, now)
@@ -1482,8 +1497,7 @@ def _run_medium_review(
     if loaded is None:
         print(json.dumps({"status": "SKIPPED", "reason": "NO_OPEN_MEDIUM_POSITION"}))
         return 0
-    position, remaining = loaded
-    wallet_key = "WALLET#MEDIUM_TERM"
+    position, remaining, wallet_key = loaded
     costs = _runtime_costs()
     observed_at, price = _current_price(client, position.code, now)
     overlays = _automatic_disclosure_overlays(
@@ -1566,7 +1580,7 @@ def _run_exit(
         loaded = _load_open_position(ddb, table, session)
         if loaded is None:
             continue
-        position, remaining = loaded
+        position, remaining, wallet_key = loaded
         observation = _current_observation(client, position, now)
         scheduled_exit_at = now.replace(hour=9, minute=10, second=0, microsecond=0)
         result = review_position(
@@ -1613,7 +1627,7 @@ def _run_exit(
             position,
             result,
             notification=notification,
-            wallet_key=f"WALLET#CLOSING_BET#{session.value}",
+            wallet_key=wallet_key,
             costs=costs,
         )
         payload["status"] = "RECORDED" if inserted else "DUPLICATE_SKIPPED"
@@ -1730,7 +1744,7 @@ def _run_tuning(*, s3, notifier, bucket: str, now: datetime) -> int:
     )
     minimum_cases = int(os.getenv("TUNING_MINIMUM_CASES", "40"))
     maximum_cases = int(os.getenv("TUNING_MAXIMUM_CASES", "250"))
-    cash = int(os.getenv("STARTING_CASH", "600000"))
+    cash = int(os.getenv("STARTING_CASH", "200000"))
     outcomes = []
     for session in (Session.KRX_1520, Session.NXT_1955):
         cases = _list_replay_cases(s3, bucket, session, maximum_cases)
@@ -1803,7 +1817,7 @@ def _run_worker() -> int:
     catalyst_prefix = os.getenv("CATALYST_PREFIX", "config/catalysts")
     phase = os.getenv("RUN_PHASE", "ENTRY_1520")
     session = Session.NXT_1955 if phase == "ENTRY_NXT_1955" else Session.KRX_1520
-    cash = int(os.getenv("STARTING_CASH", "600000"))
+    cash = int(os.getenv("STARTING_CASH", "200000"))
     candidate_limit = int(os.getenv("CANDIDATE_LIMIT", "40"))
     now = datetime.now(KST)
 
@@ -1843,7 +1857,7 @@ def _run_worker() -> int:
             max_attempts=int(os.getenv("KIWOOM_READ_MAX_ATTEMPTS", "4")),
         ),
     )
-    medium_cash = int(os.getenv("MEDIUM_STARTING_CASH", "600000"))
+    medium_cash = int(os.getenv("MEDIUM_STARTING_CASH", "200000"))
     if phase == "EQUITY_SNAPSHOT_1550":
         result = _record_paper_equity_snapshot(
             client=client, ddb=ddb, table_name=table, recorded_at=now
@@ -1863,7 +1877,7 @@ def _run_worker() -> int:
             table=table,
             now=now,
             catalysts=catalysts,
-            initial_cash=int(os.getenv("DAY_TRADE_STARTING_CASH", "600000")),
+            initial_cash=int(os.getenv("DAY_TRADE_STARTING_CASH", "200000")),
             candidate_limit=int(os.getenv("DAY_TRADE_CANDIDATE_LIMIT", "30")),
         )
     if phase == "MEDIUM_SIGNAL_1540":
@@ -1992,7 +2006,7 @@ def _run_worker() -> int:
     champion_key = os.getenv("PAPER_CHAMPION_KEY", f"config/rules/{session.value}.json")
     champion = _load_optional_json(s3, bucket, champion_key)
     active_config = config_from_champion(base_config, champion) if champion else base_config
-    wallet_key = f"WALLET#CLOSING_BET#{session.value}"
+    wallet_key = paper_wallet_key("CLOSING_BET", session)
     available_cash = _load_or_create_wallet(ddb, table, wallet_key, cash, now)
     costs = _runtime_costs()
     decision = ClosingBetEngine(active_config).evaluate(

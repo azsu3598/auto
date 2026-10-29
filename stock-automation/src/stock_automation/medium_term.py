@@ -39,7 +39,7 @@ class MediumTermConfig:
     maximum_twenty_day_return_pct: float = 22.0
     maximum_invalidation_distance_pct: float = 12.0
     maximum_allocation_pct: float = 0.30
-    maximum_position_loss: int = 20_000
+    maximum_position_loss: int = 6_700  # 200,000 KRW principal (2026-10-29)
     maximum_candidates: int = 3
     maximum_entry_gap_pct: float = 3.0
 

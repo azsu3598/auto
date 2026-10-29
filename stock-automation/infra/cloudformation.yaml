@@ -32,15 +32,20 @@ Parameters:
     Description: Secrets Manager JSON with dart_api_key (free OpenDART key)
   StartingCash:
     Type: Number
-    Default: 600000
+    Default: 200000
   MediumStartingCash:
     Type: Number
-    Default: 600000
+    Default: 200000
     Description: Separate paper capital for the 20-40 trading-day strategy
   DayTradeStartingCash:
     Type: Number
-    Default: 600000
+    Default: 200000
     Description: Separate paper capital for explicitly invoked day-trade scans
+  PaperWalletEpoch:
+    Type: String
+    Default: ""
+    AllowedPattern: "[A-Za-z0-9_-]{0,40}"
+    Description: Appended to every paper wallet key to start a new ledger (e.g. 200K-20261103); empty keeps the original wallets
   BuyFeeBps:
     Type: Number
     Description: Verified broker buy commission in basis points, used by the paper ledger and replay/tuning
@@ -274,6 +279,8 @@ Resources:
               Value: !Ref SellFeeBps
             - Name: SELL_TAX_BPS
               Value: !Ref SellTaxBps
+            - Name: PAPER_WALLET_EPOCH
+              Value: !Ref PaperWalletEpoch
             - Name: NOTIFICATION_CHANNEL
               Value: !Ref NotificationChannel
             - Name: NOTIFICATION_SECRET_ARN

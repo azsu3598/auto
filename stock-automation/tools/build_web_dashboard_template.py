@@ -84,7 +84,7 @@ def build():
         'MemorySize':128,'Timeout':15,'ReservedConcurrentExecutions':2,'Role':attr('ReadRole'),
         'Code':{'S3Bucket':ref('ArtifactBucketName'),'S3Key':ref('ApiCodeKey')},
         'Environment':{'Variables':{'PAPER_TABLE':ref('PaperTableName'),'LIVE_ORDER_ENABLED':'0',
-          'CLIENT_ID':ref('WebClient'),
+          'PAPER_WALLET_EPOCH':ref('PaperWalletEpoch'),'CLIENT_ID':ref('WebClient'),
           'TOKEN_ISSUER':sub('https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}')}}}},
       'HttpApi':{'Type':'AWS::ApiGatewayV2::Api','Properties':{'Name':'stock-paper-web-read-only','ProtocolType':'HTTP',
         'CorsConfiguration':{'AllowOrigins':[sub('https://${Distribution.DomainName}')],
@@ -120,7 +120,9 @@ def build():
     parameters={'ArtifactBucketName':{'Type':'String'},'ApiCodeKey':{'Type':'String','AllowedPattern':'config/web/[a-f0-9]{64}\\.zip'},
       'PaperTableName':{'Type':'String','Default':'stock-automation-paper','AllowedValues':['stock-automation-paper']},
       'LoginDomainPrefix':{'Type':'String','AllowedPattern':'sabu-paper-[a-f0-9]{12}'},
-      'OperatorUserName':{'Type':'String','Default':'stock-paper-operator','AllowedValues':['stock-paper-operator']}}
+      'OperatorUserName':{'Type':'String','Default':'stock-paper-operator','AllowedValues':['stock-paper-operator']},
+      # Shows only the wallets of the app stack's PaperWalletEpoch; empty keeps the original wallets.
+      'PaperWalletEpoch':{'Type':'String','Default':'','AllowedPattern':'[A-Za-z0-9_-]{0,40}'}}
     return {'AWSTemplateFormatVersion':'2010-09-09','Description':'Authenticated HTTPS mobile viewer of the paper ledger; no orders or trading schedule changes',
       'Parameters':parameters,'Resources':resources,'Outputs':{
         'DashboardUrl':{'Value':sub('https://${Distribution.DomainName}/')},

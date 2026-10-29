@@ -24,7 +24,7 @@ class StrategyConfig:
     max_final_candidates: int = 3
     max_positions: int = 1
     max_allocation_pct: float = 0.40
-    max_daily_loss: int = 10_000
+    max_daily_loss: int = 3_300  # 200,000 KRW paper/live principal (2026-10-29)
     default_stop_mode: str = "5M_CONFIRMED"
 
     @property

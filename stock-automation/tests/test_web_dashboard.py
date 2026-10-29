@@ -110,7 +110,8 @@ class WebDeploymentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output=Path(tmp)/'web';manifest=packager.package(output)
             with zipfile.ZipFile(output/'api.zip') as archive:
-                self.assertEqual(set(archive.namelist()),{'paper_web_api.py','stock_automation/dashboard.py','stock_automation/__init__.py'})
+                self.assertEqual(set(archive.namelist()),{'paper_web_api.py','stock_automation/dashboard.py',
+                    'stock_automation/paper_wallet.py','stock_automation/__init__.py'})
             self.assertFalse((output/'static/config.js').exists())
             html=(output/'static/index.html').read_text(encoding='utf-8')
             self.assertLess(html.index('/auth.js'),html.index('/app.js'))

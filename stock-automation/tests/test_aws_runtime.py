@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import copy
 import json
+import os
 import unittest
 from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
@@ -16,6 +18,7 @@ from stock_automation.aws_runtime import (
     _deliver_outbox,
     _deliver_pending_outbox,
     _five_min_stop_confirmation,
+    _load_medium_position,
     _load_or_create_wallet,
     _paper_equity_components,
     _record_paper_equity_snapshot,
@@ -34,12 +37,14 @@ from stock_automation.engine import ClosingBetEngine
 from stock_automation.day_trade import DayTradeEngine
 from stock_automation.medium_term import MediumTermEngine, confirm_medium_term_entry
 from stock_automation.models import DecisionType, Session
+from stock_automation.paper_wallet import wallet_key as paper_wallet_key
 from test_engine import quote, snapshot
 from test_day_trade import quote as day_trade_quote, snapshot as day_trade_snapshot
 from test_exit_engine import position
 from test_medium_term import snapshot as medium_snapshot
 
 KST = timezone(timedelta(hours=9))
+EPOCH = "200K-20261103"
 
 
 class FakeDdb:
@@ -642,6 +647,124 @@ class AwsRuntimeTests(unittest.TestCase):
         self.assertEqual(2, len(s3.objects))
         self.assertIn("WALLET#DAY_TRADE", ddb.items)
         self.assertIn("OPEN#DAY_TRADE", ddb.items)
+
+    def test_wallet_epoch_creates_new_200k_wallet_and_keeps_the_old_one(self):
+        ddb = FakeDdb()
+        old = {
+            "pk": {"S": "WALLET#DAY_TRADE"},
+            "initial_cash": {"N": "600000"},
+            "available_cash": {"N": "587000"},
+            "invested_principal": {"N": "0"},
+        }
+        ddb.items["WALLET#DAY_TRADE"] = copy.deepcopy(old)
+        builder = SimpleNamespace(
+            build_day_trade_snapshot=lambda **kwargs: day_trade_snapshot(
+                day_trade_quote(), captured_at=kwargs["captured_at"]
+            )
+        )
+        with patch.dict(os.environ, {"PAPER_WALLET_EPOCH": EPOCH}), patch(
+            "stock_automation.aws_runtime.KiwoomSnapshotBuilder",
+            return_value=builder,
+        ), patch(
+            "stock_automation.aws_runtime._market_change",
+            side_effect=[0.2, 0.5],
+        ), patch(
+            "stock_automation.aws_runtime._runtime_costs",
+            return_value=TradingCosts(1.5, 1.5, 18.0),
+        ):
+            result = _run_day_trade_scan(
+                client=object(),
+                ddb=ddb,
+                s3=FakeS3(),
+                bucket="paper",
+                table="paper",
+                now=datetime(2026, 10, 12, 10, 30, 30, tzinfo=KST),
+                catalysts={},
+                initial_cash=200_000,
+                candidate_limit=30,
+            )
+            self.assertEqual(
+                "WALLET#CLOSING_BET#KRX_1520#" + EPOCH,
+                paper_wallet_key("CLOSING_BET", Session.KRX_1520),
+            )
+            self.assertEqual("WALLET#MEDIUM_TERM#" + EPOCH, paper_wallet_key("MEDIUM_TERM"))
+
+        self.assertEqual(0, result)
+        new_key = "WALLET#DAY_TRADE#" + EPOCH
+        self.assertEqual("200000", ddb.items[new_key]["initial_cash"]["N"])
+        self.assertEqual("200000", ddb.items[new_key]["available_cash"]["N"])
+        self.assertEqual(old, ddb.items["WALLET#DAY_TRADE"])
+        self.assertEqual(new_key, ddb.items["OPEN#DAY_TRADE"]["wallet_key"]["S"])
+        debits = [a["Update"]["Key"]["pk"]["S"] for a in ddb.transactions[0]["TransactItems"] if "Update" in a]
+        self.assertEqual([new_key], debits)
+
+    def test_exit_returns_cash_to_the_wallet_that_paid_for_the_entry(self):
+        epoch_key = "WALLET#CLOSING_BET#KRX_1520#" + EPOCH
+        costs = TradingCosts(1.5, 1.5, 18.0)
+        decision = ClosingBetEngine().evaluate(snapshot(quote()), cash=200_000)
+        ddb = FakeDdb()
+        self.assertTrue(_save_decision(ddb, "paper", decision, wallet_key=epoch_key, costs=costs))
+        self.assertEqual(epoch_key, ddb.items["OPEN#CLOSING_BET#KRX_1520"]["wallet_key"]["S"])
+
+        # A stored key wins over the epoch in effect at exit time; an older
+        # position without one returns cash to the original wallet.
+        for stored, expected in ((epoch_key, epoch_key), (None, "WALLET#CLOSING_BET#KRX_1520")):
+            with self.subTest(stored=stored):
+                ddb = FakeDdb()
+                held = position()
+                item = {
+                    "pk": {"S": "OPEN#CLOSING_BET#KRX_1520"},
+                    "payload_json": {"S": json.dumps(held.to_dict(), ensure_ascii=False)},
+                    "remaining_quantity": {"N": str(held.quantity)},
+                }
+                if stored:
+                    item["wallet_key"] = {"S": stored}
+                ddb.items[item["pk"]["S"]] = item
+                with patch.dict(os.environ, {"PAPER_WALLET_EPOCH": "LATER-EPOCH"}):
+                    _run_exit(
+                        client=FakeQuoteClient(),
+                        ddb=ddb,
+                        s3=FakeS3(),
+                        notifier=FakeNotifier(),
+                        bucket="paper",
+                        table="paper",
+                        phase="EXIT_0910",
+                        now=datetime(2026, 10, 7, 9, 10, 10, tzinfo=KST),
+                        costs=costs,
+                    )
+                credits = [
+                    a["Update"]["Key"]["pk"]["S"]
+                    for t in ddb.transactions
+                    for a in t["TransactItems"]
+                    if "Update" in a
+                ]
+                self.assertEqual([expected], credits)
+
+        medium = MediumTermEngine().evaluate(medium_snapshot(), cash=200_000)
+        entry = confirm_medium_term_entry(
+            medium.entry_plan,
+            observed_at=datetime(2026, 11, 4, 9, 15, tzinfo=KST),
+            observed_price=11_100,
+            cash=200_000,
+        )
+        ddb = FakeDdb()
+        medium_key = "WALLET#MEDIUM_TERM#" + EPOCH
+        self.assertTrue(_save_medium_entry(ddb, "paper", medium.entry_plan, entry, wallet_key=medium_key))
+        with patch.dict(os.environ, {"PAPER_WALLET_EPOCH": ""}):
+            self.assertEqual(medium_key, _load_medium_position(ddb, "paper")[2])
+        del ddb.items["OPEN#MEDIUM_TERM"]["wallet_key"]
+        with patch.dict(os.environ, {"PAPER_WALLET_EPOCH": EPOCH}):
+            self.assertEqual("WALLET#MEDIUM_TERM", _load_medium_position(ddb, "paper")[2])
+
+    def test_equity_snapshot_counts_only_current_epoch_wallets(self):
+        items = [
+            {"pk": {"S": "WALLET#CLOSING_BET#KRX_1520"}, "available_cash": {"N": "600000"}},
+            {"pk": {"S": "WALLET#CLOSING_BET#KRX_1520#" + EPOCH}, "available_cash": {"N": "200000"}},
+        ]
+        with patch.dict(os.environ, {"PAPER_WALLET_EPOCH": EPOCH}):
+            self.assertEqual((200_000, 0), _paper_equity_components(items, {}))
+        with patch.dict(os.environ, {"PAPER_WALLET_EPOCH": ""}):
+            self.assertEqual((600_000, 0), _paper_equity_components(items, {}))
 
     def test_0910_run_closes_verified_open_position(self):
         ddb = FakeDdb(open_position=position())

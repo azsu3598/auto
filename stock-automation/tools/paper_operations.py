@@ -8,6 +8,8 @@ import uuid
 from datetime import datetime,timezone
 
 WORKSPACE=Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(WORKSPACE/'stock-automation/src'))
+from stock_automation.paper_wallet import wallet_key  # noqa: E402
 DEFAULT_PLAN=WORKSPACE/'runtime/paper-pilot-plan-20261022-final.json'
 BATCH_PLAN=WORKSPACE/'runtime/paper-batch-plan-20261022-reviewed4.json'
 KEEP_CLEANUP={'STOP_PM','STOP_AM','REPORT_PM','REPORT_AM','FALLBACK_PM','FALLBACK_AM'}
@@ -36,13 +38,16 @@ class Operations:
                 'STOP_PM','REPORT_PM','START_AM','EXIT_0905','EXIT_0910','STOP_AM','REPORT_AM'):
             item=self.get(name)
             phases[name]={k:item[k] for k in ('status','reason','report') if k in item} if item else {'status':'NO_RECORD'}
+        # The stack's PaperWalletEpoch names the wallet; an older plan has none.
+        key=wallet_key('CLOSING_BET','KRX_1520',epoch=self.params.get('PaperWalletEpoch',''))
         wallet=self.clients['dynamodb'].get_item(TableName='stock-automation-paper',
-            Key={'pk':{'S':'WALLET#CLOSING_BET#KRX_1520'}},ConsistentRead=True).get('Item',{})
+            Key={'pk':{'S':key}},ConsistentRead=True).get('Item',{})
         opened=self.clients['dynamodb'].get_item(TableName='stock-automation-paper',
             Key={'pk':{'S':'OPEN#CLOSING_BET#KRX_1520'}},ConsistentRead=True).get('Item',{})
         return {'paper_only':True,'entry_date':self.params['EntryDate'],'exit_date':self.params['ExitDate'],
             'server_state':vm['State']['Name'],'running_tasks':cluster['runningTasksCount'],
-            'pending_tasks':cluster['pendingTasksCount'],'virtual_available_cash':wallet.get('available_cash',{}).get('N','NOT_CREATED'),
+            'pending_tasks':cluster['pendingTasksCount'],'wallet_key':key,
+            'virtual_available_cash':wallet.get('available_cash',{}).get('N','NOT_CREATED'),
             'open_virtual_quantity':opened.get('remaining_quantity',{}).get('N','0'),'phases':phases}
 
     def stop(self):
@@ -108,7 +113,12 @@ class BatchOperations:
         return {k:item[k] for k in ('status','phase','reason','report') if k in item}
 
     def status(self):
+        # A 200,000 KRW batch writes the PaperWalletEpoch wallet, not the pilot's.
+        key=wallet_key('CLOSING_BET','KRX_1520',epoch=self.params.get('PaperWalletEpoch',''))
+        wallet=self.clients['dynamodb'].get_item(TableName='stock-automation-paper',
+            Key={'pk':{'S':key}},ConsistentRead=True).get('Item',{})
         return {'bounded_sessions':len(self.plan['batch_plan']['sessions']),'ARMED':self.get('ARMED'),'HALT':self.get('HALT'),'STOP':self.get('STOP'),
+            'wallet_key':key,'virtual_available_cash':wallet.get('available_cash',{}).get('N','NOT_CREATED'),
             'sessions':[{'entry_date':slot['entry_date'],'exit_date':slot['exit_date'],
                 'phases':{phase:self.get('sessions/'+slot['entry_date']+'/'+phase) for phase in
                     ('GATE','SCAN_1450','SHORTLIST_1510','ENTRY_1520','EXIT_0910','REPORT_AM')}}

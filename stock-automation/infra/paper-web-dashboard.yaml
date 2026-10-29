@@ -26,6 +26,11 @@
       "AllowedValues": [
         "stock-paper-operator"
       ]
+    },
+    "PaperWalletEpoch": {
+      "Type": "String",
+      "Default": "",
+      "AllowedPattern": "[A-Za-z0-9_-]{0,40}"
     }
   },
   "Resources": {
@@ -446,6 +451,9 @@
               "Ref": "PaperTableName"
             },
             "LIVE_ORDER_ENABLED": "0",
+            "PAPER_WALLET_EPOCH": {
+              "Ref": "PaperWalletEpoch"
+            },
             "CLIENT_ID": {
               "Ref": "WebClient"
             },

@@ -185,13 +185,39 @@ class BatchTests(unittest.TestCase):
         for rows in mutations:
             self.worker.rows.return_value = rows
             with self.assertRaises(ValueError):
-                self.worker.wallet()
+                self.worker.wallet(self.plan['template'])
 
     def test_no_trade_predecessor_may_have_no_wallet_but_open_state_still_blocks(self):
         self.worker.rows.return_value=[]
-        self.assertEqual(self.worker.wallet(allow_uncreated=True),[])
+        self.assertEqual(self.worker.wallet(self.plan['template'], allow_uncreated=True),[])
         with self.assertRaisesRegex(ValueError,'ISOLATED_PAPER_WALLET'):
-            self.worker.wallet()
+            self.worker.wallet(self.plan['template'])
+
+    def test_200k_batch_requires_epoch_and_checks_only_its_own_wallet(self):
+        epoch = '200K-20261103'
+        plan = copy.deepcopy(self.plan)
+        for target in (plan, plan['template']):
+            target.update(starting_cash='200000', wallet_epoch=epoch)
+        b.validate_batch(plan)
+        for cash, value in (('200000', ''), ('600000', epoch), ('300000', epoch), ('200000', 'bad epoch')):
+            wrong = copy.deepcopy(plan)
+            for target in (wrong, wrong['template']):
+                target.update(starting_cash=cash, wallet_epoch=value)
+            with self.assertRaises(ValueError):
+                b.validate_batch(wrong)
+        old = self.worker.rows()[0]
+        new = {**old, 'pk': {'S': 'WALLET#CLOSING_BET#KRX_1520#' + epoch},
+               'initial_cash': {'N': '200000'}, 'available_cash': {'N': '200000'}}
+        # The 600,000 KRW wallet stays as history beside the new ledger.
+        self.worker.rows.return_value = [old, new]
+        self.assertEqual(self.worker.wallet(plan['template']), [old, new])
+        self.worker.rows.return_value = [old]
+        self.assertEqual(self.worker.wallet(plan['template'], allow_uncreated=True), [old])
+        with self.assertRaisesRegex(ValueError, 'ISOLATED_PAPER_WALLET'):
+            self.worker.wallet(plan['template'])
+        self.worker.rows.return_value = [old, {**new, 'initial_cash': {'N': '600000'}}]
+        with self.assertRaisesRegex(ValueError, 'PAPER_WALLET_NOT_RECONCILED'):
+            self.worker.wallet(plan['template'])
 
     def test_halt_blocks_new_entry_but_preserves_existing_scheduled_exit(self):
         self.items['validation/batch/root/HALT.json'] = {'status': 'NEW_ENTRIES_HALTED'}

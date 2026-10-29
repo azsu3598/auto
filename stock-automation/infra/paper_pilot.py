@@ -15,6 +15,20 @@ KST = timezone(timedelta(hours=9))
 PHASE_TIMES = {'SCAN_1450': (14, 50), 'SHORTLIST_1510': (15, 10),
     'ENTRY_1520': (15, 20), 'EQUITY_SNAPSHOT_1550': (15, 50),
     'EXIT_0905': (9, 5), 'EXIT_0910': (9, 10)}
+# Approved paper capital: starting cash -> whether a wallet epoch is required.
+# 600,000 KRW runs use the original wallet; 200,000 KRW runs (2026-11-03 on) use
+# a new epoch wallet so the two ledgers never mix.
+APPROVED_CAPITAL = {'600000': False, '200000': True}
+
+
+def capital(plan):
+    """Return the plan's approved (starting_cash, wallet_epoch) pair or fail closed."""
+    cash, epoch = plan.get('starting_cash'), plan.get('wallet_epoch', '')
+    needs_epoch = APPROVED_CAPITAL.get(cash)
+    if (needs_epoch is None or not isinstance(epoch, str) or bool(epoch) != needs_epoch
+            or (epoch and not re.fullmatch('[A-Za-z0-9_-]{1,40}', epoch))):
+        raise ValueError('INVALID_PAPER_PLAN')
+    return cash, epoch
 
 
 def stamp(value):
@@ -51,8 +65,9 @@ def validate_calendar(plan):
 
 def validate_plan(plan, now=None):
     entry, exit_day = plan['entry_date'], plan['exit_date']
-    if exit_day <= entry or plan['starting_cash'] != '600000' or plan['paper_only'] is not True:
+    if exit_day <= entry or plan['paper_only'] is not True:
         raise ValueError('INVALID_PAPER_PLAN')
+    capital(plan)
     expected = {'GATE', 'START_PM', 'STOP_PM', 'START_AM', 'STOP_AM', 'REPORT_PM', 'REPORT_AM', *PHASE_TIMES}
     if set(plan['events']) != expected:
         raise ValueError('EXACT_PILOT_EVENTS_REQUIRED')
@@ -168,7 +183,8 @@ class Pilot:
         expected_env = {x['name']: x['value'] for x in original['environment']}
         expected_env.update(PILOT_ENTRY_DATE=plan['entry_date'], PILOT_EXIT_DATE=plan['exit_date'])
         if (a != b or env != expected_env or env['KIWOOM_MODE'] != 'demo' or env['LIVE_ORDER_ENABLED'] != '0'
-                or env['STARTING_CASH'] != '600000' or warm.get('entryPoint') != ['python']
+                or (env['STARTING_CASH'], env.get('PAPER_WALLET_EPOCH', '')) != capital(plan)
+                or warm.get('entryPoint') != ['python']
                 or len(warm.get('command', [])) != 2 or warm['command'][0] != '-c'
                 or hashlib.sha256(warm['command'][1].encode()).hexdigest() != plan['bootstrap_sha256']):
             raise ValueError('PAPER_CONTAINER_CHANGED')

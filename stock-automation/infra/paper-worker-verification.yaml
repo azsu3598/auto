@@ -91,15 +91,15 @@
     },
     "StartingCash": {
       "Type": "String",
-      "Default": "600000"
+      "Default": "200000"
     },
     "MediumStartingCash": {
       "Type": "String",
-      "Default": "600000"
+      "Default": "200000"
     },
     "DayTradeStartingCash": {
       "Type": "String",
-      "Default": "600000"
+      "Default": "200000"
     },
     "BuyFeeBps": {
       "Type": "String",
@@ -112,6 +112,11 @@
     "SellTaxBps": {
       "Type": "String",
       "Default": "20"
+    },
+    "PaperWalletEpoch": {
+      "Type": "String",
+      "Default": "",
+      "AllowedPattern": "[A-Za-z0-9_-]{0,40}"
     }
   },
   "Resources": {
@@ -246,6 +251,12 @@
                 "Name": "SELL_TAX_BPS",
                 "Value": {
                   "Ref": "SellTaxBps"
+                }
+              },
+              {
+                "Name": "PAPER_WALLET_EPOCH",
+                "Value": {
+                  "Ref": "PaperWalletEpoch"
                 }
               },
               {

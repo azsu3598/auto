@@ -38,7 +38,8 @@ class BacktestTests(unittest.TestCase):
         result = replay_decision(engine=self.engine, case=case, cash=600_000, costs=self.costs)
         self.assertEqual(ReplayOutcome.PARTIAL_THEN_SCHEDULED, result.outcome)
         self.assertEqual(2, len(result.exits))
-        self.assertEqual(7_500, result.net_pnl)
+        # 3 shares under the 3,300 KRW closing-bet loss limit (2026-10-29).
+        self.assertEqual(1_900, result.net_pnl)
 
     def test_gap_below_emergency_uses_observed_open(self):
         case = ReplayCase(
@@ -51,7 +52,7 @@ class BacktestTests(unittest.TestCase):
         self.assertEqual(19_000, result.exits[0].price)
         # The planned emergency-floor risk is bounded, but a gap can execute
         # below that floor at the first observable price.
-        self.assertEqual(-11_000, result.net_pnl)
+        self.assertEqual(-3_000, result.net_pnl)
 
     def test_five_minute_stop_requires_following_failed_reclaim(self):
         case = ReplayCase(

@@ -14,6 +14,7 @@ def package(output):
     output.mkdir(parents=True)
     files={'paper_web_api.py':(ROOT/'infra/paper_web_api.py').read_bytes(),
         'stock_automation/dashboard.py':(ROOT/'src/stock_automation/dashboard.py').read_bytes(),
+        'stock_automation/paper_wallet.py':(ROOT/'src/stock_automation/paper_wallet.py').read_bytes(),
         'stock_automation/__init__.py':b''}
     archive=output/'api.zip'
     with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_DEFLATED) as z:

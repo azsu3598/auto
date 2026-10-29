@@ -150,7 +150,12 @@ def session_plan(batch, index):
 
 
 def validate_batch(batch):
-    if (batch.get('paper_only') is not True or batch.get('starting_cash') != '600000'
+    try:
+        # The batch and every session it builds carry one approved capital pair.
+        approved = p.capital(batch) == p.capital(batch.get('template', {}))
+    except ValueError:
+        approved = False
+    if (batch.get('paper_only') is not True or not approved
             or len(batch.get('sessions', [])) not in ALLOWED_SESSION_COUNTS
             or not re.fullmatch('[a-f0-9]{32}', batch.get('batch_id', ''))):
         raise ValueError('APPROVED_PAPER_SESSION_COUNT_REQUIRED')
@@ -284,17 +289,23 @@ class Batch(p.Pilot):
         if self.get(self.root_key('HALT'), optional=True) is not None:
             raise ValueError('BATCH_NEW_ENTRIES_HALTED')
 
-    def wallet(self, *, allow_uncreated=False):
+    def wallet(self, plan, *, allow_uncreated=False):
+        """Check the one closing-bet wallet of ``plan``'s capital (cash and epoch)."""
         rows = self.rows()
         if any(r['pk']['S'].startswith(('OPEN#', 'PENDING#')) for r in rows):
             raise ValueError('UNRECONCILED_OPEN_OR_PENDING_STATE')
+        cash, epoch = p.capital(plan)
         wallets = [r for r in rows if r['pk']['S'].startswith('WALLET#')]
+        if epoch:
+            # Wallets of an earlier capital are kept as history and not checked here.
+            wallets = [r for r in wallets if r['pk']['S'].endswith('#' + epoch)]
         if not wallets and allow_uncreated:
             return rows
-        if len(wallets) != 1 or wallets[0]['pk']['S'] != 'WALLET#CLOSING_BET#KRX_1520':
+        expected = 'WALLET#CLOSING_BET#KRX_1520' + ('#' + epoch if epoch else '')
+        if len(wallets) != 1 or wallets[0]['pk']['S'] != expected:
             raise ValueError('ISOLATED_PAPER_WALLET_REQUIRED')
         wallet = wallets[0]
-        if (wallet.get('initial_cash') != {'N': '600000'} or wallet.get('invested_principal') != {'N': '0'}
+        if (wallet.get('initial_cash') != {'N': cash} or wallet.get('invested_principal') != {'N': '0'}
                 or not re.fullmatch('[0-9]+', wallet.get('available_cash', {}).get('N', ''))):
             raise ValueError('PAPER_WALLET_NOT_RECONCILED')
         # Preserve cash and realized results. Never reset it to the initial sum.
@@ -335,7 +346,9 @@ class Batch(p.Pilot):
         detail = reports['REPORT_AM'].get('report', {})
         if detail.get('decision') != artifact['decision'] or detail.get('open_positions') != 0 or detail.get('network_stopped_and_idle') is not True:
             raise ValueError('PREDECESSOR_FINAL_REPORT_NOT_CLEAN')
-        rows = self.wallet(allow_uncreated=reports['REPORT_AM'].get('report', {}).get('decision') == 'NO_TRADE')
+        # The predecessor's own capital: the first 200,000 KRW session follows a
+        # 600,000 KRW run whose original wallet must still be clean.
+        rows = self.wallet(plan, allow_uncreated=reports['REPORT_AM'].get('report', {}).get('decision') == 'NO_TRADE')
         if require_digest and reports['REPORT_AM'].get('ledger_digest') != self.ledger_digest(rows):
             raise ValueError('LEDGER_CHANGED_AFTER_REPORT')
         self.idle()
@@ -478,7 +491,7 @@ class Batch(p.Pilot):
                 status = self.report(name, plan)
                 state['report'] = self.report_detail
                 if name == 'REPORT_AM' and status == 'REPORTED':
-                    self.wallet()
+                    self.wallet(plan)
                     state['ledger_digest'] = self.ledger_digest(self.rows())
             elif name.startswith('STOP_'):
                 status = 'NO_OWN_START' if self.get(self.key('START_'+name[-2:]), optional=True) is None else self.controller(
