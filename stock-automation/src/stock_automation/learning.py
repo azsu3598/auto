@@ -193,11 +193,27 @@ def apply_parameters(base: StrategyConfig, params: TunableParameters) -> Strateg
     )
 
 
+def code_rule_version(session) -> str:
+    """The rule version of the engine logic itself, ignoring any champion name."""
+    return StrategyConfig(session=session).rule_version
+
+
+def champion_matches_code(base: StrategyConfig, payload: dict) -> bool:
+    """True when ``payload`` was tuned against the current engine logic.
+
+    A champion from older logic (no ``base_rule_version``, or another one)
+    must not run under the new logic with its old name.
+    """
+    return payload.get("base_rule_version") == code_rule_version(base.session)
+
+
 def config_from_champion(base: StrategyConfig, payload: dict) -> StrategyConfig:
     if payload.get("mode") != "PAPER_ONLY":
         raise ValueError("learned rules may only be activated in paper mode")
     if payload.get("session") != base.session.value:
         raise ValueError("learned rule session mismatch")
+    if not champion_matches_code(base, payload):
+        raise ValueError("learned rule base version does not match the engine")
     raw = payload.get("parameters")
     if not isinstance(raw, dict):
         raise ValueError("learned rule parameters are missing")
@@ -259,6 +275,7 @@ def write_paper_champion(
     payload = {
         "mode": "PAPER_ONLY",
         "rule_version": config.rule_version,
+        "base_rule_version": code_rule_version(config.session),
         "session": config.session.value,
         "parameters": asdict(result.challenger_parameters),
         "evidence": {

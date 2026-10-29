@@ -15,7 +15,7 @@ from .models import (
     Quote,
     StopMode,
 )
-from .risk import build_position_plan
+from .risk import ATR_UNAVAILABLE, STOP_TOO_WIDE, atr_stop_rejection, build_position_plan
 
 
 def _age_seconds(newer: datetime, older: datetime) -> float:
@@ -73,12 +73,36 @@ class ClosingBetEngine:
 
         selected = final[0]
         entry = selected.quote.best_ask or selected.quote.price
+        policy = self.config.atr_stop_policy
+        stop_rejection = atr_stop_rejection(
+            entry_price=entry,
+            support_price=selected.quote.support_price,
+            atr14=selected.quote.atr14,
+            policy=policy,
+        )
+        if stop_rejection is not None:
+            return Decision(
+                event_id=event_id,
+                idempotency_key=idempotency_key,
+                decided_at=snapshot.captured_at,
+                decision=DecisionType.NO_TRADE,
+                session=snapshot.session,
+                rule_version=self.config.rule_version,
+                starting_cash=cash,
+                remaining_cash=cash,
+                position=None,
+                candidates=tuple(final),
+                reason_codes=(stop_rejection,),
+                notes="The ATR stop for the top candidate is wider than the allowed limit.",
+            )
         plan = build_position_plan(
             cash=cash,
             entry_price=entry,
             support_price=selected.quote.support_price,
             max_allocation_pct=self.config.max_allocation_pct,
             max_loss=self.config.max_daily_loss,
+            atr14=selected.quote.atr14,
+            atr_policy=policy,
         )
         if plan is None:
             return Decision(
@@ -192,6 +216,17 @@ class ClosingBetEngine:
         # 15:20 marks a quote whose same-day DART check is missing; unknown risk blocks.
         if "DART_NOT_CHECKED" in q.warnings:
             return "DART_NOT_CHECKED"
+        # closing-v0.4 sizes stops from the daily ATR; without it there is no plan.
+        if q.atr14 is None or not q.atr14 > 0:
+            return ATR_UNAVAILABLE
+        # Drop a too-wide stop before ranking so the next candidate can be chosen.
+        if atr_stop_rejection(
+            entry_price=q.best_ask or q.price,
+            support_price=q.support_price,
+            atr14=q.atr14,
+            policy=cfg.atr_stop_policy,
+        ) is not None:
+            return STOP_TOO_WIDE
         if self._market_change(snapshot, q) <= cfg.maximum_market_decline_pct:
             return "MARKET_DECLINE_GATE"
         return None
@@ -222,10 +257,17 @@ class ClosingBetEngine:
         score += 4.0 if q.price >= q.ma20 else 0.0
         score += 3.0 if q.price >= q.ma5 else 0.0
         score += 8.0  # already verified above a rising 5-minute MA20
-        score += 5.0  # already verified above same-session VWAP
+        # Without a VWAP the hard filter checked the 5-minute MA20 instead.
+        if q.vwap is not None:
+            score += 5.0
+        else:
+            risks.append("VWAP_UNKNOWN")
 
-        intraday_volume_ratio = q.five_min_volume_ratio or q.volume_ratio
-        score += min(8.0, max(0.0, (intraday_volume_ratio - 1.0) * 8.0))
+        # The daily volume ratio is scored above; never count it twice.
+        if q.five_min_volume_ratio is not None:
+            score += min(8.0, max(0.0, (q.five_min_volume_ratio - 1.0) * 8.0))
+        else:
+            risks.append("INTRADAY_VOLUME_UNKNOWN")
         if q.higher_lows is True:
             score += 4.0
         if q.breakout_holds is True:
@@ -251,8 +293,9 @@ class ClosingBetEngine:
                 score -= 8.0
 
         catalyst_confirmed = q.catalyst_verified and bool(q.catalyst.strip())
-        score += min(6.0, max(0.0, q.catalyst_score) * 6.0)
+        # Unverified theme strength (e.g. Kiwoom ka90001) is context, not points.
         if catalyst_confirmed:
+            score += min(6.0, max(0.0, q.catalyst_score) * 6.0)
             score += 4.0
         if q.program_net is not None and q.program_net > 0:
             score += 1.5
@@ -281,8 +324,9 @@ class ClosingBetEngine:
             "STRONG_CLOSE",
             "VOLUME_EXPANSION",
             "ABOVE_5M_MA20",
-            "ABOVE_VWAP",
         ]
+        if q.vwap is not None:
+            reasons.append("ABOVE_VWAP")
         if q.higher_lows:
             reasons.append("FIVE_MIN_HIGHER_LOWS")
         if q.breakout_holds:

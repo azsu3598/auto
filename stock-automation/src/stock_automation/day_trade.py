@@ -26,7 +26,7 @@ class DayTradeExitAction(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class DayTradeConfig:
-    rule_version: str = "day-trade-v0.2"
+    rule_version: str = "day-trade-v0.3"
     entry_start: time = time(9, 10)
     last_entry: time = time(14, 50)
     mandatory_exit: time = time(15, 10)
@@ -39,6 +39,10 @@ class DayTradeConfig:
     maximum_allocation_pct: float = 0.25
     maximum_position_loss: int = 8_000
     maximum_candidates: int = 3
+    # Late-entry guard (day-trade-v0.3): distance above the VWAP, in percent.
+    maximum_vwap_distance_pct: float = 3.0
+    vwap_distance_penalty_start_pct: float = 2.0
+    vwap_distance_penalty_per_pct: float = 3.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,7 +315,9 @@ class DayTradeEngine:
             or quote.five_min_volume_ratio < self.config.minimum_five_min_volume_ratio
             or quote.price < quote.five_min_ma20
             or quote.five_min_ma20_slope <= 0
+            or quote.vwap <= 0
             or quote.price < quote.vwap
+            or (quote.price / quote.vwap - 1.0) * 100.0 > self.config.maximum_vwap_distance_pct
             or quote.support_price <= 0
             or quote.support_price >= quote.price
             or not (quote.breakout_holds or quote.reclaimed_ma20)
@@ -340,6 +346,12 @@ class DayTradeEngine:
             risks.append("MARKET_WEAKNESS")
         if quote.day_change_pct > 8.0:
             score -= (quote.day_change_pct - 8.0) * 2.0
+            risks.append("LATE_ENTRY_RISK")
+        vwap_distance = (quote.price / quote.vwap - 1.0) * 100.0
+        if vwap_distance > self.config.vwap_distance_penalty_start_pct:
+            score -= (
+                vwap_distance - self.config.vwap_distance_penalty_start_pct
+            ) * self.config.vwap_distance_penalty_per_pct
             risks.append("LATE_ENTRY_RISK")
         reasons = ["ABOVE_5M_MA20", "ABOVE_VWAP", "INTRADAY_VOLUME_EXPANSION"]
         if catalyst_confirmed:

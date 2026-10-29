@@ -70,7 +70,7 @@ class DayTradeEngineTests(unittest.TestCase):
             * decision.position.quantity,
             8_000,
         )
-        self.assertEqual("day-trade-v0.2", decision.rule_version)
+        self.assertEqual("day-trade-v0.3", decision.rule_version)
 
     def test_unverified_catalyst_is_scored_instead_of_rejected(self):
         engine = DayTradeEngine()
@@ -163,6 +163,48 @@ class DayTradeEngineTests(unittest.TestCase):
         )
         self.assertEqual(DayTradeExitAction.HOLD, first.action)
         self.assertEqual(DayTradeExitAction.STOP_LOSS, confirmed.action)
+
+
+class DayTradeVwapDistanceTests(unittest.TestCase):
+    """day-trade-v0.3: VWAP distance cap (3%) and penalty above 2%."""
+
+    def test_default_fixture_score_is_unchanged(self):
+        # +1.27% above the VWAP; 90.8284 is the day-trade-v0.2 score.
+        candidate = DayTradeEngine().evaluate(snapshot(quote()), cash=600_000).candidates[0]
+        self.assertEqual(90.8284, candidate.score)
+        self.assertNotIn("LATE_ENTRY_RISK", candidate.risks)
+
+    def test_one_percent_above_vwap_scores_like_closer_quotes(self):
+        engine = DayTradeEngine()
+        near = engine.evaluate(snapshot(quote(vwap=19_900)), cash=600_000).candidates[0]
+        one = engine.evaluate(snapshot(quote(vwap=19_802)), cash=600_000).candidates[0]
+        self.assertEqual(near.score, one.score)
+        self.assertNotIn("LATE_ENTRY_RISK", one.risks)
+
+    def test_two_and_a_half_percent_above_vwap_is_penalized(self):
+        engine = DayTradeEngine()
+        base = engine.evaluate(
+            snapshot(quote(price=20_500, vwap=20_200)), cash=600_000
+        ).candidates[0]
+        far = engine.evaluate(
+            snapshot(quote(price=20_500, vwap=20_000)), cash=600_000
+        ).candidates[0]
+        self.assertAlmostEqual(1.5, base.score - far.score)  # (2.5 - 2.0) * 3
+        self.assertIn("LATE_ENTRY_RISK", far.risks)
+        self.assertNotIn("LATE_ENTRY_RISK", base.risks)
+
+    def test_three_and_a_half_percent_above_vwap_is_excluded(self):
+        decision = DayTradeEngine().evaluate(
+            snapshot(quote(vwap=19_323)), cash=600_000
+        )
+        self.assertEqual(DayTradeDecisionType.NO_TRADE, decision.decision)
+        self.assertEqual((), decision.candidates)
+
+    def test_missing_vwap_is_excluded(self):
+        # The Kiwoom adapter sends 0.0 when no VWAP was computed.
+        decision = DayTradeEngine().evaluate(snapshot(quote(vwap=0.0)), cash=600_000)
+        self.assertEqual(DayTradeDecisionType.NO_TRADE, decision.decision)
+        self.assertEqual((), decision.candidates)
 
 
 if __name__ == "__main__":

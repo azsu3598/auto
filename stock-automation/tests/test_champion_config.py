@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from stock_automation.config import StrategyConfig
-from stock_automation.learning import config_from_champion
+from stock_automation.learning import champion_matches_code, config_from_champion
 
 
 class ChampionConfigTests(unittest.TestCase):
@@ -11,6 +11,7 @@ class ChampionConfigTests(unittest.TestCase):
         return {
             "mode": "PAPER_ONLY",
             "rule_version": "closing-v0.2-learned",
+            "base_rule_version": "closing-v0.4",
             "session": "KRX_1520",
             "parameters": {
                 "minimum_score": 62.0,
@@ -35,6 +36,17 @@ class ChampionConfigTests(unittest.TestCase):
         unsafe["parameters"]["minimum_score"] = 10
         with self.assertRaisesRegex(ValueError, "safety envelope"):
             config_from_champion(StrategyConfig(), unsafe)
+
+    def test_rejects_champion_tuned_on_other_engine_logic(self):
+        legacy = self.payload()
+        del legacy["base_rule_version"]  # written before closing-v0.4
+        older = self.payload()
+        older["base_rule_version"] = "closing-v0.3"
+        for payload in (legacy, older):
+            self.assertFalse(champion_matches_code(StrategyConfig(), payload))
+            with self.assertRaisesRegex(ValueError, "base version"):
+                config_from_champion(StrategyConfig(), payload)
+        self.assertTrue(champion_matches_code(StrategyConfig(), self.payload()))
 
 
 if __name__ == "__main__":

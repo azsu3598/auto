@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from dataclasses import replace
@@ -11,6 +12,7 @@ from stock_automation.config import StrategyConfig
 from stock_automation.learning import (
     TunableParameters,
     TuningPolicy,
+    config_from_champion,
     parameters_from_config,
     tune_strategy,
     write_paper_champion,
@@ -87,6 +89,10 @@ class LearningTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             self.assertIn('"mode": "PAPER_ONLY"', text)
             self.assertIn('"minimum_close_strength": 0.58', text)
+            # The champion names the engine logic it was tuned on and loads back.
+            payload = json.loads(text)
+            self.assertEqual("closing-v0.4", payload["base_rule_version"])
+            self.assertEqual(0.58, config_from_champion(base, payload).minimum_close_strength)
 
 
 if __name__ == "__main__":

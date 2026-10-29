@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -35,6 +36,12 @@ def quote(**overrides) -> Quote:
         five_min_ma20=19_700,
         five_min_ma20_slope=0.4,
         support_price=19_400,
+        # 3% of the price: closing-v0.4 ATR stops equal the old fixed-ratio stops here.
+        atr14=600.0,
+        # The Kiwoom path always fills these; the values equal the old fallbacks
+        # (5-minute MA20, daily volume ratio) so default scores are unchanged.
+        vwap=19_700,
+        five_min_volume_ratio=1.8,
         nxt_eligible=False,
         theme="robot",
         catalyst="confirmed contract",
@@ -214,9 +221,9 @@ class ClosingBetEngineTests(unittest.TestCase):
         verified = engine.rank_candidates(snapshot(quote()))[0]
         unverified = engine.rank_candidates(snapshot(quote(catalyst_verified=False)))[0]
         missing = engine.rank_candidates(snapshot(quote(catalyst="", catalyst_score=0.0)))[0]
-        # Verified: 0.8 * 6 + 4; unverified keeps only the theme score; none adds nothing.
-        self.assertAlmostEqual(4.0, verified.score - unverified.score)
-        self.assertAlmostEqual(4.8, unverified.score - missing.score)
+        # Verified: 0.8 * 6 + 4. closing-v0.4: an unverified theme score adds nothing.
+        self.assertAlmostEqual(8.8, verified.score - unverified.score)
+        self.assertAlmostEqual(0.0, unverified.score - missing.score)
         self.assertIn("CATALYST_CONFIRMED", verified.reasons)
         self.assertNotIn("CATALYST_CONFIRMED", unverified.reasons)
         self.assertIn("CATALYST_UNKNOWN", unverified.risks)
@@ -318,6 +325,100 @@ class ClosingBetEngineTests(unittest.TestCase):
         weak = ClosingBetEngine().rank_candidates(weak_snapshot)[0]
         self.assertLess(weak.score, normal.score)
         self.assertIn("MARKET_WEAKNESS", weak.risks)
+
+
+class ClosingV04Tests(unittest.TestCase):
+    """closing-v0.4: ATR stops, verified-only catalyst points, missing intraday data."""
+
+    def test_large_atr_sizes_the_position_from_the_wider_stop(self):
+        decision = ClosingBetEngine().evaluate(snapshot(quote(atr14=1_200.0)), cash=600_000)
+        self.assertEqual(DecisionType.BUY, decision.decision)
+        self.assertEqual(19_400, decision.position.stop_price)  # 0.5 * ATR below 20,000
+        self.assertEqual(18_800, decision.position.emergency_stop)
+        self.assertEqual(8, decision.position.quantity)
+        self.assertLessEqual(
+            (decision.position.entry_price - decision.position.emergency_stop)
+            * decision.position.quantity,
+            10_000,
+        )
+
+    def test_stop_wider_than_the_limit_is_recorded_as_stop_too_wide(self):
+        # A lone too-wide candidate is filtered before ranking, so nothing qualifies.
+        q = quote(support_price=18_800)
+        engine = ClosingBetEngine()
+        self.assertEqual({q.code: "STOP_TOO_WIDE"}, engine.rejection_reasons(snapshot(q)))
+        decision = engine.evaluate(snapshot(q), cash=600_000)
+        self.assertEqual(DecisionType.NO_TRADE, decision.decision)
+        self.assertEqual(("NO_QUALIFYING_CANDIDATE",), decision.reason_codes)
+        self.assertIsNone(decision.position)
+        self.assertEqual(600_000, decision.remaining_cash)
+
+    def test_too_wide_top_scorer_is_skipped_for_the_next_candidate(self):
+        engine = ClosingBetEngine()
+        wide = quote(code="111111", theme="robot", support_price=18_800)
+        normal = quote(code="222222", theme="bio", trading_value=12_000_000_000)
+        # Without the stop check the wide quote outranks the normal one.
+        unfiltered = {
+            c.quote.code: c.score
+            for c in (engine._score_quote(snapshot(wide), replace(wide, support_price=19_400)),
+                      engine._score_quote(snapshot(normal), normal))
+        }
+        self.assertGreater(unfiltered["111111"], unfiltered["222222"])
+        snap = snapshot(wide, normal)
+        self.assertEqual({"111111": "STOP_TOO_WIDE"}, engine.rejection_reasons(snap))
+        self.assertEqual(["222222"], [c.quote.code for c in engine.rank_candidates(snap)])
+        decision = engine.evaluate(snap, cash=600_000)
+        self.assertEqual(DecisionType.BUY, decision.decision)
+        self.assertEqual("222222", decision.position.code)
+        self.assertLessEqual(
+            (decision.position.entry_price - decision.position.emergency_stop)
+            * decision.position.quantity,
+            10_000,
+        )
+
+    def test_missing_atr_is_a_hard_filter(self):
+        engine = ClosingBetEngine()
+        for atr14 in (None, 0.0):
+            q = quote(atr14=atr14)
+            self.assertEqual("ATR_UNAVAILABLE", engine.rejection_reason(snapshot(q), q))
+            decision = engine.evaluate(snapshot(q), cash=600_000)
+            self.assertEqual(DecisionType.NO_TRADE, decision.decision)
+            self.assertIsNone(decision.position)
+
+    def test_unverified_theme_score_adds_no_points(self):
+        engine = ClosingBetEngine()
+        strong = engine.rank_candidates(
+            snapshot(quote(catalyst_verified=False, catalyst_score=1.0))
+        )[0]
+        none = engine.rank_candidates(
+            snapshot(quote(catalyst_verified=False, catalyst_score=0.0))
+        )[0]
+        self.assertAlmostEqual(none.score, strong.score)
+
+    def test_verified_catalyst_keeps_its_points(self):
+        engine = ClosingBetEngine()
+        verified = engine.rank_candidates(snapshot(quote(catalyst_score=1.0)))[0]
+        missing = engine.rank_candidates(snapshot(quote(catalyst="", catalyst_score=0.0)))[0]
+        self.assertAlmostEqual(6.0 + 4.0, verified.score - missing.score)
+
+    def test_missing_vwap_earns_no_vwap_points(self):
+        engine = ClosingBetEngine()
+        known = engine.rank_candidates(snapshot(quote()))[0]
+        unknown = engine.rank_candidates(snapshot(quote(vwap=None)))[0]
+        # The hard filter still checks the 5-minute MA20 in place of the VWAP.
+        self.assertAlmostEqual(5.0, known.score - unknown.score)
+        self.assertIn("ABOVE_VWAP", known.reasons)
+        self.assertNotIn("ABOVE_VWAP", unknown.reasons)
+        self.assertIn("VWAP_UNKNOWN", unknown.risks)
+        self.assertNotIn("VWAP_UNKNOWN", known.risks)
+
+    def test_missing_intraday_volume_does_not_reuse_the_daily_ratio(self):
+        engine = ClosingBetEngine()
+        flat = engine.rank_candidates(snapshot(quote(five_min_volume_ratio=1.0)))[0]
+        unknown = engine.rank_candidates(snapshot(quote(five_min_volume_ratio=None)))[0]
+        self.assertAlmostEqual(flat.score, unknown.score)
+        self.assertIn("INTRADAY_VOLUME_UNKNOWN", unknown.risks)
+        self.assertNotIn("INTRADAY_VOLUME_UNKNOWN", flat.risks)
 
 
 if __name__ == "__main__":

@@ -36,6 +36,8 @@ LABELS = {
     "CATALYST_NOT_VERIFIED": "촉매 미확인(closing-v0.2 이하)",
     "DART_RISK_DISCLOSURE": "당일 위험 공시(DART)",
     "DART_NOT_CHECKED": "당일 DART 확인 없음(15:20 진입 차단)",
+    "ATR_UNAVAILABLE": "일봉 ATR 없음(closing-v0.4 손절 계산 불가)",
+    "STOP_TOO_WIDE": "ATR 손절 폭 상한 초과(closing-v0.4)",
     "MARKET_DECLINE_GATE": "시장 급락 차단",
 }
 

@@ -30,6 +30,7 @@ from .backtest_io import replay_case_from_dict
 from .day_trade import DayTradeDecisionType, DayTradeEngine
 from .learning import (
     TuningPolicy,
+    champion_matches_code,
     config_from_champion,
     tune_strategy,
     write_paper_champion,
@@ -1737,7 +1738,8 @@ def _run_tuning(*, s3, notifier, bucket: str, now: datetime) -> int:
         base = StrategyConfig(session=session)
         champion_key = f"config/rules/{session.value}.json"
         current = _load_optional_json(s3, bucket, champion_key)
-        if current:
+        # A champion tuned on older engine logic is ignored, not reused.
+        if current and champion_matches_code(base, current):
             base = config_from_champion(base, current)
         result = tune_strategy(
             cases,
@@ -1991,7 +1993,12 @@ def _run_worker() -> int:
     base_config = StrategyConfig(session=session)
     champion_key = os.getenv("PAPER_CHAMPION_KEY", f"config/rules/{session.value}.json")
     champion = _load_optional_json(s3, bucket, champion_key)
-    active_config = config_from_champion(base_config, champion) if champion else base_config
+    # A champion tuned on older engine logic is ignored; the code defaults apply.
+    active_config = (
+        config_from_champion(base_config, champion)
+        if champion and champion_matches_code(base_config, champion)
+        else base_config
+    )
     wallet_key = f"WALLET#CLOSING_BET#{session.value}"
     available_cash = _load_or_create_wallet(ddb, table, wallet_key, cash, now)
     costs = _runtime_costs()

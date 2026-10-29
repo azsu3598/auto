@@ -3,12 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .models import Session
+from .risk import AtrStopPolicy
 
 
 @dataclass(frozen=True, slots=True)
 class StrategyConfig:
     session: Session = Session.KRX_1520
-    rule_version: str = "closing-v0.3"
+    rule_version: str = "closing-v0.4"
     max_quote_age_seconds: int = 180
     minimum_trading_value: int = 10_000_000_000
     minimum_volume_ratio: float = 1.10
@@ -26,6 +27,23 @@ class StrategyConfig:
     max_allocation_pct: float = 0.40
     max_daily_loss: int = 10_000
     default_stop_mode: str = "5M_CONFIRMED"
+    # ATR stops (closing-v0.4). Fixed by the user's work order, not tuned by
+    # learning.py; percentages are of the entry price.
+    soft_atr_mult: float = 0.5
+    hard_atr_mult: float = 0.5
+    min_stop_pct: float = 1.5
+    max_stop_pct: float = 5.0
+    max_hard_stop_pct: float = 7.0
+
+    @property
+    def atr_stop_policy(self) -> AtrStopPolicy:
+        return AtrStopPolicy(
+            soft_atr_mult=self.soft_atr_mult,
+            hard_atr_mult=self.hard_atr_mult,
+            min_stop_pct=self.min_stop_pct,
+            max_stop_pct=self.max_stop_pct,
+            max_hard_stop_pct=self.max_hard_stop_pct,
+        )
 
     @property
     def excludes_nxt(self) -> bool:
