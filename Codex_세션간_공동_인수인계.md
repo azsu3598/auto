@@ -287,6 +287,18 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-29 09:06 KST — PC-D / Claude → 11/02 PC-C 작업자 / 10/28 PC-C 작업 확인(코드 변경 없음)
+
+- 작업 경로: `D:/Test`, `main` / `8aff11d`(= `origin/main`), fetch 후 작업 트리 깨끗함.
+- 범위: 10/28 PC-C 기록 5건과 commit `4c85dd9`·`8aff11d` 대조.
+- `4c85dd9` 코드 대조: `_apply_recorded_dart_checks(require_check=)`·`_apply_dart_catalysts`(검증 촉매 종목도 조회)·`_with_dart_check`(검증 촉매 문구 유지)·`engine.py` `DART_NOT_CHECKED` 하드 필터·`rejection_report.py` 라벨이 기록과 일치. 15:20 `require_check`는 `DART_API_KEY` 환경변수 존재로 판단하며, 4개 batch/검증 템플릿이 같은 이름으로 주입함을 확인.
+- `8aff11d`: 11/02 사전 승인 4개 항목·범위 밖·중단 조건 기록 확인. 기록의 "commit·push하지 않음" 문구는 기록 작성 시점 기준이며 이후 사용자가 commit·push함(push는 사용자가 직접 수행).
+- 테스트(PC-D, 시스템 Python 3.13, `PYTHONPATH=src`): 집중(`test_aws_runtime`·`test_engine`·`test_rejection_report`) **52개 OK**. 전체 `unittest discover -s tests` **419개 실행, 실패 2·오류 7·skip 2** — 9건 모두 PC-D 환경 패키지 없음(`boto3`/`botocore` 5건 모듈 로드 실패, `truststore` 4건 텔레그램 테스트). 기존 PC-D 환경 실패 9건과 같고, 모듈 5개가 로드되지 않아 PC-C 전체 485개 OK는 PC-D에서 재현하지 못함. `compileall -q src tests tools infra` 통과, `git diff --check` 통과.
+- 변경 파일: 이 문서(기록 추가)와 rotate로 보관 파일. 코드·템플릿 변경 없음.
+- 남은 위험: 15:10 DART 장애·기업코드 로딩 실패 시 15:20 전부 `NO_TRADE`(안전 쪽, 기존 기록과 같음).
+- 실거래 상태: 변경 없음, AWS 호출 없음, 실제 주문 없음.
+- 다음: 11/02(월) 09:41~14:40 PC-C 작업지시서 2-3부터(사전 승인 범위 안). 새 이미지에 `4c85dd9` 포함 필수.
+
 ### 2026-10-28 PC-C / Claude → 11/02 PC-C 작업자 / 11/02 승인 목록 사전 승인 기록(문서만)
 
 - **사용자 사전 승인(2026-10-28, 대화에서 "4개 모두 승인")**: [병행 작업 계획](docs/운영%20검증/2026-10-28_실거래까지_병행작업계획.md) 3절 4개 항목 전부.
@@ -325,18 +337,6 @@ python -m compileall -q src tests
 - 변경 파일: `docs/운영 검증/2026-10-27_PC-C_작업지시_운용중단_5회재시작.md` 2-2 — 집중 테스트를 `C:\Test\stock-automation\tests`에서 `PYTHONPATH=..\src`, 모듈 이름만(`test_paper_batch` …)으로 실행하도록 바꾸고 이유 한 줄 추가. 전체 테스트·compileall 명령은 그대로.
 - 검증(PC-C, 수정한 명령을 CMD 스크립트로 그대로 실행): 집중 173개 OK, 전체 482개 OK(skip 2), compileall 통과, `git diff --check` 통과.
 - 실거래 상태: 변경 없음, AWS 호출 없음, 실제 주문 없음. commit/push는 사용자 승인 대기.
-
-### 2026-10-28 PC-C / Claude → PC-D / 체크리스트 2절: 10/28 PC-D 변경 재검증(코드 변경 없음)
-
-- 작업 경로: `C:/Test`, `main` / `193e808`(= `origin/main`), pull 후 작업 트리 깨끗함. 필수 3개 문서를 다시 읽음.
-- 체크리스트(`docs/운영 검증/2026-10-28_사용자_할일_체크리스트.md`) 대조: 1절 push 완료(10/28 commit 6개 + 체크리스트 commit이 원격에 있음). 연결 문서 4개 있음, 날짜·요일·14:40 마감은 작업지시서·병행 계획과 일치.
-- 전체 테스트(`C:\Test\.venv` Python 3.13.16, `boto3` 1.43.111): `python -m unittest discover -s tests` **482개 실행, OK, skip 2**(Docker opt-in `test_container_tmp_runtime` 2건). PC-D 환경 실패 9건(`botocore`·`truststore`)은 PC-C에서 모두 통과.
-- 집중 테스트(작업지시서 2-2 목록 + 실거래 6개 모듈 + `test_telegram_setup`): 243개 OK. 단, **작업지시서 2-2 명령을 그대로(`tests.test_...` 형식) 실행하면 import 오류 4건**(`test_paper_batch_checks`·`test_aws_runtime`·`test_rejection_report`·`test_live_scenarios`가 형제 모듈을 `test_engine` 등으로 직접 import). `tests` 폴더에서 `PYTHONPATH=..\src`로 모듈명만 주면 통과한다. 코드 문제 아님, 지시서 명령 보완 필요.
-- `compileall -q src tests tools infra` 통과. `validate_paper_infrastructure.py`(Git 제외 `runtime/infra-validation`의 cfn-lint 1.57.2, `고정IP_모의배포_진행.md` 로컬 검증 절차): `CFN_SCHEMA_AND_IAM_LINT: PASS`, `TEMPLATES_VALIDATED: 11`(`live-locked.yaml` 포함), `NO_AWS_CALLS; NO_RESOURCES_CREATED`. 위 PC-D A3 기록의 cfn-lint 미실행 항목 해소.
-- 참고: 10/28 `3406a4a`(10:18 장중 분석)·`193e808`(체크리스트) commit은 10절 기록이 없다(문서만, 운용 영향 없음).
-- 변경 파일: 이 문서(기록 추가)와 rotate로 보관 파일. 코드·템플릿 변경 없음.
-- 실거래 상태: LIVE_ORDER_ENABLED·kill switch·실계좌 Secret·AWS 변경 없음, 실제 주문 없음. AWS 호출 없음.
-- 다음: 11/02(월) 09:41~14:40 작업지시서 2-3부터(사용자 사전 승인 후). commit/push는 사용자 승인 대기.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 
