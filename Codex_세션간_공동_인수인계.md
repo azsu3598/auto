@@ -287,6 +287,54 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-29 PC-D / Claude → PC-C / closing-v0.4 손절 폭 초과 후보를 순위 전에 제외(브랜치, 미커밋)
+
+- 작업 위치: worktree `D:/Test-logic-v04` / `feature/closing-v0.4`, 기준 `977262b` + 11:10 명세 구현 기록의 미커밋 변경 위. 이 기록은 `main` 작업 트리 `D:/Test`에 적었다.
+- 문제: `evaluate()`가 점수 1위에만 `atr_stop_rejection`을 적용해, 1위가 `STOP_TOO_WIDE`면 정상인 2위가 있어도 NO_TRADE였다.
+- 수정: `src/stock_automation/engine.py` `rejection_reason()`에서 `ATR_UNAVAILABLE` 바로 다음에 `atr_stop_rejection(entry_price=q.best_ask or q.price, support_price=q.support_price, atr14=q.atr14, policy=cfg.atr_stop_policy)` 결과가 있으면 `STOP_TOO_WIDE` 반환. `evaluate()`의 기존 검사는 방어용으로 유지. ATR 수치(0.5/0.5/1.5%/5%/7%) 불변. 안전 필터 완화 없음(필터 추가만).
+- 테스트: `test_engine.ClosingV04Tests.test_too_wide_top_scorer_is_skipped_for_the_next_candidate` 신규(필터 없이는 점수 1위인 손절 초과 종목이 `rejection_reasons()`에 `STOP_TOO_WIDE`, `rank_candidates()`에 없음, 2위 BUY·손실 ≤ 10,000원). **기대값 변경 1건**: `test_stop_wider_than_the_limit_is_recorded_as_stop_too_wide` — 유일 후보가 순위 전에 제외되므로 NO_TRADE 사유 `STOP_TOO_WIDE` → `NO_QUALIFYING_CANDIDATE`, `rejection_reasons()`가 `STOP_TOO_WIDE`를 표시하는 단언 추가(이 테스트는 11:10 명세 구현 기록에서 추가한 미커밋 테스트). `tests/test_day_trade.py`는 이번에 변경 없음(11:10 명세 구현 기록의 버전 문자열 1줄 외 기대값 불변).
+- 전체 테스트(PC-D 이번 실행, `stock-automation`, `PYTHONPATH=src`, `unittest discover -s tests -v`): **442개 실행, 통과 431, 실패 2·오류 7, skip 2**. 9건 모두 패키지 없음(`boto3`/`botocore` 5, `truststore` 4)으로 새 실패 0. `compileall -q src tests tools infra` 통과, `git diff --check` 통과.
+- 미실행: PC-C 전체 테스트, 백테스트 비교(replay 기록은 S3에만 있음, AWS 조회 금지).
+- 남은 위험: 15:10 DART 조회는 하드 필터 통과 종목만 하므로, 15:10에 손절 폭 초과로 빠진 종목이 15:20 시세로 통과해도 `DART_NOT_CHECKED`로 차단된다(안전 쪽). `evaluate()`의 방어 검사는 정상 경로에서 도달하지 않는다.
+- 실거래 상태: 변경 없음. 실거래 설정·비상정지·실계좌 Secret·실제 주문·AWS 변경 없음. main 병합·이미지 빌드·배포 안 함. commit/push 안 함(사용자가 직접).
+- 다음: 사용자 커밋 후 PC-C에서 브랜치 전체 테스트. 11/10 5회 운용 종료 뒤 replay 백테스트 비교로 병합 여부 결정.
+
+### 2026-10-29 PC-D / Claude → PC-C / 11:10 명세 구현(브랜치) 검토(읽기·테스트만, 코드 변경 없음)
+
+- 대상: worktree `D:/Test-logic-v04` / `feature/closing-v0.4`(기준 `977262b`, 미커밋 12개)와 `main`의 `stock-automation/README.md` 수정. 아래 11:10 기록과 실제 diff 대조.
+- 일치: 명세 1~5번이 기록대로 구현됨. `AtrStopPolicy`·`_tick_floor`·`ATR_UNAVAILABLE` 하드 필터·`STOP_TOO_WIDE`·검증 촉매만 가점·VWAP/5분 거래량 누락 처리·단타 VWAP 이격·챔피언 `base_rule_version`. 정책 없는 `build_position_plan`은 기존 식 그대로라 단타 손절 불변. 실거래·주문·AWS 템플릿 파일 변경 없음. README 정정 4곳은 코드와 일치.
+- 재실행(PC-D, `PYTHONPATH=src`): 집중 5개 모듈 56개 OK, 전체 441개 실행·실패 2·오류 7·skip 2 — 9건 모두 `boto3`/`botocore`/`truststore` 없음, 기록과 같다. `test_runtime_safety`·`test_scheduled_execution`·`test_paper_control`·`test_worker_verifier`는 PC-D에서 로드되지 않아 PC-C 확인 필요.
+- 동작 확인: 진입 10,000원 기준 ATR 7.0%까지 계획 생성, 7.2% 이상은 `STOP_TOO_WIDE`(비상손절 7% 상한이 먼저 걸림). 즉 일봉 ATR이 가격의 약 7%를 넘는 종목은 종가배팅에서 빠진다.
+- 보완 권장(버그 아님, 명세가 모호했던 부분): ① `STOP_TOO_WIDE`를 1위 후보에만 적용해 2위가 조건을 만족해도 NO_TRADE가 된다. 변동성 큰 종목이 1위가 되기 쉬우므로, 손절 폭 검사를 `rejection_reason` 하드 필터로 옮겨 순위 전에 걸러내는 쪽을 권장. ② 기준 버전이 다른 챔피언을 조용히 무시하므로 실행 결과에 경고 표시를 남길 것(낮음). ③ 병합 전 브랜치 README의 규칙 버전·ATR 손절 설명 갱신(기록에 이미 있음).
+- 변경 파일: 이 문서(기록 추가)와 rotate 보관 파일만. 코드 변경 없음.
+- 실거래 상태: 변경 없음, AWS 호출 없음, 실제 주문 없음. commit/push 안 함.
+- 다음: 사용자가 ① 권장안 반영 여부를 프로그래머에게 지시 → PC-C 브랜치 전체 테스트 → 5회 운용(11/10) 후 병합 판단.
+
+### 2026-10-29 11:10 KST — PC-D / Claude → PC-C / 매매 로직 수정 명세 1~5번 구현(브랜치, 미커밋)
+
+- PC alias / 도구: `PC-D` / Claude. 작업지시: 사용자가 붙여 준 "매매 로직 수정 담당" 지시서. 명세: `docs/프로그램 설계/2026-10-29_매매로직_수정명세.md`.
+- 브랜치·기준 commit: 시작 시 dirty 6개는 사용자 승인으로 `d043458`(단타 기록)·`977262b`(명세) 커밋. 5번(README)은 `main` 작업 트리 `D:/Test`, 1~4번은 git worktree `D:/Test-logic-v04` / 브랜치 `feature/closing-v0.4`(기준 `977262b`). 5회 모의운용(11/03~11/10) 전이므로 main 병합·이미지 빌드·ECR·AWS 배포 안 함. **11/02 배포는 `main`(현재 코드, `closing-v0.3`)으로 한다.**
+- 변경 파일(`main`): `stock-automation/README.md`(명세 5절 4곳: 촉매 필수 문구 → 가점, `closing-v0.2` → `v0.3`, 테마 강도는 v0.3에서 미검증이어도 최대 6점 반영됨을 사실대로 기재), 이 문서·rotate 보관 파일.
+- 변경 파일(브랜치): `src/stock_automation/risk.py`(`AtrStopPolicy`, `_tick_floor`, `atr_stop_rejection`, `build_position_plan(atr14=, atr_policy=)` — 정책 없으면 기존 고정 비율 그대로), `config.py`(`closing-v0.4`, `soft_atr_mult` 0.5·`hard_atr_mult` 0.5·`min_stop_pct` 1.5·`max_stop_pct` 5.0·`max_hard_stop_pct` 7.0, `atr_stop_policy`), `engine.py`(하드 필터 `ATR_UNAVAILABLE`(DART 검사 다음), 1위 후보 손절 초과 시 NO_TRADE `STOP_TOO_WIDE`, 검증 촉매일 때만 `catalyst_score` 가점, VWAP 없으면 5점·`ABOVE_VWAP` 제외+`VWAP_UNKNOWN`, 5분 거래량 배율 없으면 0점+`INTRADAY_VOLUME_UNKNOWN`), `day_trade.py`(`day-trade-v0.3`, `maximum_vwap_distance_pct` 3.0 초과 제외, 2.0% 초과 1%p당 3점 감점+`LATE_ENTRY_RISK`, `vwap <= 0` 제외), `learning.py`(챔피언에 `base_rule_version` 저장, 불일치·누락 챔피언 `config_from_champion` 거부), `aws_runtime.py`(15:20·주간 튜닝에서 기준 버전 불일치 챔피언은 무시하고 코드 기본값 사용), `tools/rejection_report.py`(`ATR_UNAVAILABLE`·`STOP_TOO_WIDE` 라벨). 새 상수는 learning 자동 조정 대상(5개)에 넣지 않았다.
+- 추가 테스트: 새 `tests/test_risk.py` 9개(작은/큰 ATR, 손절 5%·비상 7% 초과, ATR 없음·0·음수·NaN, 호가 경계 2,010·5,020·20,100·50,200원 내림, 손실 ≤ 10,000원, 정책 없을 때 고정 비율 값이 `main` 결과와 동일), `test_engine.ClosingV04Tests` 7개, `test_day_trade.DayTradeVwapDistanceTests` 5개(+1.0%/+2.5%/+3.5%/VWAP 0, 기본 fixture 점수 90.8284 고정), `test_champion_config` 1개, `test_learning` 단언 추가.
+- 기대값·fixture 변경(이유): ① `test_engine.quote()` fixture에 `atr14=600.0`(이 fixture에서 v0.4 손절이 기존 손절과 같아지는 값), `vwap=19_700`·`five_min_volume_ratio=1.8`(기존 대체값과 같은 값, 키움 경로는 항상 채움) 추가 — 이 fixture를 쓰는 엔진·aws_runtime·backtest·learning·reporting 테스트의 기대값은 그대로. ② `test_engine.test_catalyst_is_scored_not_required`: 검증−미검증 차이 4.0 → 8.8, 미검증−촉매 없음 4.8 → 0.0(명세 2번 의도된 변경). ③ `test_day_trade.test_creates_isolated_paper_position`: `"day-trade-v0.2"` → `"day-trade-v0.3"`(지시된 버전 상향으로 불가피. 지시서의 "test_day_trade 기존 기대값 불변"과 충돌하는 유일한 줄이며, 점수·손절·수량 기대값은 하나도 바뀌지 않음). ④ `test_champion_config` payload에 `base_rule_version: closing-v0.4` 추가(기대값 동일).
+- 전체 테스트(PC-D 이번 실행, 시스템 Python 3.13, `PYTHONPATH=src`): 브랜치 **441개 실행, 통과 430, 실패 2·오류 7, skip 2**. 실패·오류 9건 모두 패키지 없음(`boto3`/`botocore` 5, `truststore` 4)으로 기존 PC-D 환경 실패와 같음. `main`(README만 변경) 419개 실행, 같은 9건. `compileall -q src tests tools infra` 양쪽 통과, `git diff --check` 양쪽 통과. worktree에는 Git 제외 서브모듈 `Kiwoom-REST-API`가 비어 있어 `D:/Test` 로컬 사본을 같은 commit `234560d`로 복제했다(네트워크 없음).
+- 백테스트 비교: **비교 불가.** `replay-cases/`는 S3에만 있고 저장소에 기록이 없다. AWS 조회는 지시서상 금지.
+- 미확인: PC-C 전체 테스트(완료 판정 기준) 미실행. S3 `config/rules/*.json` 챔피언 존재 여부 미확인 — 있으면 v0.4 배포 후 무시된다(의도). 브랜치 README의 규칙 버전 표·ATR 손절 설명은 `main` README 수정과 충돌하지 않도록 아직 v0.4로 바꾸지 않았다(병합 시 갱신 필요). 작업 중 Claude Code 프로세스가 한 번 비정상 종료(0xC0000409)됐으나 작업 트리 변경은 보존됨을 확인했다.
+- 남은 위험: ATR 손절 초과·ATR 없음으로 `NO_TRADE`가 늘 수 있다(안전 쪽). 1위 후보가 `STOP_TOO_WIDE`면 2위로 넘어가지 않고 NO_TRADE다(명세대로). 단타는 VWAP가 없을 때(키움 어댑터가 0.0을 넣음) 이전에는 통과했으나 이제 제외된다. 제안값은 5회 기록·replay 백테스트 없이 채택한 초기값이다.
+- 실거래 상태: 변경 없음. `LIVE_ORDER_ENABLED`·비상정지·실계좌 Secret·AWS·예약 변경 없음, 실제 주문 없음. commit/push 안 함(사용자가 직접).
+- 다음: 사용자가 `main`(README·이 기록·보관 파일과 차트 수업 세션 변경)과 브랜치(`D:/Test-logic-v04`)를 각각 커밋. PC-C는 브랜치를 받아 전체 테스트를 실행하고, 5회 운용(11/10) 종료 뒤 S3 replay 백테스트 비교 → 병합 여부를 사용자에게 받는다.
+
+### 2026-10-29 PC-D / Claude → 다음 세션 / 차트 기초 1강 학습 기록(문서만)
+
+- 작업 경로: `D:/Test`, `main` / `42f44bb`(미커밋 상태 위에서 작업).
+- 요청: 사용자 차트 기초 수업(캔들 네 가격·양봉/음봉과 등락률 기준 차이·종가 위치) 진행과 숙제 채점.
+- 변경 파일: `Sabu/README.md` "현재 학습 기록"에 2026-10-29 한 줄 추가, 이 문서(기록 추가)와 rotate로 보관 파일.
+- 테스트: 코드 변경 없음, 실행 안 함.
+- 같은 날 앞선 기록(매매 로직 수정 명세)과 별개다. 명세·프로그래머 프롬프트는 변경 없음.
+- 실거래 상태: 변경 없음, AWS 호출 없음, 실제 주문 없음. commit/push 하지 않음(사용자가 직접).
+- 다음: 차트 수업 2강(음봉 꼬리 복습 → 교재 3장 추세·지지·저항).
+
 ### 2026-10-29 PC-D / Claude → 수정 담당 프로그래머 / 매매 로직 검토와 수정 명세(문서만, 코드 변경 없음)
 
 - 작업 경로: `D:/Test`, `main` / `42f44bb`. 시작 시 사용자 미커밋 문서 3개(`docs/실시간 데이터 확인/` 2개, `docs/프로그램 설계/추천_이벤트_현재본.csv`)는 건드리지 않았다.
@@ -298,50 +346,6 @@ python -m compileall -q src tests
 - 남은 위험: 명세의 제안값(ATR 배수·손절 상한 등)은 사용자 미확정. 전략 변경(1~4번)은 11/03~11/10 5회 모의운용 종료 후 적용해야 5회 기록이 유지된다. S3 학습 챔피언 파일 존재 여부 미확인.
 - 실거래 상태: 변경 없음, AWS 호출 없음, 실제 주문 없음. commit/push 하지 않음(사용자가 직접).
 - 다음: 11/02 PC-C 작업은 기존 지시서대로. 명세 5번(README 정정)은 언제든 가능, 1~4번은 5회 운용 후 사용자 제안값 확정 뒤 착수.
-
-### 2026-10-29 09:06 KST — PC-D / Claude → 11/02 PC-C 작업자 / 10/28 PC-C 작업 확인(코드 변경 없음)
-
-- 작업 경로: `D:/Test`, `main` / `8aff11d`(= `origin/main`), fetch 후 작업 트리 깨끗함.
-- 범위: 10/28 PC-C 기록 5건과 commit `4c85dd9`·`8aff11d` 대조.
-- `4c85dd9` 코드 대조: `_apply_recorded_dart_checks(require_check=)`·`_apply_dart_catalysts`(검증 촉매 종목도 조회)·`_with_dart_check`(검증 촉매 문구 유지)·`engine.py` `DART_NOT_CHECKED` 하드 필터·`rejection_report.py` 라벨이 기록과 일치. 15:20 `require_check`는 `DART_API_KEY` 환경변수 존재로 판단하며, 4개 batch/검증 템플릿이 같은 이름으로 주입함을 확인.
-- `8aff11d`: 11/02 사전 승인 4개 항목·범위 밖·중단 조건 기록 확인. 기록의 "commit·push하지 않음" 문구는 기록 작성 시점 기준이며 이후 사용자가 commit·push함(push는 사용자가 직접 수행).
-- 테스트(PC-D, 시스템 Python 3.13, `PYTHONPATH=src`): 집중(`test_aws_runtime`·`test_engine`·`test_rejection_report`) **52개 OK**. 전체 `unittest discover -s tests` **419개 실행, 실패 2·오류 7·skip 2** — 9건 모두 PC-D 환경 패키지 없음(`boto3`/`botocore` 5건 모듈 로드 실패, `truststore` 4건 텔레그램 테스트). 기존 PC-D 환경 실패 9건과 같고, 모듈 5개가 로드되지 않아 PC-C 전체 485개 OK는 PC-D에서 재현하지 못함. `compileall -q src tests tools infra` 통과, `git diff --check` 통과.
-- 변경 파일: 이 문서(기록 추가)와 rotate로 보관 파일. 코드·템플릿 변경 없음.
-- 남은 위험: 15:10 DART 장애·기업코드 로딩 실패 시 15:20 전부 `NO_TRADE`(안전 쪽, 기존 기록과 같음).
-- 실거래 상태: 변경 없음, AWS 호출 없음, 실제 주문 없음.
-- 다음: 11/02(월) 09:41~14:40 PC-C 작업지시서 2-3부터(사전 승인 범위 안). 새 이미지에 `4c85dd9` 포함 필수.
-
-### 2026-10-28 PC-C / Claude → 11/02 PC-C 작업자 / 11/02 승인 목록 사전 승인 기록(문서만)
-
-- **사용자 사전 승인(2026-10-28, 대화에서 "4개 모두 승인")**: [병행 작업 계획](docs/운영%20검증/2026-10-28_실거래까지_병행작업계획.md) 3절 4개 항목 전부.
-  1. 기존 batch 운용 `stop`(11/02 09:41~14:40, 5회차 미시작 종료 포함)
-  2. 새 앱 이미지 ECR 게시(`4c85dd9` 이후 커밋 포함 필수)와 control Lambda 갱신
-  3. batch 스택 갱신(새 5회 계획, `PmStart`·`PmEnd`·`AmStart`·`AmEnd`=11/03~11/10)과 `DEPLOYMENT_CHECK`
-  4. 새 5회 예약 활성화와 그에 따른 AWS 비용(기존 운용과 같은 구성, 문서상 월 $7~10 예상, 상한 아님)
-- 범위 밖(포함 안 됨): 예약 추가·연장, 실거래 설정·`LIVE_ORDER_ENABLED`·kill switch, 실계좌 Secret, 실주문, 잠긴 실거래 템플릿 배포, 이 목록에 없는 AWS 변경.
-- 조건: 작업지시서 순서·각 단계 결과 확인을 그대로 따른다. 결과가 기대와 다르면(2-3 status 이상, `schedule_errors`, 오프라인 검사 실패, `DEPLOYMENT_CHECK` 거부 등) 승인과 관계없이 멈추고 사용자에게 보고한다. 14:40을 넘기면 stop하지 않고 일정을 다시 정한다. commit/push는 이 승인에 포함되지 않는다.
-- 이 기록은 사용자 요청으로 commit·push하지 않았다(PC-C 작업 트리에 미커밋 상태).
-- 실거래 상태: 변경 없음, AWS 호출 없음, 실제 주문 없음.
-
-### 2026-10-28 PC-C / Claude → PC-D / 15:20 DART 미확인 종목 진입 차단(모의 경로, 11/02 배포 대상)
-
-- 사용자 승인: 아래 기록의 `4115c94` 발견을 11/02 배포 전에 PC-C에서 수정하고 commit/push.
-- `src/stock_automation/aws_runtime.py`: `_apply_recorded_dart_checks(..., require_check=)` — 같은 날 유효한 check가 없는 종목에 `DART_NOT_CHECKED` 경고(shortlist 없음·`dart_checks` 없음 포함). `ENTRY_1520`은 `DART_API_KEY`가 있으면 `require_check=True`(키 존재만 확인, DART 호출 없음). `_apply_dart_catalysts`는 `catalyst_verified` 종목도 조회(15:20 차단 대상이 되지 않게), `_with_dart_check`는 이미 검증된 촉매 문구를 덮어쓰지 않고 위험 플래그만 더한다.
-- `src/stock_automation/engine.py`: `DART_NOT_CHECKED` 경고 → 하드 필터 `DART_NOT_CHECKED`(위험 공시 검사 다음). `tools/rejection_report.py` 한국어 라벨 추가.
-- 테스트: `test_aws_runtime` 신규 2(필수 시 오래된·읽을 수 없는·없는 check 차단, shortlist 없음/빈 check는 NO_TRADE / 검증 촉매 종목도 조회·문구 유지·위험 차단), `test_engine` 신규 1. **기존 기대값 변경 1건**: `test_same_day_dart_disclosure_becomes_verified_catalyst`의 조회 목록에 `000007`(검증 촉매) 추가 — 의도한 동작 변경(조회 확대)이며 결과 시세 불변 확인은 유지.
-- 문서: 작업지시서 0절 변경 목록 8번 추가.
-- 검증(PC-C): 집중 51개 OK, 전체 485개 OK(skip 2 Docker), `compileall` 통과, `validate_paper_infrastructure.py` PASS(11개), `git diff --check` 통과.
-- 영향: 15:10 실패·DART 장애·하드 필터 통과 12개 초과 시 일부/전체 `NO_TRADE`가 늘 수 있다(안전 쪽). batch 템플릿·Lambda 불변, 앱 이미지에만 반영되므로 11/02 새 이미지 빌드에 포함해야 한다. `rule_version`은 `closing-v0.3` 그대로.
-- 실거래 상태: 변경 없음, AWS 호출 없음, 실제 주문 없음.
-
-### 2026-10-28 PC-C / Claude → PC-D / 10/28 PC-D commit 9개 코드·기록 대조(읽기만, 코드 변경 없음)
-
-- 범위: `4115c94`·`7b897a6`·`3a6c9ca`·`d1efea2`·`227be3a`·`887efab`·`a180def`·`3406a4a`·`193e808`의 diff와 해당 10절·보관 기록, 연결 문서(작업지시서·일정·병행 계획·잠금 템플릿 안내·증권사 검증 계획), `infra/paper-calendar-2026.json`(11/03~11/10 휴장 없음, 특별 세션 11/19는 범위 밖).
-- 기록과 일치: `7b897a6`(2·3·5회 허용, 세 곳 동일), `3a6c9ca`(단타 촉매 점수화·순위 후보, 기록된 남은 위험 ①~⑤ 그대로), `227be3a`(A1 ①~⑥ 모두 코드에 있음), `887efab`(템플릿 잠금·IAM·Deny·환경변수 이름이 `live_cli.py`·키움 `env_var_names("real")`=`APP_KEY`/`APP_SECRET`와 일치, 시나리오 15·인프라 8개 존재). R1b 거절 주문은 코드에 호가 단위 검사가 없어 계획대로 가능, 매수 슬리피지 검사는 상향만이라 R1 저가 지정가도 가능. `3406a4a`는 보고서·CSV 이벤트·모의 현재본 3곳 기록.
-- **발견(모의 경로, 11/02 배포 대상) `4115c94`**: 15:20은 DART를 호출하지 않으므로 위험 공시 차단은 15:10에 조회된 종목에만 적용된다. 조회 안 된 종목은 위험 확인 없이 진입 판단까지 간다. 경우: ① 15:10 `shortlist.json`이 없을 때 15:20 대체 스냅샷(`ENTRY_FALLBACK_CANDIDATE_LIMIT`)은 DART 조회·상장 코드 없음, ② 15:10 조회가 45초 예산·DART 오류로 끊긴 종목, ③ 하드 필터 통과 종목이 12개를 넘을 때 조회는 시세 순서 앞 12개, shortlist는 점수 상위 12개라 둘이 다를 수 있음. 기록의 "당일 위험 공시는 하드 필터로 탈락"은 조회된 종목에 한해 참이다. 최근 하드 필터 통과 0~소수라 빈도는 낮다. 권장: 11/02 배포 전에 PC-D가 "DART 설정이 있는데 같은 날 `dart_checks`가 없는 종목은 15:20 진입 금지(`DART_NOT_CHECKED`)" 수정과 테스트를 추가할지 사용자 결정. 배포 후에는 5회 기록을 다시 시작해야 하므로 11/02 전에만 가능.
-- 낮음: 실행 잠금 120초는 연장 없음(실행이 120초를 넘으면 다른 실행이 들어올 수 있음). `FakeDdb`는 조건식을 문자열로 흉내 내므로 실제 DynamoDB 조건 동작은 실거래 테이블 배포 후에만 확인된다. A2 테스트 보조 수정은 기록과 달리 `227be3a`에 들어 있다(내용 같음).
-- 테스트: 위 PC-C 기록(전체 482 OK) 이후 코드 변경 없음, 재실행 안 함.
-- 실거래 상태: 변경 없음, AWS 호출 없음, 실제 주문 없음. commit/push는 사용자 승인 대기.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 
