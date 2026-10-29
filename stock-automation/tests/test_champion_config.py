@@ -11,7 +11,7 @@ class ChampionConfigTests(unittest.TestCase):
         return {
             "mode": "PAPER_ONLY",
             "rule_version": "closing-v0.2-learned",
-            "base_rule_version": "closing-v0.4",
+            "base_rule_version": "closing-v0.5",
             "session": "KRX_1520",
             "parameters": {
                 "minimum_score": 62.0,
@@ -47,6 +47,14 @@ class ChampionConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "base version"):
                 config_from_champion(StrategyConfig(), payload)
         self.assertTrue(champion_matches_code(StrategyConfig(), self.payload()))
+
+    def test_rejects_champion_tuned_on_closing_v04(self):
+        # closing-v0.5 adds tiers, so a v0.4 champion was tuned on other selection logic.
+        v04 = self.payload()
+        v04["base_rule_version"] = "closing-v0.4"
+        self.assertFalse(champion_matches_code(StrategyConfig(), v04))
+        with self.assertRaisesRegex(ValueError, "base version"):
+            config_from_champion(StrategyConfig(), v04)
 
 
 if __name__ == "__main__":

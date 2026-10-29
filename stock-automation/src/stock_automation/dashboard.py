@@ -374,6 +374,9 @@ def _event_reasons(
             ),
             None,
         )
+        # A CONDITIONAL tier is shown with why it missed FULL, before the strengths.
+        if isinstance(selected, dict) and isinstance(selected.get("tier_reasons"), list):
+            raw.extend(selected["tier_reasons"])
         if isinstance(selected, dict) and isinstance(selected.get("reasons"), list):
             raw.extend(selected["reasons"])
     if not raw and payload.get("action"):
@@ -579,6 +582,11 @@ def _recent_timestamp(
 
 _REASON_LABELS = {
     "TOP_SCORE_SELECTED": "종가배팅 종합점수 1위",
+    "TIER_FULL": "정식 등급(정상 크기)",
+    "TIER_CONDITIONAL": "조건부 등급(절반 크기)",
+    "CATALYST_UNKNOWN": "재료 미확인",
+    "MARKET_WEAKNESS": "시장 약세(지수 -1% 이하)",
+    "SCORE_BELOW_MINIMUM": "점수 기준 미달(여유폭 이내)",
     "TOP_INTRADAY_SCORE_SELECTED": "단타 종합점수 1위",
     "TOP_DAILY_CHART_SELECTED": "중기 차트점수 1위",
     "HIGH_TRADING_VALUE": "거래대금 충분",

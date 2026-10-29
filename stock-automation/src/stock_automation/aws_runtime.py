@@ -2042,6 +2042,11 @@ def _run_worker() -> int:
                 "target1": decision.position.target1,
                 "target2": decision.position.target2,
                 "decided_at": decision.decided_at.isoformat(),
+                # closing-v0.5 tier and, for CONDITIONAL, why it missed FULL.
+                "reason_codes": [
+                    *(code for code in decision.reason_codes if code != "PAPER_EXECUTION_ONLY"),
+                    *(decision.candidates[0].tier_reasons if decision.candidates else ()),
+                ],
             },
         )
     inserted = _save_decision(

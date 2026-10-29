@@ -91,7 +91,7 @@ class LearningTests(unittest.TestCase):
             self.assertIn('"minimum_close_strength": 0.58', text)
             # The champion names the engine logic it was tuned on and loads back.
             payload = json.loads(text)
-            self.assertEqual("closing-v0.4", payload["base_rule_version"])
+            self.assertEqual("closing-v0.5", payload["base_rule_version"])
             self.assertEqual(0.58, config_from_champion(base, payload).minimum_close_strength)
 
 

@@ -15,6 +15,15 @@ EVENT_COLUMNS = (
 )
 
 
+def _tier_text(candidate) -> str:
+    """closing-v0.5 tier, with why a CONDITIONAL candidate missed FULL."""
+    if candidate is None or not candidate.tier:
+        return "등급 없음"
+    if candidate.tier_reasons:
+        return f"{candidate.tier} ({', '.join(candidate.tier_reasons)})"
+    return candidate.tier
+
+
 def append_training_event(
     path: str | Path,
     snapshot: MarketSnapshot,
@@ -98,6 +107,8 @@ def write_markdown_report(
         lines.extend([
             f"**AI 모의매수: {p.name}({p.code})**",
             "",
+            f"- 추천 등급: {_tier_text(decision.candidates[0] if decision.candidates else None)}",
+            f"- 판단 코드: {', '.join(decision.reason_codes)}",
             f"- 모의 체결가: {p.entry_price:,}원",
             f"- 수량: {p.quantity:,}주",
             f"- 투자금: {p.invested_amount:,}원",
@@ -121,13 +132,13 @@ def write_markdown_report(
         lines.append("조건을 통과한 후보가 없다.")
     else:
         lines.extend([
-            "| 순위 | 종목 | 기준가 | 점수 | 근거 | 위험 |",
-            "|---:|---|---:|---:|---|---|",
+            "| 순위 | 종목 | 기준가 | 점수 | 등급 | 근거 | 위험 |",
+            "|---:|---|---:|---:|---|---|---|",
         ])
         for index, candidate in enumerate(decision.candidates, 1):
             lines.append(
                 f"| {index} | {candidate.quote.name}({candidate.quote.code}) | "
-                f"{candidate.quote.price:,}원 | {candidate.score:.2f} | "
+                f"{candidate.quote.price:,}원 | {candidate.score:.2f} | {_tier_text(candidate)} | "
                 f"{', '.join(candidate.reasons)} | {', '.join(candidate.risks) or '-'} |"
             )
         lines.extend(["", "## 차트 근거", ""])

@@ -9,8 +9,12 @@ from pathlib import Path
 
 from stock_automation.config import StrategyConfig
 from stock_automation.dart import BLOCKING_RISK_FLAGS
+from unittest.mock import patch
+
 from stock_automation.engine import ClosingBetEngine
+from stock_automation.learning import TunableParameters, apply_parameters
 from stock_automation.medium_term import MediumTermEngine
+from stock_automation.risk import build_position_plan
 from stock_automation.ledger import DuplicateDecisionError, JsonlLedger
 from stock_automation.models import DecisionType, MarketSnapshot, Quote, Session
 
@@ -419,6 +423,174 @@ class ClosingV04Tests(unittest.TestCase):
         self.assertAlmostEqual(flat.score, unknown.score)
         self.assertIn("INTRADAY_VOLUME_UNKNOWN", unknown.risks)
         self.assertNotIn("INTRADAY_VOLUME_UNKNOWN", flat.risks)
+
+
+def market(snap: MarketSnapshot, kospi: float) -> MarketSnapshot:
+    return replace(snap, kospi_change_pct=kospi)
+
+
+def engine_at(score: float, snap: MarketSnapshot) -> ClosingBetEngine:
+    """An engine whose minimum_score puts the snapshot's top quote at ``score`` on a 60 scale.
+
+    Scores come from the full formula, so the test moves the threshold instead:
+    "score 65" means 5 points above minimum_score, as with the default of 60.
+    """
+    actual = ClosingBetEngine().rank_candidates(snap)[0].score
+    return ClosingBetEngine(StrategyConfig(minimum_score=actual - (score - 60.0)))
+
+
+class ClosingV05TierTests(unittest.TestCase):
+    """closing-v0.5: FULL / CONDITIONAL tiers; CONDITIONAL buys at half size."""
+
+    def evaluate(self, engine: ClosingBetEngine, snap: MarketSnapshot):
+        with patch(
+            "stock_automation.engine.build_position_plan", wraps=build_position_plan
+        ) as sizing:
+            decision = engine.evaluate(snap, cash=600_000)
+        return decision, sizing
+
+    def test_full_tier_buys_at_normal_size(self):
+        snap = market(snapshot(quote()), -0.5)
+        decision, sizing = self.evaluate(engine_at(65.0, snap), snap)
+        self.assertEqual(DecisionType.BUY, decision.decision)
+        self.assertEqual("FULL", decision.candidates[0].tier)
+        self.assertEqual(
+            ("TOP_SCORE_SELECTED", "TIER_FULL", "PAPER_EXECUTION_ONLY"), decision.reason_codes
+        )
+        self.assertEqual(10_000, sizing.call_args.kwargs["max_loss"])
+        self.assertAlmostEqual(0.40, sizing.call_args.kwargs["max_allocation_pct"])
+        self.assertEqual(11, decision.position.quantity)  # unchanged from closing-v0.4
+
+    def test_unverified_catalyst_is_conditional_at_half_size(self):
+        snap = snapshot(quote(catalyst_verified=False))
+        decision, sizing = self.evaluate(engine_at(65.0, snap), snap)
+        self.assertEqual(DecisionType.BUY, decision.decision)
+        self.assertEqual("CONDITIONAL", decision.candidates[0].tier)
+        self.assertEqual(("CATALYST_UNKNOWN",), decision.candidates[0].tier_reasons)
+        self.assertIn("TIER_CONDITIONAL", decision.reason_codes)
+        self.assertEqual(5_000, sizing.call_args.kwargs["max_loss"])
+        self.assertAlmostEqual(0.20, sizing.call_args.kwargs["max_allocation_pct"])
+        p = decision.position
+        self.assertLessEqual((p.entry_price - p.emergency_stop) * p.quantity, 5_000)
+        self.assertLessEqual(p.invested_amount, 120_000)
+        self.assertIn("CATALYST_UNKNOWN", decision.notes)
+        self.assertIn("max loss 5,000 KRW", decision.notes)
+        self.assertEqual("CONDITIONAL", decision.to_dict()["candidates"][0]["tier"])
+
+    def test_weak_market_is_conditional(self):
+        snap = market(snapshot(quote()), -1.5)
+        decision, sizing = self.evaluate(engine_at(65.0, snap), snap)
+        self.assertEqual("CONDITIONAL", decision.candidates[0].tier)
+        self.assertEqual(("MARKET_WEAKNESS",), decision.candidates[0].tier_reasons)
+        self.assertIn("TIER_CONDITIONAL", decision.reason_codes)
+        self.assertEqual(5_000, sizing.call_args.kwargs["max_loss"])
+
+    def test_score_within_the_margin_is_conditional(self):
+        snap = snapshot(quote())
+        decision, _ = self.evaluate(engine_at(55.0, snap), snap)
+        self.assertEqual(DecisionType.BUY, decision.decision)
+        self.assertEqual(("SCORE_BELOW_MINIMUM",), decision.candidates[0].tier_reasons)
+        self.assertIn("TIER_CONDITIONAL", decision.reason_codes)
+
+    def test_score_below_the_conditional_threshold_is_no_trade(self):
+        snap = snapshot(quote())
+        decision, _ = self.evaluate(engine_at(49.0, snap), snap)
+        self.assertEqual(DecisionType.NO_TRADE, decision.decision)
+        self.assertEqual(("NO_QUALIFYING_CANDIDATE",), decision.reason_codes)
+        self.assertEqual("", decision.candidates[0].tier)
+        self.assertIsNone(decision.position)
+
+    def test_full_is_selected_over_a_higher_scoring_conditional(self):
+        full = quote(
+            code="111111",
+            theme="robot",
+            institution_net=None,
+            program_net=None,
+            five_min_volume_ratio=1.0,
+            recent_resistance=20_100,  # under 1.2% room: -8
+        )
+        conditional = quote(code="222222", theme="bio", catalyst_verified=False)
+        snap = snapshot(full, conditional)
+        engine = engine_at(61.0, snapshot(full))
+        ranked = {c.quote.code: c for c in engine.rank_candidates(snap)}
+        self.assertEqual("FULL", ranked["111111"].tier)
+        self.assertEqual("CONDITIONAL", ranked["222222"].tier)
+        self.assertGreater(ranked["222222"].score, ranked["111111"].score)
+        decision = engine.evaluate(snap, cash=600_000)
+        self.assertEqual("111111", decision.position.code)
+        self.assertIn("TIER_FULL", decision.reason_codes)
+
+    def test_conditional_size_below_one_share_is_position_size_zero(self):
+        def expensive(**overrides):
+            return quote(
+                price=148_000, open_price=140_600, high_price=148_740, low_price=139_860,
+                ma5=143_560, ma20=139_860, ma120=125_800, five_min_ma20=145_780,
+                support_price=143_560, atr14=4_440.0, vwap=145_780,
+                best_ask=148_000, best_bid=147_900, **overrides,
+            )
+        # Half allocation is 120,000 KRW, under one 148,000 KRW share.
+        decision = ClosingBetEngine().evaluate(
+            snapshot(expensive(catalyst_verified=False)), cash=600_000
+        )
+        self.assertEqual("CONDITIONAL", decision.candidates[0].tier)
+        self.assertEqual(DecisionType.NO_TRADE, decision.decision)
+        self.assertEqual(("POSITION_SIZE_ZERO",), decision.reason_codes)
+        full = ClosingBetEngine().evaluate(snapshot(expensive()), cash=600_000)
+        self.assertEqual(DecisionType.BUY, full.decision)
+        self.assertEqual(1, full.position.quantity)
+
+    def test_hard_filter_rejection_gets_no_tier(self):
+        engine = ClosingBetEngine(StrategyConfig(minimum_score=0.0))
+        q = quote(vwap=20_500)  # below the VWAP
+        snap = snapshot(q)
+        self.assertEqual({q.code: "BELOW_VWAP"}, engine.rejection_reasons(snap))
+        self.assertIsNone(engine._score_quote(snap, q))
+        self.assertEqual((), engine.rank_candidates(snap))
+        decision = engine.evaluate(snap, cash=600_000)
+        self.assertEqual(DecisionType.NO_TRADE, decision.decision)
+        self.assertEqual((), decision.candidates)
+
+    def test_conditional_threshold_follows_the_learned_minimum_score(self):
+        base = StrategyConfig()
+        learned = apply_parameters(
+            base,
+            TunableParameters(
+                minimum_score=55.0,
+                minimum_close_strength=base.minimum_close_strength,
+                minimum_volume_ratio=base.minimum_volume_ratio,
+                maximum_day_gain_pct=base.maximum_day_gain_pct,
+                maximum_ma5_distance_pct=base.maximum_ma5_distance_pct,
+            ),
+        )
+        self.assertEqual(10.0, learned.conditional_score_margin)
+        engine = ClosingBetEngine(learned)
+        self.assertEqual("FULL", engine._tier(55.0, True, 0.2)[0])
+        self.assertEqual("CONDITIONAL", engine._tier(45.0, True, 0.2)[0])
+        self.assertEqual("", engine._tier(44.99, True, 0.2)[0])
+        self.assertEqual("", ClosingBetEngine(base)._tier(45.0, True, 0.2)[0])
+
+    def test_tier_is_visible_in_ledger_report_dashboard_and_alert(self):
+        from stock_automation.dashboard import _event_reasons
+        from stock_automation.notifications import _render_trade_message
+        from stock_automation.reporting import append_training_event, write_markdown_report
+
+        snap = snapshot(quote(catalyst_verified=False))
+        decision = engine_at(65.0, snap).evaluate(snap, cash=600_000)
+        with tempfile.TemporaryDirectory() as directory:
+            csv_path = Path(directory) / "events.csv"
+            append_training_event(csv_path, snap, decision)
+            self.assertIn("TIER_CONDITIONAL", csv_path.read_text(encoding="utf-8"))
+            report = write_markdown_report(directory, snap, decision).read_text(encoding="utf-8")
+        self.assertIn("- 추천 등급: CONDITIONAL (CATALYST_UNKNOWN)", report)
+        payload = decision.to_dict()
+        labels = _event_reasons({}, payload, payload["position"])
+        self.assertEqual(["종가배팅 종합점수 1위", "조건부 등급(절반 크기)", "재료 미확인"], labels[:3])
+        alert = _render_trade_message(
+            "[모의매수] 테스트",
+            {"reason_codes": ["TOP_SCORE_SELECTED", "TIER_CONDITIONAL", "CATALYST_UNKNOWN"]},
+            maximum_characters=1_000,
+        )
+        self.assertIn("사유: 종가배팅 종합점수 1위, 조건부 등급(절반 크기), 재료 미확인", alert)
 
 
 if __name__ == "__main__":

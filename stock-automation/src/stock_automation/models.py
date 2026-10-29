@@ -105,6 +105,11 @@ class Candidate:
     score: float
     reasons: tuple[str, ...]
     risks: tuple[str, ...]
+    # closing-v0.5: "FULL", "CONDITIONAL", or "" below the conditional threshold.
+    tier: str = ""
+    # Why a CONDITIONAL candidate missed FULL (CATALYST_UNKNOWN, MARKET_WEAKNESS,
+    # SCORE_BELOW_MINIMUM).
+    tier_reasons: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +178,8 @@ class Decision:
                     "program_net": c.quote.program_net,
                     "reasons": list(c.reasons),
                     "risks": list(c.risks),
+                    "tier": c.tier,
+                    "tier_reasons": list(c.tier_reasons),
                     "technical": {
                         "close_strength": round(c.quote.close_strength, 4),
                         "volume_ratio": round(c.quote.volume_ratio, 4),

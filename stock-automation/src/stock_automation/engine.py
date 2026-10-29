@@ -17,6 +17,10 @@ from .models import (
 )
 from .risk import ATR_UNAVAILABLE, STOP_TOO_WIDE, atr_stop_rejection, build_position_plan
 
+TIER_FULL = "FULL"
+TIER_CONDITIONAL = "CONDITIONAL"
+_TIER_ORDER = {TIER_FULL: 0, TIER_CONDITIONAL: 1}
+
 
 def _age_seconds(newer: datetime, older: datetime) -> float:
     if newer.tzinfo is None or older.tzinfo is None:
@@ -43,7 +47,8 @@ class ClosingBetEngine:
         stable_suffix = sha256(idempotency_key.encode("utf-8")).hexdigest()[:10]
         event_id = f"SIM-{snapshot.captured_at:%Y%m%d}-{snapshot.session.value}-{stable_suffix}"
 
-        if not final or final[0].score < self.config.minimum_score:
+        # Ranking puts FULL first, then CONDITIONAL, then untiered candidates.
+        if not final or not final[0].tier:
             no_quotes = not snapshot.quotes
             reason = (
                 "NO_QUALIFYING_CANDIDATE"
@@ -72,6 +77,10 @@ class ClosingBetEngine:
             )
 
         selected = final[0]
+        conditional = selected.tier == TIER_CONDITIONAL
+        fraction = self.config.conditional_risk_fraction if conditional else 1.0
+        max_loss = int(self.config.max_daily_loss * fraction)
+        max_allocation_pct = self.config.max_allocation_pct * fraction
         entry = selected.quote.best_ask or selected.quote.price
         policy = self.config.atr_stop_policy
         stop_rejection = atr_stop_rejection(
@@ -99,8 +108,8 @@ class ClosingBetEngine:
             cash=cash,
             entry_price=entry,
             support_price=selected.quote.support_price,
-            max_allocation_pct=self.config.max_allocation_pct,
-            max_loss=self.config.max_daily_loss,
+            max_allocation_pct=max_allocation_pct,
+            max_loss=max_loss,
             atr14=selected.quote.atr14,
             atr_policy=policy,
         )
@@ -152,8 +161,17 @@ class ClosingBetEngine:
             remaining_cash=plan.remaining_cash,
             position=position,
             candidates=tuple(final),
-            reason_codes=("TOP_SCORE_SELECTED", "PAPER_EXECUTION_ONLY"),
-            notes=f"Planned risk {plan.risk_amount:,} KRW; no live order was submitted.",
+            reason_codes=(
+                "TOP_SCORE_SELECTED",
+                f"TIER_{selected.tier}",
+                "PAPER_EXECUTION_ONLY",
+            ),
+            notes=(
+                f"Tier {selected.tier}"
+                + (f" ({', '.join(selected.tier_reasons)})" if selected.tier_reasons else "")
+                + f"; max loss {max_loss:,} KRW, allocation {max_allocation_pct:.0%}; "
+                f"planned risk {plan.risk_amount:,} KRW; no live order was submitted."
+            ),
         )
 
     def _validate_snapshot(self, snapshot: MarketSnapshot) -> None:
@@ -173,7 +191,10 @@ class ClosingBetEngine:
             candidate = self._score_quote(snapshot, quote)
             if candidate is not None:
                 results.append(candidate)
-        return sorted(results, key=lambda item: item.score, reverse=True)
+        return sorted(
+            results,
+            key=lambda item: (_TIER_ORDER.get(item.tier, len(_TIER_ORDER)), -item.score),
+        )
 
     def rejection_reason(self, snapshot: MarketSnapshot, q: Quote) -> str | None:
         """Return the first hard filter that rejects ``q``, or None when it passes.
@@ -343,8 +364,34 @@ class ClosingBetEngine:
             risks.append("CATALYST_UNKNOWN")
         if q.rsi14 is not None and q.rsi14 > 76.0:
             risks.append("RSI_OVERHEATED")
-        score = min(100.0, max(0.0, score))
-        return Candidate(q, round(score, 4), tuple(reasons), tuple(dict.fromkeys(risks)))
+        score = round(min(100.0, max(0.0, score)), 4)
+        tier, tier_reasons = self._tier(score, catalyst_confirmed, market_change)
+        return Candidate(
+            q,
+            score,
+            tuple(reasons),
+            tuple(dict.fromkeys(risks)),
+            tier=tier,
+            tier_reasons=tier_reasons,
+        )
+
+    def _tier(
+        self, score: float, catalyst_confirmed: bool, market_change: float
+    ) -> tuple[str, tuple[str, ...]]:
+        """closing-v0.5 tier: FULL needs all three conditions; CONDITIONAL is half size."""
+        cfg = self.config
+        missed: list[str] = []
+        if not catalyst_confirmed:
+            missed.append("CATALYST_UNKNOWN")
+        if market_change <= cfg.market_weakness_start_pct:
+            missed.append("MARKET_WEAKNESS")
+        if score < cfg.minimum_score:
+            missed.append("SCORE_BELOW_MINIMUM")
+        if not missed:
+            return TIER_FULL, ()
+        if score >= cfg.minimum_score - cfg.conditional_score_margin:
+            return TIER_CONDITIONAL, tuple(missed)
+        return "", ()
 
     @staticmethod
     def _market_change(snapshot: MarketSnapshot, quote: Quote) -> float:

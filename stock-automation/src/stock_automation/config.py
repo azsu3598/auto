@@ -9,7 +9,7 @@ from .risk import AtrStopPolicy
 @dataclass(frozen=True, slots=True)
 class StrategyConfig:
     session: Session = Session.KRX_1520
-    rule_version: str = "closing-v0.4"
+    rule_version: str = "closing-v0.5"
     max_quote_age_seconds: int = 180
     minimum_trading_value: int = 10_000_000_000
     minimum_volume_ratio: float = 1.10
@@ -34,6 +34,10 @@ class StrategyConfig:
     min_stop_pct: float = 1.5
     max_stop_pct: float = 5.0
     max_hard_stop_pct: float = 7.0
+    # Conditional tier (closing-v0.5). Fixed by the user's work order, not
+    # tuned by learning.py.
+    conditional_score_margin: float = 10.0  # = the most a verified catalyst can add
+    conditional_risk_fraction: float = 0.5
 
     @property
     def atr_stop_policy(self) -> AtrStopPolicy:

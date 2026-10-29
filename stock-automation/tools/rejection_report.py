@@ -48,12 +48,15 @@ def summarize_file(path: Path) -> dict:
     engine = ClosingBetEngine(StrategyConfig(session=snapshot.session))
     reasons = engine.rejection_reasons(snapshot)
     passed = len(snapshot.quotes) - len(reasons)
+    # closing-v0.5 tier of every stock that passed, before the one-per-theme cut.
+    tiers = Counter(candidate.tier or "NONE" for candidate in engine._rank(snapshot))
     return {
         "file": str(path),
         "captured_at": snapshot.captured_at.isoformat(),
         "session": snapshot.session.value,
         "quotes": len(snapshot.quotes),
         "passed_hard_filters": passed,
+        "tiers": {tier: tiers.get(tier, 0) for tier in ("FULL", "CONDITIONAL", "NONE")},
         "counts": dict(Counter(reasons.values())),
         "reasons": reasons,
     }
@@ -73,14 +76,23 @@ def collect(paths: list[Path]) -> tuple[list[dict], list[dict]]:
 def render(rows: list[dict], skipped: list[dict]) -> str:
     total = Counter()
     quotes = passed = 0
-    lines = ["## 파일별 결과", "", "| 파일 | 수신 시세 | 하드 필터 통과 | 가장 많은 탈락 사유 |", "|---|---|---|---|"]
+    lines = [
+        "## 파일별 결과",
+        "",
+        "| 파일 | 수신 시세 | 하드 필터 통과 | 정식/조건부/등급 없음 | 가장 많은 탈락 사유 |",
+        "|---|---|---|---|---|",
+    ]
     for row in rows:
         total.update(row["counts"])
         quotes += row["quotes"]
         passed += row["passed_hard_filters"]
         top = max(row["counts"].items(), key=lambda item: item[1], default=None)
         top_text = f"{LABELS.get(top[0], top[0])} {top[1]}건" if top else "-"
-        lines.append(f"| {row['file']} | {row['quotes']} | {row['passed_hard_filters']} | {top_text} |")
+        tiers = row.get("tiers", {})
+        tier_text = "/".join(str(tiers.get(t, 0)) for t in ("FULL", "CONDITIONAL", "NONE"))
+        lines.append(
+            f"| {row['file']} | {row['quotes']} | {row['passed_hard_filters']} | {tier_text} | {top_text} |"
+        )
     lines += ["", f"## 전체 집계 (파일 {len(rows)}개, 시세 {quotes}건, 하드 필터 통과 {passed}건)", ""]
     lines += ["| 탈락 사유 | 건수 | 비율 |", "|---|---|---|"]
     rejected = sum(total.values())

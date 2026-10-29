@@ -38,7 +38,7 @@ class AtrStopPlanTests(unittest.TestCase):
                 POLICY.max_hard_stop_pct,
             ),
         )
-        self.assertEqual("closing-v0.4", StrategyConfig().rule_version)
+        self.assertEqual("closing-v0.5", StrategyConfig().rule_version)
 
     def test_small_atr_uses_the_minimum_stop_distance(self):
         result = plan(20_000, 19_900, 200.0)

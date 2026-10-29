@@ -47,7 +47,9 @@ class RejectionReportTests(unittest.TestCase):
             self.assertEqual([], skipped)
             self.assertEqual([2, 2], [row["quotes"] for row in rows])
             self.assertEqual([1, 0], [row["passed_hard_filters"] for row in rows])
+            self.assertEqual({"FULL": 1, "CONDITIONAL": 0, "NONE": 0}, rows[0]["tiers"])
             text = report.render(rows, skipped)
+            self.assertIn("| 2 | 1 | 1/0/0 |", text)
             self.assertIn("거래대금 부족 (`LOW_TRADING_VALUE`) | 2 | 66.7%", text)
             self.assertIn("NXT 대상 종목(KRX 전략 제외) (`NXT_ELIGIBLE_EXCLUDED`) | 1 | 33.3%", text)
 
