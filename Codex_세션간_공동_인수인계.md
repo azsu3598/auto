@@ -287,6 +287,58 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-29 15:26 KST — PC-D / Claude → PC-C / closing-v0.5 조건부 추천 등급 구현(브랜치 커밋 `c160fc6`)
+
+- 작업 위치: worktree `D:/Test-logic-v04` / `feature/closing-v0.4`, `94b8a57` 위에 커밋 `c160fc6` 1개. 새 브랜치 없음, main 병합 안 함. 명세: `docs/프로그램 설계/2026-10-29_조건부추천등급_수정명세.md`(main 작업 트리에 미추적 상태로 있음. 브랜치에는 넣지 않음).
+- 구현:
+  - `config.py`: `rule_version="closing-v0.5"`, `conditional_score_margin=10.0`, `conditional_risk_fraction=0.5`. 두 값은 학습 대상 아님(`learning.py` 변경 없음).
+  - `models.Candidate`: `tier`·`tier_reasons` 필드 추가(기본값 있음). `Decision.to_dict()` 후보에 두 값 포함.
+  - `engine.py`: `_tier()` 추가. `FULL`은 점수 ≥ `minimum_score`, 검증 촉매, 해당 지수 > −1.0%를 모두 충족. `CONDITIONAL`은 그 외 점수 ≥ `minimum_score − 10`이며, 못 채운 조건(`CATALYST_UNKNOWN`/`MARKET_WEAKNESS`/`SCORE_BELOW_MINIMUM`)을 `tier_reasons`에 기록. 그 아래는 등급 없음.
+  - 정렬은 FULL → CONDITIONAL → 등급 없음 순이고 같은 등급 안에서는 점수순. `_diversify`는 정렬 뒤에 그대로 적용.
+  - NO_TRADE 조건을 "1위 후보에 등급 없음"으로 변경. 사유 코드는 기존과 같음.
+  - CONDITIONAL은 `build_position_plan(max_loss=5,000, max_allocation_pct=0.20)`로 호출. `risk.py` 변경 없음.
+  - BUY `reason_codes`는 `("TOP_SCORE_SELECTED", "TIER_FULL"|"TIER_CONDITIONAL", "PAPER_EXECUTION_ONLY")`. `notes`에 등급, 조건부 사유, 손실 한도, 배분을 기록.
+- 표시 경로:
+  - CSV 원장: `outcome_code`에 이미 포함.
+  - `reporting.py`: 보고서 BUY 절에 "추천 등급"과 "판단 코드" 줄을 추가하고, 후보 표에 등급 열을 추가.
+  - `dashboard.py`: 등급·조건부 사유의 한국어 라벨을 추가하고, 선택 후보의 `tier_reasons`를 사유 목록에 표시.
+  - `aws_runtime.py`: 매수 알림 payload에 `reason_codes`(TIER와 조건부 사유)를 추가.
+  - `tools/rejection_report.py`: 하드 필터를 통과한 종목의 FULL/CONDITIONAL/등급 없음 수를 집계.
+  - `README.md`(브랜치): 등급 표를 넣고 규칙 버전을 `closing-v0.5`·`day-trade-v0.3`으로 바꿈. 촉매 설명을 코드에 맞게 바꿈(검증 촉매만 최대 10점, 미검증 테마 강도는 0점).
+- 바꾸지 않은 것: 하드 필터, 점수식, `day_trade.py`, `medium_term.py`, 실주문 코드와 설정.
+- 테스트:
+  - 명세의 10개 테스트를 추가했다. `test_engine.ClosingV05TierTests` 9개, `test_champion_config.test_rejects_champion_tuned_on_closing_v04` 1개.
+    - 점수 65·60·55 같은 값은 `minimum_score`를 옮겨 상대 점수로 맞췄다.
+    - 6번 테스트는 실제 점수가 FULL 기준+1점, CONDITIONAL 기준+약 9.6점이다.
+  - 명세 외로 2개를 추가했다. 표시 경로 테스트 `test_tier_is_visible_in_ledger_report_dashboard_and_alert`, 그리고 `test_rejection_report`의 등급 집계 단언이다.
+  - 기대값 변경은 버전 문자열 4곳이다. `test_risk` 1곳, `test_learning` 1곳, `test_champion_config`의 fixture `base_rule_version` 2곳(v0.4 → v0.5)이다.
+- 전체 테스트: PC-D에서 이번에 실행했다(`stock-automation/tests`, `PYTHONPATH=../src`, `unittest discover`). **453개 실행, 통과 442, 실패 2·오류 7, skip 2.**
+  - 9건 모두 패키지 없음(`boto3`/`botocore`/`truststore`)이 원인이며, 새 실패는 0이다(직전 기록과 같은 9건이고, 테스트 수는 +11).
+  - `git diff --check` 통과.
+- 미실행: PC-C 전체 테스트(boto3 계열 4개 모듈 포함). v0.3·v0.4·v0.5 replay 비교는 S3 자료가 필요하고 AWS 조회가 금지라 하지 못했다.
+- 남은 위험:
+  - CONDITIONAL은 재료 미확인 종목도 매수하므로 모의 매수 빈도가 늘어난다.
+  - 5,000원 손실 한도로 1주가 안 되는 고가주(약 12만 원 초과, 현금 60만 원 기준)는 `POSITION_SIZE_ZERO`다.
+- 실거래 상태: 변경 없음. 실거래 설정·비상정지·실계좌 Secret·실제 주문·AWS 변경 없음. 이미지 빌드·배포 안 함. push 안 함(사용자가 직접).
+- 다음:
+  - 11/03~11/10 운용은 main(`closing-v0.3`)으로 진행한다.
+  - 운용이 끝나면 PC-C에서 브랜치 전체 테스트를 돌리고, replay로 v0.3/v0.4/v0.5를 비교한다. 조건부 매수 손익·승률은 따로 본 뒤 병합 여부를 결정한다.
+
+### 2026-10-29 PC-D / Claude → PC-C / closing-v0.5 작업 브랜치 정정(문서만, 미커밋)
+
+- 사용자 승인으로 바로 아래 15:20 기록의 "`feature/closing-v0.5` 분기"를 정정: 새 브랜치 없이 `feature/closing-v0.4`(`94b8a57`) 위에 이어서 커밋한다. v0.4 비교는 커밋 `94b8a57`로 한다. main 병합 금지는 동일.
+- 변경 파일: `docs/프로그램 설계/2026-10-29_조건부추천등급_수정명세.md`(적용 시점과 순서), 이 문서. 코드 변경·테스트 실행 없음. 실거래·AWS 변경 없음. commit/push 안 함.
+
+### 2026-10-29 15:20 KST — PC-D / Claude → PC-C / 추천 2단 등급(FULL/CONDITIONAL) 규칙 추가와 closing-v0.5 명세(코드 변경 없음, 미커밋)
+
+- 배경: 사용자가 대화 추천 기준이 지나치게 엄격하다고 판단(10/21 이후 대화 추천 전부 NO_TRADE). `docs/실시간 데이터 확인` 대조 결과 Codex 시절(8월~10/7) 추천은 거래대금 100~300억대 중형주의 조건부 1종목이었고, 이번 14:58 Claude 스캔은 상위 30개(하한 약 600억)만 봐서 대형주만 남았다(조회 범위 실수).
+- 사용자 승인으로 `AGENTS.md` 11절에 "Recommendation Tiers" 추가, 14절에 한 문단 추가. `CONDITIONAL`은 재료 미확인·시장 약세(지수 −3% 미만 하락)·거래대금 100억 이상을 완화하고 비중 절반(손실 약 5,000원)·취소 조건 필수. 차트 조건(VWAP·5분20·고가 근접)과 과열 제외는 완화하지 않음. 스캔은 상위 100개 이상.
+- 15:04 재스캔(네이버 공개 API, 상위 100): 코스피 −1.14%·코스닥 −2.51%. 대화 조건부 후보 메리츠금융지주(138040) 131,400원(+6.40%, 고가 대비 −0.30%, VWAP·5분20 위, 거래대금 252억). 당일 재료 미확인·ATR 미조회·NXT 표시 Y(프로그램 KRX_1520에서는 제외 대상). 보고서·원장 판단 문단·추천 이벤트 CSV 행은 아직 작성하지 않음(14:58·15:04 분석 모두).
+- 신규: `docs/프로그램 설계/2026-10-29_조건부추천등급_수정명세.md`(closing-v0.5). 하드 필터·점수식 불변. `score ≥ minimum_score − 10`(10 = 확인 재료 최대 가점) 구간과 재료 미확인·지수 −1% 이하 후보를 `CONDITIONAL`로 절반 크기(손실 5,000원·배분 20%) 매수, `reason_codes`에 `TIER_*`. `feature/closing-v0.4`에서 `feature/closing-v0.5` 분기, main 병합 금지, 11/10 운용 뒤 v0.3·v0.4·v0.5 리플레이 비교.
+- 변경 파일: `AGENTS.md`, 위 명세, 이 문서(rotate 보관 파일 포함). Claude 메모(저장소 밖) 갱신. 코드·테스트 변경 없음, 테스트 미실행.
+- 실거래 상태: 변경 없음. 실제 주문·AWS 호출 없음. commit/push 안 함(사용자가 직접).
+- 다음: 프로그래머가 명세 구현 → PC-C 전체 테스트. 기존 미커밋 파일(13:23 보고서·원장·CSV)은 그대로 둠.
+
 ### 2026-10-29 PC-D / Claude → PC-C / closing-v0.4 손절 폭 초과 후보를 순위 전에 제외(브랜치, 미커밋)
 
 - 작업 위치: worktree `D:/Test-logic-v04` / `feature/closing-v0.4`, 기준 `977262b` + 11:10 명세 구현 기록의 미커밋 변경 위. 이 기록은 `main` 작업 트리 `D:/Test`에 적었다.
@@ -309,43 +361,6 @@ python -m compileall -q src tests
 - 변경 파일: 이 문서(기록 추가)와 rotate 보관 파일만. 코드 변경 없음.
 - 실거래 상태: 변경 없음, AWS 호출 없음, 실제 주문 없음. commit/push 안 함.
 - 다음: 사용자가 ① 권장안 반영 여부를 프로그래머에게 지시 → PC-C 브랜치 전체 테스트 → 5회 운용(11/10) 후 병합 판단.
-
-### 2026-10-29 11:10 KST — PC-D / Claude → PC-C / 매매 로직 수정 명세 1~5번 구현(브랜치, 미커밋)
-
-- PC alias / 도구: `PC-D` / Claude. 작업지시: 사용자가 붙여 준 "매매 로직 수정 담당" 지시서. 명세: `docs/프로그램 설계/2026-10-29_매매로직_수정명세.md`.
-- 브랜치·기준 commit: 시작 시 dirty 6개는 사용자 승인으로 `d043458`(단타 기록)·`977262b`(명세) 커밋. 5번(README)은 `main` 작업 트리 `D:/Test`, 1~4번은 git worktree `D:/Test-logic-v04` / 브랜치 `feature/closing-v0.4`(기준 `977262b`). 5회 모의운용(11/03~11/10) 전이므로 main 병합·이미지 빌드·ECR·AWS 배포 안 함. **11/02 배포는 `main`(현재 코드, `closing-v0.3`)으로 한다.**
-- 변경 파일(`main`): `stock-automation/README.md`(명세 5절 4곳: 촉매 필수 문구 → 가점, `closing-v0.2` → `v0.3`, 테마 강도는 v0.3에서 미검증이어도 최대 6점 반영됨을 사실대로 기재), 이 문서·rotate 보관 파일.
-- 변경 파일(브랜치): `src/stock_automation/risk.py`(`AtrStopPolicy`, `_tick_floor`, `atr_stop_rejection`, `build_position_plan(atr14=, atr_policy=)` — 정책 없으면 기존 고정 비율 그대로), `config.py`(`closing-v0.4`, `soft_atr_mult` 0.5·`hard_atr_mult` 0.5·`min_stop_pct` 1.5·`max_stop_pct` 5.0·`max_hard_stop_pct` 7.0, `atr_stop_policy`), `engine.py`(하드 필터 `ATR_UNAVAILABLE`(DART 검사 다음), 1위 후보 손절 초과 시 NO_TRADE `STOP_TOO_WIDE`, 검증 촉매일 때만 `catalyst_score` 가점, VWAP 없으면 5점·`ABOVE_VWAP` 제외+`VWAP_UNKNOWN`, 5분 거래량 배율 없으면 0점+`INTRADAY_VOLUME_UNKNOWN`), `day_trade.py`(`day-trade-v0.3`, `maximum_vwap_distance_pct` 3.0 초과 제외, 2.0% 초과 1%p당 3점 감점+`LATE_ENTRY_RISK`, `vwap <= 0` 제외), `learning.py`(챔피언에 `base_rule_version` 저장, 불일치·누락 챔피언 `config_from_champion` 거부), `aws_runtime.py`(15:20·주간 튜닝에서 기준 버전 불일치 챔피언은 무시하고 코드 기본값 사용), `tools/rejection_report.py`(`ATR_UNAVAILABLE`·`STOP_TOO_WIDE` 라벨). 새 상수는 learning 자동 조정 대상(5개)에 넣지 않았다.
-- 추가 테스트: 새 `tests/test_risk.py` 9개(작은/큰 ATR, 손절 5%·비상 7% 초과, ATR 없음·0·음수·NaN, 호가 경계 2,010·5,020·20,100·50,200원 내림, 손실 ≤ 10,000원, 정책 없을 때 고정 비율 값이 `main` 결과와 동일), `test_engine.ClosingV04Tests` 7개, `test_day_trade.DayTradeVwapDistanceTests` 5개(+1.0%/+2.5%/+3.5%/VWAP 0, 기본 fixture 점수 90.8284 고정), `test_champion_config` 1개, `test_learning` 단언 추가.
-- 기대값·fixture 변경(이유): ① `test_engine.quote()` fixture에 `atr14=600.0`(이 fixture에서 v0.4 손절이 기존 손절과 같아지는 값), `vwap=19_700`·`five_min_volume_ratio=1.8`(기존 대체값과 같은 값, 키움 경로는 항상 채움) 추가 — 이 fixture를 쓰는 엔진·aws_runtime·backtest·learning·reporting 테스트의 기대값은 그대로. ② `test_engine.test_catalyst_is_scored_not_required`: 검증−미검증 차이 4.0 → 8.8, 미검증−촉매 없음 4.8 → 0.0(명세 2번 의도된 변경). ③ `test_day_trade.test_creates_isolated_paper_position`: `"day-trade-v0.2"` → `"day-trade-v0.3"`(지시된 버전 상향으로 불가피. 지시서의 "test_day_trade 기존 기대값 불변"과 충돌하는 유일한 줄이며, 점수·손절·수량 기대값은 하나도 바뀌지 않음). ④ `test_champion_config` payload에 `base_rule_version: closing-v0.4` 추가(기대값 동일).
-- 전체 테스트(PC-D 이번 실행, 시스템 Python 3.13, `PYTHONPATH=src`): 브랜치 **441개 실행, 통과 430, 실패 2·오류 7, skip 2**. 실패·오류 9건 모두 패키지 없음(`boto3`/`botocore` 5, `truststore` 4)으로 기존 PC-D 환경 실패와 같음. `main`(README만 변경) 419개 실행, 같은 9건. `compileall -q src tests tools infra` 양쪽 통과, `git diff --check` 양쪽 통과. worktree에는 Git 제외 서브모듈 `Kiwoom-REST-API`가 비어 있어 `D:/Test` 로컬 사본을 같은 commit `234560d`로 복제했다(네트워크 없음).
-- 백테스트 비교: **비교 불가.** `replay-cases/`는 S3에만 있고 저장소에 기록이 없다. AWS 조회는 지시서상 금지.
-- 미확인: PC-C 전체 테스트(완료 판정 기준) 미실행. S3 `config/rules/*.json` 챔피언 존재 여부 미확인 — 있으면 v0.4 배포 후 무시된다(의도). 브랜치 README의 규칙 버전 표·ATR 손절 설명은 `main` README 수정과 충돌하지 않도록 아직 v0.4로 바꾸지 않았다(병합 시 갱신 필요). 작업 중 Claude Code 프로세스가 한 번 비정상 종료(0xC0000409)됐으나 작업 트리 변경은 보존됨을 확인했다.
-- 남은 위험: ATR 손절 초과·ATR 없음으로 `NO_TRADE`가 늘 수 있다(안전 쪽). 1위 후보가 `STOP_TOO_WIDE`면 2위로 넘어가지 않고 NO_TRADE다(명세대로). 단타는 VWAP가 없을 때(키움 어댑터가 0.0을 넣음) 이전에는 통과했으나 이제 제외된다. 제안값은 5회 기록·replay 백테스트 없이 채택한 초기값이다.
-- 실거래 상태: 변경 없음. `LIVE_ORDER_ENABLED`·비상정지·실계좌 Secret·AWS·예약 변경 없음, 실제 주문 없음. commit/push 안 함(사용자가 직접).
-- 다음: 사용자가 `main`(README·이 기록·보관 파일과 차트 수업 세션 변경)과 브랜치(`D:/Test-logic-v04`)를 각각 커밋. PC-C는 브랜치를 받아 전체 테스트를 실행하고, 5회 운용(11/10) 종료 뒤 S3 replay 백테스트 비교 → 병합 여부를 사용자에게 받는다.
-
-### 2026-10-29 PC-D / Claude → 다음 세션 / 차트 기초 1강 학습 기록(문서만)
-
-- 작업 경로: `D:/Test`, `main` / `42f44bb`(미커밋 상태 위에서 작업).
-- 요청: 사용자 차트 기초 수업(캔들 네 가격·양봉/음봉과 등락률 기준 차이·종가 위치) 진행과 숙제 채점.
-- 변경 파일: `Sabu/README.md` "현재 학습 기록"에 2026-10-29 한 줄 추가, 이 문서(기록 추가)와 rotate로 보관 파일.
-- 테스트: 코드 변경 없음, 실행 안 함.
-- 같은 날 앞선 기록(매매 로직 수정 명세)과 별개다. 명세·프로그래머 프롬프트는 변경 없음.
-- 실거래 상태: 변경 없음, AWS 호출 없음, 실제 주문 없음. commit/push 하지 않음(사용자가 직접).
-- 다음: 차트 수업 2강(음봉 꼬리 복습 → 교재 3장 추세·지지·저항).
-
-### 2026-10-29 PC-D / Claude → 수정 담당 프로그래머 / 매매 로직 검토와 수정 명세(문서만, 코드 변경 없음)
-
-- 작업 경로: `D:/Test`, `main` / `42f44bb`. 시작 시 사용자 미커밋 문서 3개(`docs/실시간 데이터 확인/` 2개, `docs/프로그램 설계/추천_이벤트_현재본.csv`)는 건드리지 않았다.
-- 요청: 현재 자동매매 로직 검토 → 수정할 로직을 전문 프로그래머에게 전달할 설명으로 작성.
-- 읽은 코드: `engine.py`·`config.py`·`risk.py`·`exit_engine.py`·`indicators.py`·`day_trade.py`·`learning.py` 일부·`providers/kiwoom.py` 시세 조립부.
-- 발견(상세는 새 명세): ① 종가배팅 손절·목표가가 사실상 -2.5%/-4.5%/+3.8%/+6.2% 고정(지지선이 VWAP·5분 20이평 위 최댓값이라 `min(support, entry×0.975)`가 거의 항상 비율 쪽), ATR 미사용, 손절 폭 상한 없음. ② 미검증 키움 테마 강도가 `engine.py:254`에서 최대 6점. ③ 단타 VWAP 이격 상한 없음. ④ VWAP/5분 거래량 누락 시 대체값 가점·이중 계산(키움 경로 영향 없음). ⑤ README의 "검증 촉매 필수"·`closing-v0.2` 문구가 코드와 불일치.
-- 변경 파일: `docs/프로그램 설계/2026-10-29_매매로직_수정명세.md`(신규), 이 문서(기록 추가), rotate로 보관 파일.
-- 테스트: 코드 변경 없음, 단위 테스트 미실행. `risk.build_position_plan` 계산값만 PC-D Python으로 직접 확인.
-- 남은 위험: 명세의 제안값(ATR 배수·손절 상한 등)은 사용자 미확정. 전략 변경(1~4번)은 11/03~11/10 5회 모의운용 종료 후 적용해야 5회 기록이 유지된다. S3 학습 챔피언 파일 존재 여부 미확인.
-- 실거래 상태: 변경 없음, AWS 호출 없음, 실제 주문 없음. commit/push 하지 않음(사용자가 직접).
-- 다음: 11/02 PC-C 작업은 기존 지시서대로. 명세 5번(README 정정)은 언제든 가능, 1~4번은 5회 운용 후 사용자 제안값 확정 뒤 착수.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 

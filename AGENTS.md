@@ -407,6 +407,31 @@ A stock should reach the final list only when its expected reward justifies its 
 
 When confidence is low, reduce the number of recommendations rather than lowering the selection standard.
 
+### Recommendation Tiers (user-approved 2026-10-29)
+
+Label every final recommendation with exactly one tier.
+
+* `FULL` (정식 추천): all conditions in this document are met, including a verified same-day catalyst and a stable market.
+* `CONDITIONAL` (조건부 추천): the chart conditions are met, but one or more of the following is relaxed:
+  * The same-day catalyst is unverified. State "재료 미확인" explicitly.
+  * The market is weak, but the relevant index has not fallen 3% or more.
+  * Trading value is at least KRW 10 billion, even if the stock is not near the top of the ranking.
+
+The chart conditions are never relaxed for `CONDITIONAL`:
+
+* Above VWAP and the 5-minute MA20
+* Near the session high
+* Not overextended: caution at +8% or more; exclude above +12%
+
+A `CONDITIONAL` recommendation must also have:
+
+* At most half the normal allocation, with a planned loss of about KRW 5,000
+* An entry range plus explicit cancel conditions
+
+Scan at least the top 100 stocks by trading value, not only the largest names, so mid-cap candidates are seen.
+
+`NO_TRADE` remains correct when no stock meets even the `CONDITIONAL` tier.
+
 ---
 
 ## 12. Capital and Risk Guidelines
@@ -481,6 +506,8 @@ Prefer `NO_TRADE` when:
 * External event risk is excessive
 * Available candidates are too highly correlated
 * The reason for expecting further upside cannot be clearly explained
+
+An unverified catalyst or a weak market (relevant index above -3%) alone moves a candidate to the `CONDITIONAL` tier in section 11 instead of forcing `NO_TRADE`.
 
 Never recommend a stock merely because the user asked for recommendations.
 
