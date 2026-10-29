@@ -287,6 +287,37 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-29 16:05 KST — PC-D / Claude → PC-C / 모의 원금 20만 원 전환 구현(main `86c9ffd`·`f322eb6`, 브랜치 `834516d`·`de6a215`)
+
+- 요청: `docs/프로그램 설계/2026-10-29_모의원금_20만원_전환명세.md` 구현. main 먼저 커밋 후 `feature/closing-v0.4`(`c160fc6` 위, `D:/Test-logic-v04`)에 cherry-pick. AWS 배포·스택 변경 금지.
+- 시작 상태: main 작업 트리에 이 명세의 **미완성 구현이 미커밋으로 이미 있었다**(`paper_wallet.py`·`aws_runtime.py`·`config.py` 등 14개, 작성 세션 기록 없음). 삭제하지 않고 검토해 이어서 완성했다. 당시 빠진 것: 테스트 갱신(배치 `wallet(plan)` 오류 2, 백테스트 기대값 2), JSON 템플릿 3개 재생성, 배치 상태의 epoch 지갑, 대시보드 Lambda epoch, 명세 테스트.
+- 구현(main):
+  - 시작 금액 기본값 200000: `aws_runtime.py`(STARTING_CASH 2곳·MEDIUM·DAY_TRADE), `infra/cloudformation.yaml`, 빌더로 재생성한 `paper-worker-verification.yaml`·`paper-one-session-pilot.yaml`·`paper-five-session-batch.yaml`(스크래치에 생성 → diff 검토 → 반영, 저장본 = 빌더 출력 확인).
+  - 손실 한도: `StrategyConfig.max_daily_loss` 3,300, `DayTradeConfig.maximum_position_loss` 2,700, `MediumTermConfig.maximum_position_loss` 6,700. `learning.py`는 이 값을 조정하지 않음(점수·종가강도·거래량·상승률·MA5 거리만). 배분 비율·하드 필터·점수식·`rule_version`·`LIVE_*` 변경 없음.
+  - `src/stock_automation/paper_wallet.py`(신규, 표준 라이브러리만): `wallet_key()` 하나로 모든 지갑 키 생성, `PAPER_WALLET_EPOCH`가 있으면 `#<epoch>`(1~40자 영숫자·`_`·`-`, 그 외 ValueError). 진입·청산·중기·단타·`tools/paper_operations.py`가 이 함수를 쓴다.
+  - 포지션(`OPEN#CLOSING_BET#*`, `OPEN#MEDIUM_TERM`, `OPEN#DAY_TRADE`)에 `wallet_key` 저장, 청산은 저장된 키로. 키 없는 기존 포지션은 epoch 없는 옛 키.
+  - `is_current_wallet()`: 대시보드·15:50 총자산은 현재 epoch의 모의 지갑만 합산. 모의 전략 키가 아닌 `WALLET#LIVE…`·`WALLET#TEST` 등은 숨기지 않음.
+  - `PaperWalletEpoch` 파라미터(기본 빈 값, `[A-Za-z0-9_-]{0,40}`) → 컨테이너 `PAPER_WALLET_EPOCH`: 앱·worker·pilot·batch 템플릿. **명세 외 추가:** `paper-web-dashboard.yaml`(빌더 `build_web_dashboard_template.py`)의 Lambda 환경변수에도 추가하고 `package_web_dashboard.py`가 `paper_wallet.py`를 포함. 이게 없으면 웹 대시보드가 60만·20만 지갑을 합산한다.
+  - `infra/paper_pilot.py`·`paper_batch.py`(미완성 구현에 있던 것 유지·검토): 승인 자본을 `600000`/epoch 없음, `200000`/epoch 필수 두 쌍만 허용. 배치 지갑 검사는 epoch가 있으면 그 epoch 지갑만 본다(옛 지갑은 이력으로 둠). 20만 원 배치 계획에는 `starting_cash: "200000"`과 `wallet_epoch`가 필요하다.
+  - `tools/paper_operations.py`: 파일럿·배치 `status`가 계획 `parameters.PaperWalletEpoch`의 지갑을 읽고 `wallet_key`를 출력(읽기만).
+  - 대시보드 안전 표시 "일손실 한도" 10,000원 → 3,300원(`f322eb6`). `README.md` 한도·epoch 설명 갱신.
+- 테스트(명세 7개 대응): 1 `test_aws_runtime.test_wallet_epoch_creates_new_200k_wallet_and_keeps_the_old_one`, 2 `test_paper_wallet.test_without_epoch_every_key_is_the_original_one`, 3 `test_aws_runtime.test_exit_returns_cash_to_the_wallet_that_paid_for_the_entry`(종가·중기, 청산 시점 epoch가 달라도 저장 키 사용), 4 `test_paper_wallet.test_closing_bet_with_200k`(+브랜치 `test_conditional_closing_bet_with_200k`: 손실 ≤ 1,650·투자 ≤ 40,000), 5 `test_day_trade_and_medium_term_with_200k`, 6 `test_dashboard.test_wallet_epoch_shows_only_the_current_paper_wallets`·`test_paper_operations.test_status_reads_the_wallet_of_the_stack_epoch`, 7 `test_paper_wallet.test_starting_cash_defaults_are_200k_and_epoch_is_passed_to_the_worker`. 추가: epoch 형식·비모의 키, 한도 상수, 총자산 epoch 합산, 배치 20만 자본 쌍·epoch 지갑 검사, aws_runtime 기본값.
+- **기대값 변경:** main `test_backtest` 2건(순손익 7,500→1,900, −11,000→−3,000; 3,300원 한도로 3주). `test_paper_batch` 2건은 `wallet()` → `wallet(plan)` 호출만. 브랜치 `test_engine` 5건: v0.4 큰 ATR 수량 8→2·한도 3,300, v0.5 FULL `max_loss` 10,000→3,300·수량 11→3, CONDITIONAL 5,000→1,650(2건, notes 문구 포함), CONDITIONAL 0주 사례는 148,000원·현금 60만 → 50,000원·현금 20만(정식 3,300원으로는 148,000원 종목이 0주가 되어 원래 의도 유지 불가). 브랜치 README 등급 표 한도 3,300/1,650원.
+- 브랜치 cherry-pick 충돌 1곳: `aws_runtime._run_worker`의 champion 처리. 브랜치의 `champion_matches_code` 검사를 유지하고 지갑 키만 `paper_wallet_key`로 해결.
+- 전체 테스트(PC-D 이번 실행, `stock-automation`, `PYTHONPATH=src`, `unittest discover -s tests`): main **433개, 실패 2·오류 7·skip 2**, 브랜치 **468개, 실패 2·오류 7·skip 2**. 9건 모두 `boto3`/`botocore`/`truststore` 없음(HEAD 기준선과 같은 9건, 새 실패 0). 양쪽 `compileall -q src tests tools infra` 통과, `git diff --check` 통과.
+- 미실행: PC-C 전체 테스트(boto3 계열 `test_worker_verifier`·`test_paper_control`·`test_runtime_safety`·`test_scheduled_execution`). `tools/validate_paper_infrastructure.py`(PC-D에 `cfnlint` 없음). worker 템플릿 일치는 `test_worker_verifier` 대신 빌더 출력과 직접 비교로 확인.
+- 남은 위험: 전환 시 열린 옛 포지션이 있으면 15:50 총자산은 옛 지갑 현금을 빼고 그 포지션 평가액은 더한다(명세대로 열린 포지션 0에서 전환). 웹 대시보드 스택에도 같은 `PaperWalletEpoch`를 넣어야 한다. 대화 추천 규칙(`AGENTS.md` 12절 일손실 약 10,000원)은 바꾸지 않음.
+- 실거래 상태: 변경 없음. `LIVE_*`·비상정지·실계좌 Secret·실제 주문 없음. AWS 호출·배포·스택 변경·이미지 빌드 없음. push 안 함(사용자가 직접).
+- 다음: PC-C에서 main·브랜치 전체 테스트(boto3 포함)와 `validate_paper_infrastructure.py`. 11/03 전 사용자 승인 후 이미지 빌드, 앱·배치·웹 스택에 `StartingCash` 등 200000·`PaperWalletEpoch=200K-20261103`, 배치 계획 `starting_cash "200000"`·`wallet_epoch`. 반영 전 열린 모의 포지션 0 확인.
+
+### 2026-10-29 PC-D / Claude → PC-C / 모의 원금 20만 원 전환 명세(문서만, 미커밋)
+
+- 사용자 결정: 실거래 원금 20만 원, 모의도 다음 운용(11/03~11/10)부터 20만 원. 손실 한도는 1/3(종가 10,000→3,300, 단타 8,000→2,700, 중기 20,000→6,700), 배분 비율 불변.
+- 확인한 사실(main): 시작 금액은 `STARTING_CASH`·`MEDIUM_STARTING_CASH`·`DAY_TRADE_STARTING_CASH`(기본 600000, CloudFormation 템플릿 4개 파라미터 기본 600000). `_load_or_create_wallet`은 기존 지갑이 있으면 `initial_cash`를 무시하므로 환경변수만 바꾸면 전환되지 않는다.
+- 신규: `docs/프로그램 설계/2026-10-29_모의원금_20만원_전환명세.md`. `PAPER_WALLET_EPOCH`로 새 지갑 키(`#200K-20261103`)를 만들어 기존 원장 보존·혼합 방지, 청산은 진입 지갑으로. main 먼저, 브랜치에 cherry-pick, `rule_version` 불변.
+- 앞선 권장(11/10까지 로직 변경 없음)과 달리 사용자 결정으로 11/03 운용 전 main 변경이 필요하다. 이미지 빌드·스택 파라미터·배포는 사용자 승인 필요.
+- 코드·AWS 변경 없음, 테스트 미실행. 실거래 상태 변경 없음. commit/push 안 함.
+
 ### 2026-10-29 PC-D / Claude → PC-C / closing-v0.5 구현(`c160fc6`) 검토와 main 문서 커밋
 
 - 대상: `D:/Test-logic-v04` `feature/closing-v0.4`의 `c160fc6`(origin보다 1커밋 앞섬, 작업 트리 clean). 명세 `docs/프로그램 설계/2026-10-29_조건부추천등급_수정명세.md`와 diff 대조.
@@ -337,28 +368,6 @@ python -m compileall -q src tests
 
 - 사용자 승인으로 바로 아래 15:20 기록의 "`feature/closing-v0.5` 분기"를 정정: 새 브랜치 없이 `feature/closing-v0.4`(`94b8a57`) 위에 이어서 커밋한다. v0.4 비교는 커밋 `94b8a57`로 한다. main 병합 금지는 동일.
 - 변경 파일: `docs/프로그램 설계/2026-10-29_조건부추천등급_수정명세.md`(적용 시점과 순서), 이 문서. 코드 변경·테스트 실행 없음. 실거래·AWS 변경 없음. commit/push 안 함.
-
-### 2026-10-29 15:20 KST — PC-D / Claude → PC-C / 추천 2단 등급(FULL/CONDITIONAL) 규칙 추가와 closing-v0.5 명세(코드 변경 없음, 미커밋)
-
-- 배경: 사용자가 대화 추천 기준이 지나치게 엄격하다고 판단(10/21 이후 대화 추천 전부 NO_TRADE). `docs/실시간 데이터 확인` 대조 결과 Codex 시절(8월~10/7) 추천은 거래대금 100~300억대 중형주의 조건부 1종목이었고, 이번 14:58 Claude 스캔은 상위 30개(하한 약 600억)만 봐서 대형주만 남았다(조회 범위 실수).
-- 사용자 승인으로 `AGENTS.md` 11절에 "Recommendation Tiers" 추가, 14절에 한 문단 추가. `CONDITIONAL`은 재료 미확인·시장 약세(지수 −3% 미만 하락)·거래대금 100억 이상을 완화하고 비중 절반(손실 약 5,000원)·취소 조건 필수. 차트 조건(VWAP·5분20·고가 근접)과 과열 제외는 완화하지 않음. 스캔은 상위 100개 이상.
-- 15:04 재스캔(네이버 공개 API, 상위 100): 코스피 −1.14%·코스닥 −2.51%. 대화 조건부 후보 메리츠금융지주(138040) 131,400원(+6.40%, 고가 대비 −0.30%, VWAP·5분20 위, 거래대금 252억). 당일 재료 미확인·ATR 미조회·NXT 표시 Y(프로그램 KRX_1520에서는 제외 대상). 보고서·원장 판단 문단·추천 이벤트 CSV 행은 아직 작성하지 않음(14:58·15:04 분석 모두).
-- 신규: `docs/프로그램 설계/2026-10-29_조건부추천등급_수정명세.md`(closing-v0.5). 하드 필터·점수식 불변. `score ≥ minimum_score − 10`(10 = 확인 재료 최대 가점) 구간과 재료 미확인·지수 −1% 이하 후보를 `CONDITIONAL`로 절반 크기(손실 5,000원·배분 20%) 매수, `reason_codes`에 `TIER_*`. `feature/closing-v0.4`에서 `feature/closing-v0.5` 분기, main 병합 금지, 11/10 운용 뒤 v0.3·v0.4·v0.5 리플레이 비교.
-- 변경 파일: `AGENTS.md`, 위 명세, 이 문서(rotate 보관 파일 포함). Claude 메모(저장소 밖) 갱신. 코드·테스트 변경 없음, 테스트 미실행.
-- 실거래 상태: 변경 없음. 실제 주문·AWS 호출 없음. commit/push 안 함(사용자가 직접).
-- 다음: 프로그래머가 명세 구현 → PC-C 전체 테스트. 기존 미커밋 파일(13:23 보고서·원장·CSV)은 그대로 둠.
-
-### 2026-10-29 PC-D / Claude → PC-C / closing-v0.4 손절 폭 초과 후보를 순위 전에 제외(브랜치, 미커밋)
-
-- 작업 위치: worktree `D:/Test-logic-v04` / `feature/closing-v0.4`, 기준 `977262b` + 11:10 명세 구현 기록의 미커밋 변경 위. 이 기록은 `main` 작업 트리 `D:/Test`에 적었다.
-- 문제: `evaluate()`가 점수 1위에만 `atr_stop_rejection`을 적용해, 1위가 `STOP_TOO_WIDE`면 정상인 2위가 있어도 NO_TRADE였다.
-- 수정: `src/stock_automation/engine.py` `rejection_reason()`에서 `ATR_UNAVAILABLE` 바로 다음에 `atr_stop_rejection(entry_price=q.best_ask or q.price, support_price=q.support_price, atr14=q.atr14, policy=cfg.atr_stop_policy)` 결과가 있으면 `STOP_TOO_WIDE` 반환. `evaluate()`의 기존 검사는 방어용으로 유지. ATR 수치(0.5/0.5/1.5%/5%/7%) 불변. 안전 필터 완화 없음(필터 추가만).
-- 테스트: `test_engine.ClosingV04Tests.test_too_wide_top_scorer_is_skipped_for_the_next_candidate` 신규(필터 없이는 점수 1위인 손절 초과 종목이 `rejection_reasons()`에 `STOP_TOO_WIDE`, `rank_candidates()`에 없음, 2위 BUY·손실 ≤ 10,000원). **기대값 변경 1건**: `test_stop_wider_than_the_limit_is_recorded_as_stop_too_wide` — 유일 후보가 순위 전에 제외되므로 NO_TRADE 사유 `STOP_TOO_WIDE` → `NO_QUALIFYING_CANDIDATE`, `rejection_reasons()`가 `STOP_TOO_WIDE`를 표시하는 단언 추가(이 테스트는 11:10 명세 구현 기록에서 추가한 미커밋 테스트). `tests/test_day_trade.py`는 이번에 변경 없음(11:10 명세 구현 기록의 버전 문자열 1줄 외 기대값 불변).
-- 전체 테스트(PC-D 이번 실행, `stock-automation`, `PYTHONPATH=src`, `unittest discover -s tests -v`): **442개 실행, 통과 431, 실패 2·오류 7, skip 2**. 9건 모두 패키지 없음(`boto3`/`botocore` 5, `truststore` 4)으로 새 실패 0. `compileall -q src tests tools infra` 통과, `git diff --check` 통과.
-- 미실행: PC-C 전체 테스트, 백테스트 비교(replay 기록은 S3에만 있음, AWS 조회 금지).
-- 남은 위험: 15:10 DART 조회는 하드 필터 통과 종목만 하므로, 15:10에 손절 폭 초과로 빠진 종목이 15:20 시세로 통과해도 `DART_NOT_CHECKED`로 차단된다(안전 쪽). `evaluate()`의 방어 검사는 정상 경로에서 도달하지 않는다.
-- 실거래 상태: 변경 없음. 실거래 설정·비상정지·실계좌 Secret·실제 주문·AWS 변경 없음. main 병합·이미지 빌드·배포 안 함. commit/push 안 함(사용자가 직접).
-- 다음: 사용자 커밋 후 PC-C에서 브랜치 전체 테스트. 11/10 5회 운용 종료 뒤 replay 백테스트 비교로 병합 여부 결정.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 
