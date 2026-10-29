@@ -188,7 +188,7 @@ def dashboard_payload(
             {"label": "기존 잔고 보호", "state": "blocked", "detail": "코드 구현·통합검증 필요"},
             {"label": "체결 원장 대사", "state": "blocked", "detail": "키움 통합검증 필요"},
             {"label": "모의전략 분리", "state": "safe", "detail": "전략별 지갑"},
-            {"label": "일손실 한도", "state": "safe", "detail": "10,000원"},
+            {"label": "일손실 한도", "state": "safe", "detail": "3,300원"},
         ],
         "warnings": warnings,
         "live_transition": {

@@ -257,6 +257,8 @@ class DashboardTests(unittest.TestCase):
         )
         original = dashboard_payload(rows, now=datetime(2026, 11, 3, 15, 0, tzinfo=KST), wallet_epoch="")
         self.assertEqual(["WALLET#CLOSING_BET#KRX_1520"], [w["key"] for w in original["wallets"]])
+        # The closing-bet limit of the 200,000 KRW principal (StrategyConfig.max_daily_loss).
+        self.assertIn({"label": "일손실 한도", "state": "safe", "detail": "3,300원"}, current["safety"])
 
     def test_decodes_dynamodb_and_loads_fixture(self):
         decoded = _decode_item({
