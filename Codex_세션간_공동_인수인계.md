@@ -287,6 +287,15 @@ python -m compileall -q src tests
 
 최근 5개 기록만 이 절에 유지한다. 이전 기록은 원문 그대로 [보관 파일](docs/운영%20검증/공동_인수인계_세션기록_보관.md)로 옮겼다.
 
+### 2026-10-29 PC-D / Claude → PC-C / closing-v0.5 구현(`c160fc6`) 검토와 main 문서 커밋
+
+- 대상: `D:/Test-logic-v04` `feature/closing-v0.4`의 `c160fc6`(origin보다 1커밋 앞섬, 작업 트리 clean). 명세 `docs/프로그램 설계/2026-10-29_조건부추천등급_수정명세.md`와 diff 대조.
+- 일치: `rule_version` closing-v0.5, `conditional_score_margin` 10.0·`conditional_risk_fraction` 0.5(learning 비대상), `_tier()`의 FULL 3조건(점수·확인 재료·지수 > −1.0%)과 CONDITIONAL(점수 ≥ minimum_score − 10), FULL 우선 정렬, CONDITIONAL 손실 5,000원·배분 20%, `TIER_*` reason_codes. 원장 CSV는 기존 `outcome_code`에 reason_codes가 들어가고, 보고서·대시보드·매수 알림에 등급 표시. 하드 필터·점수식·단타·중기·실주문 코드 diff 없음.
+- 재실행(PC-D, `PYTHONPATH=src`, `unittest discover -s tests`): **453개 실행, 실패 2·오류 7·skip 2**, 9건 모두 `boto3`/`botocore`/`truststore` 없음(기존과 같은 9건, 새 실패 0). `test_engine` 단독 OK(등급 테스트 10개 포함). `git diff --check 94b8a57 c160fc6` 통과.
+- main 커밋(사용자 요청): `8182112`(13:23 NO_TRADE 보고서·원장·CSV, 이전부터 미커밋이던 파일), `075048b`(AGENTS 등급 규칙·명세·인수인계), 이 기록 커밋. push 안 함(사용자가 직접). 브랜치 `c160fc6`도 미push.
+- 미실행: PC-C 전체 테스트, 리플레이 비교. 14:58·15:04 대화 분석의 보고서·원장·CSV는 여전히 미작성.
+- 실거래 상태: 변경 없음. 실제 주문·AWS 호출 없음.
+
 ### 2026-10-29 15:26 KST — PC-D / Claude → PC-C / closing-v0.5 조건부 추천 등급 구현(브랜치 커밋 `c160fc6`)
 
 - 작업 위치: worktree `D:/Test-logic-v04` / `feature/closing-v0.4`, `94b8a57` 위에 커밋 `c160fc6` 1개. 새 브랜치 없음, main 병합 안 함. 명세: `docs/프로그램 설계/2026-10-29_조건부추천등급_수정명세.md`(main 작업 트리에 미추적 상태로 있음. 브랜치에는 넣지 않음).
@@ -350,17 +359,6 @@ python -m compileall -q src tests
 - 남은 위험: 15:10 DART 조회는 하드 필터 통과 종목만 하므로, 15:10에 손절 폭 초과로 빠진 종목이 15:20 시세로 통과해도 `DART_NOT_CHECKED`로 차단된다(안전 쪽). `evaluate()`의 방어 검사는 정상 경로에서 도달하지 않는다.
 - 실거래 상태: 변경 없음. 실거래 설정·비상정지·실계좌 Secret·실제 주문·AWS 변경 없음. main 병합·이미지 빌드·배포 안 함. commit/push 안 함(사용자가 직접).
 - 다음: 사용자 커밋 후 PC-C에서 브랜치 전체 테스트. 11/10 5회 운용 종료 뒤 replay 백테스트 비교로 병합 여부 결정.
-
-### 2026-10-29 PC-D / Claude → PC-C / 11:10 명세 구현(브랜치) 검토(읽기·테스트만, 코드 변경 없음)
-
-- 대상: worktree `D:/Test-logic-v04` / `feature/closing-v0.4`(기준 `977262b`, 미커밋 12개)와 `main`의 `stock-automation/README.md` 수정. 아래 11:10 기록과 실제 diff 대조.
-- 일치: 명세 1~5번이 기록대로 구현됨. `AtrStopPolicy`·`_tick_floor`·`ATR_UNAVAILABLE` 하드 필터·`STOP_TOO_WIDE`·검증 촉매만 가점·VWAP/5분 거래량 누락 처리·단타 VWAP 이격·챔피언 `base_rule_version`. 정책 없는 `build_position_plan`은 기존 식 그대로라 단타 손절 불변. 실거래·주문·AWS 템플릿 파일 변경 없음. README 정정 4곳은 코드와 일치.
-- 재실행(PC-D, `PYTHONPATH=src`): 집중 5개 모듈 56개 OK, 전체 441개 실행·실패 2·오류 7·skip 2 — 9건 모두 `boto3`/`botocore`/`truststore` 없음, 기록과 같다. `test_runtime_safety`·`test_scheduled_execution`·`test_paper_control`·`test_worker_verifier`는 PC-D에서 로드되지 않아 PC-C 확인 필요.
-- 동작 확인: 진입 10,000원 기준 ATR 7.0%까지 계획 생성, 7.2% 이상은 `STOP_TOO_WIDE`(비상손절 7% 상한이 먼저 걸림). 즉 일봉 ATR이 가격의 약 7%를 넘는 종목은 종가배팅에서 빠진다.
-- 보완 권장(버그 아님, 명세가 모호했던 부분): ① `STOP_TOO_WIDE`를 1위 후보에만 적용해 2위가 조건을 만족해도 NO_TRADE가 된다. 변동성 큰 종목이 1위가 되기 쉬우므로, 손절 폭 검사를 `rejection_reason` 하드 필터로 옮겨 순위 전에 걸러내는 쪽을 권장. ② 기준 버전이 다른 챔피언을 조용히 무시하므로 실행 결과에 경고 표시를 남길 것(낮음). ③ 병합 전 브랜치 README의 규칙 버전·ATR 손절 설명 갱신(기록에 이미 있음).
-- 변경 파일: 이 문서(기록 추가)와 rotate 보관 파일만. 코드 변경 없음.
-- 실거래 상태: 변경 없음, AWS 호출 없음, 실제 주문 없음. commit/push 안 함.
-- 다음: 사용자가 ① 권장안 반영 여부를 프로그래머에게 지시 → PC-C 브랜치 전체 테스트 → 5회 운용(11/10) 후 병합 판단.
 
 ## 11. 다른 PC에서 이 PC로 돌아올 때 사용할 프롬프트
 
